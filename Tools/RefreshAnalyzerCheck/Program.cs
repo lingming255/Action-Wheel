@@ -47,11 +47,14 @@ for (int i = 0; i < source.Length; i += 4)
             "raster layers contain valid premultiplied BGRA");
 }
 CheckColourSampling();
+CheckRefreshTiming();
+CheckQuietSceneDensity();
 
 int expectedColumns = (width + first.ClusterPx - 1) / first.ClusterPx;
 int expectedRows = (height + first.ClusterPx - 1) / first.ClusterPx;
 Require(first.Clusters.Length == expectedColumns * expectedRows, "cluster grid covers the monitor");
-Require(first.Clusters.All(cluster => cluster.StartMs is >= 0 and <= 300), "cluster starts stay in the sweep window");
+Require(first.Clusters.All(cluster => cluster.StartMs is >= 0 and <= RefreshTiming.SweepMs),
+    "cluster starts stay in the shared sweep window");
 Require(first.Clusters.All(cluster => cluster.Width > 0 && cluster.Height > 0), "clusters have valid bounds");
 var nearClick = first.Clusters.OrderBy(cluster =>
     Math.Pow(cluster.Left + cluster.Width / 2 - originX, 2)
@@ -108,6 +111,57 @@ static long CountAlpha(byte[] pixels, int width, int left, int top, int right, i
 static void Require(bool condition, string check)
 {
     if (!condition) throw new InvalidOperationException($"Refresh analysis check failed: {check}.");
+}
+
+static void CheckRefreshTiming()
+{
+    Require(RefreshTiming.TotalMs == 350 && RefreshTiming.SweepMs == 210 && RefreshTiming.CoverFadeMs == 95,
+        "refresh fits its shorter interaction budget");
+    foreach (RefreshPixelLayer layer in Enum.GetValues<RefreshPixelLayer>())
+    {
+        double previousEnd = -1;
+        // Include out-of-range front values to check that callers cannot exceed the budget.
+        foreach (double front in new[] { -20.0, 0, 10, 70, 105, 180, 210, 500 })
+        {
+            RefreshEnvelope envelope = RefreshTiming.Envelope(layer, front);
+            Require(envelope.StartMs >= 0 && envelope.StartMs <= envelope.PeakMs
+                && envelope.PeakMs < envelope.EndMs && envelope.EndMs <= RefreshTiming.TotalMs,
+                "every pixel layer has a valid rise and fade inside the total budget");
+            Require(envelope.EndMs >= previousEnd, "radial batches finish in front order");
+            previousEnd = envelope.EndMs;
+        }
+        RefreshEnvelope early = RefreshTiming.Envelope(layer, 0);
+        RefreshEnvelope late = RefreshTiming.Envelope(layer, RefreshTiming.SweepMs);
+        Require(early.EndMs - early.StartMs < late.EndMs - late.StartMs,
+            "early pixels have shorter local lifetimes than late pixels");
+        Require(early.EndMs < late.StartMs,
+            "the centre is already clear while the outermost pixels arrive");
+    }
+    Require(RefreshTiming.SweepMs + RefreshTiming.CoverFadeMs <= RefreshTiming.TotalMs,
+        "the last grey cover clears before the interaction ends");
+}
+
+static void CheckQuietSceneDensity()
+{
+    const int w = 512, h = 320, t = 11;
+    // Both flat grey UI and a nearly neutral pastel used to leave broad unpopulated areas.
+    foreach ((byte r, byte g, byte b) in new[] { ((byte)128, (byte)128, (byte)128),
+        ((byte)148, (byte)155, (byte)162) })
+    {
+        var capture = new byte[w * h * 4];
+        for (int i = 0; i < capture.Length; i += 4)
+        {
+            capture[i] = b; capture[i + 1] = g; capture[i + 2] = r; capture[i + 3] = 255;
+        }
+        RefreshAnalysis result = RefreshAnalyzer.Build(capture, w, h, t, 2731, w / 2, h / 2);
+        double subjectCoverage = CountAlpha(result.Subject, w, 0, 0, w, h) / (double)(w * h);
+        double fineCoverage = CountAlpha(result.Background, w, 0, 0, w, h) / (double)(w * h);
+        Require(subjectCoverage >= 0.40, "quiet scenes keep substantial large-pixel coverage");
+        Require(fineCoverage >= 0.055, "neutral scenes retain a visible fine-texture layer");
+        Require(subjectCoverage > fineCoverage * 3,
+            "fine texture stays subordinate to the large scene-coloured pixels");
+        Console.WriteLine($"Quiet-scene coverage ({r},{g},{b}): subject={subjectCoverage:P1}, fine={fineCoverage:P1}.");
+    }
 }
 
 static void CheckColourSampling()

@@ -27,7 +27,7 @@
     VerifyFormat    - dotnet format --verify-no-changes against .editorconfig
     VerifyConfigBackup - regression-check ConfigBackup.TryImport's rejection paths (entry count,
                       entry size, unrecognised entry names, zip-slip)
-    VerifyRefresh   - check refresh layers, deterministic output and radial cluster timing
+    VerifyRefresh   - check refresh layers, radial timing and coloured bloom
     Clean           - delete bin\ and obj\
     All             - Restore, VerifyBindings, VerifyRoundTrip, VerifyChordGate, VerifyVersionSync,
                       VerifyFormat, VerifyConfigBackup, VerifyRefresh, Debug, Release, Publish
@@ -147,6 +147,8 @@ function Invoke-VerifyRefresh {
     Write-Step 'Verifying refresh analysis layers and radial cluster timing'
     $tool = Join-Path $root 'Tools\RefreshAnalyzerCheck\RefreshAnalyzerCheck.csproj'
     Invoke-Dotnet @('run', '--project', $tool, '--nologo')
+    $bloomTool = Join-Path $root 'Tools\RefreshBloomCheck\RefreshBloomCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $bloomTool, '-c', 'Release', '--nologo')
 }
 
 function Invoke-Publish {

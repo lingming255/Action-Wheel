@@ -28,6 +28,8 @@ namespace Action_Wheel.Services
         public required int TilePx { get; init; }
         public required int ClusterPx { get; init; }
         public required RefreshCluster[] Clusters { get; init; }
+        /// <summary>Low-resolution emissive bloom, prepared per cluster and per animated layer.</summary>
+        public required RefreshClusterBloom[] Blooms { get; init; }
 
         /// <summary>
         /// Captures and builds on a worker thread. <paramref name="grabbed"/> runs as soon as the
@@ -68,6 +70,21 @@ namespace Action_Wheel.Services
                 RefreshAnalysis analysis = RefreshAnalyzer.Build(
                     pixels, w, h, tile, position.X ^ position.Y ^ Environment.TickCount,
                     originX, originY);
+                var blooms = new RefreshClusterBloom[analysis.Clusters.Length];
+                Parallel.For(0, analysis.Clusters.Length, new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount),
+                }, i =>
+                {
+                    RefreshCluster cluster = analysis.Clusters[i];
+                    blooms[i] = new RefreshClusterBloom(
+                        RefreshBloom.Build(analysis.Subject, w, h, cluster.Left, cluster.Top,
+                            cluster.Width, cluster.Height, scale),
+                        RefreshBloom.Build(analysis.Background, w, h, cluster.Left, cluster.Top,
+                            cluster.Width, cluster.Height, scale),
+                        RefreshBloom.Build(analysis.Boundary, w, h, cluster.Left, cluster.Top,
+                            cluster.Width, cluster.Height, scale));
+                });
                 return new RefreshFrame
                 {
                     Grey = grey,
@@ -80,6 +97,7 @@ namespace Action_Wheel.Services
                     TilePx = tile,
                     ClusterPx = analysis.ClusterPx,
                     Clusters = analysis.Clusters,
+                    Blooms = blooms,
                 };
             }
             catch (Exception)
@@ -175,4 +193,7 @@ namespace Action_Wheel.Services
         [DllImport("gdi32.dll")]
         private static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int rop);
     }
+
+    internal readonly record struct RefreshClusterBloom(
+        RefreshBloomImage? Subject, RefreshBloomImage? Background, RefreshBloomImage? Boundary);
 }

@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Services/RefreshAnalyzer.cs" Link="RefreshAnalyzer.cs" />
+    <Compile Include="../../Services/RefreshTiming.cs" Link="RefreshTiming.cs" />
   </ItemGroup>
 </Project>

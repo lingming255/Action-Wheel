@@ -324,7 +324,8 @@ namespace Action_Wheel.Services
             {
                 int i = cy * columns + cx;
                 double z = depth[i];
-                double chance = 0.12 + 0.78 * z;
+                // Keep quiet/neutral regions populated too, while salient regions remain denser.
+                double chance = 0.45 + 0.48 * z;
                 if (occupied[i] || random.NextDouble() >= chance)
                     continue;
 
@@ -358,7 +359,9 @@ namespace Action_Wheel.Services
                 if (markWidth <= 0 || markHeight <= 0) continue;
                 SampleRectColour(source, width, x, y, markWidth, markHeight,
                     out byte r, out byte g, out byte b);
-                double chance = (0.12 + 0.78 * Saturation(r, g, b)) * (0.38 + (1 - z) * 0.45);
+                // Neutral screenshots still need fine texture. Saturation adds detail without
+                // making colourful backgrounds compete with the larger, more opaque subject.
+                double chance = (0.28 + 0.26 * Saturation(r, g, b)) * (0.64 + (1 - z) * 0.22);
                 if (random.NextDouble() >= chance) continue;
                 LegacyPigment(r, g, b, out r, out g, out b, out double alpha);
                 alpha *= 0.52; // Fine marks may overlap large blocks, but never compete in opacity.
@@ -517,7 +520,9 @@ namespace Action_Wheel.Services
                 double noise = Math.Sin(cx * 0.34 + cy * 0.23) * 9
                     + Math.Sin(cx * 0.13 - cy * 0.31) * 7
                     + (((cx * 73856093) ^ (cy * 19349663)) & 15) - 7.5;
-                double start = Math.Clamp(progress * 285 + noise + z * 13 + edge * 22, 0, 300);
+                // Normalize the original shape/noise into the shared, shorter sweep window.
+                double phase = Math.Clamp((progress * 285 + noise + z * 13 + edge * 22) / 300, 0, 1);
+                double start = phase * RefreshTiming.SweepMs;
                 clusters.Add(new RefreshCluster(left, top, right - left, bottom - top, start));
             }
             return clusters.ToArray();

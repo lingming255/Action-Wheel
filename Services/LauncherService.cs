@@ -630,14 +630,14 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// A centre release: the analyzed pixel layers sweep diagonally while colour returns under
+        /// A centre release: the analyzed pixel layers sweep radially while colour returns under
         /// the clearing grey cover. Usually capture and analysis are already complete; a faster
         /// release waits for them rather than skipping the effect.
         /// </summary>
         /// <remarks>
         /// The screen stays grey until the menu has its grey still of the monitor on screen and
         /// calls back. The colour matrix can only change the whole desktop at once, so the still
-        /// clears in an image-guided diagonal wave over the re-coloured desktop.
+        /// clears in an image-guided radial wave over the re-coloured desktop.
         /// If the menu closes first, its Closed handler restores colour instead.
         /// </remarks>
         private async void PlayRefresh()

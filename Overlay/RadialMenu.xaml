@@ -225,9 +225,9 @@
             </Canvas>
         </Grid>
 
-        <!-- Refresh: a grey still clears in an irregular diagonal front over the live desktop.
+        <!-- Refresh: a grey still clears radially from the opening click over the live desktop.
              Background glyphs, salient-region blocks and boundary accents are rasterized off-thread;
-             PlayRefresh adds one image per layer and macro cluster, then animates only Opacity. -->
+             each cluster's coloured bloom follows its own pixel layer's Opacity animation. -->
         <Canvas x:Name="RefreshLayer" Visibility="Collapsed" IsHitTestVisible="False"
                 HorizontalAlignment="Left" VerticalAlignment="Top"/>
     </Grid>

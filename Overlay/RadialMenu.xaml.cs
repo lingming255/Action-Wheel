@@ -238,6 +238,8 @@ namespace Action_Wheel.Overlay
         /// a visual tree that is no longer attached to anything.
         /// </summary>
         private bool _closed;
+        private EventHandler<object>? _refreshOnRendering;
+        private Storyboard? _refreshStoryboard;
 
         /// <summary>
         /// The one path that ever closes this window - a button click, a click elsewhere on the
@@ -269,6 +271,15 @@ namespace Action_Wheel.Overlay
         {
             _closed = true;
             _holdTimer.Stop();
+            // Rendering is static. If a refresh is cancelled before its three-frame handoff,
+            // there may be no next frame to detach it and release all its prepared bitmaps.
+            if (_refreshOnRendering != null)
+            {
+                CompositionTarget.Rendering -= _refreshOnRendering;
+                _refreshOnRendering = null;
+            }
+            _refreshStoryboard?.Stop();
+            _refreshStoryboard = null;
 
             if (_windowHandle != IntPtr.Zero)
             {
@@ -1657,13 +1668,12 @@ namespace Action_Wheel.Overlay
             return new RECT { left = 0, top = 0, right = GetSystemMetrics(0), bottom = GetSystemMetrics(1) };
         }
 
-        /// <summary>Total length of the refresh, in milliseconds, from the first band to the last fade.</summary>
-        private const double RefreshBudgetMs = 500;
+        /// <summary>Total length of the refresh, from the first pixel to the last fade.</summary>
+        private const double RefreshBudgetMs = RefreshTiming.TotalMs;
         /// <summary>Time for the radial pixel front to reach the farthest monitor corner.</summary>
-        private const double RefreshSweepMs = 300;
-        private const double RefreshRiseMs = 75;
+        private const double RefreshSweepMs = RefreshTiming.SweepMs;
         /// <summary>Cover fade duration for each pixel cluster.</summary>
-        private const double RefreshUncoverMs = 145;
+        private const double RefreshUncoverMs = RefreshTiming.CoverFadeMs;
         /// <summary>Soft radial light-front width, in DIP.</summary>
         private const double RefreshGlareDip = 180;
 
@@ -1722,31 +1732,37 @@ namespace Action_Wheel.Overlay
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
-            var storyboard = new Storyboard();
-            foreach (RefreshCluster cluster in frame.Clusters)
+            // Keep every cover below every halo. Otherwise a later cluster's opaque cover
+            // clips a neighbour's bloom along an artificial rectangular seam.
+            var covers = new Canvas { Width = layerW, Height = layerH };
+            var bloomLayer = new Canvas { Width = layerW, Height = layerH };
+            var pigments = new Canvas { Width = layerW, Height = layerH };
+            RefreshLayer.Children.Add(covers);
+            RefreshLayer.Children.Add(bloomLayer);
+            RefreshLayer.Children.Add(pigments);
+
+            var storyboard = new Storyboard { Duration = TimeSpan.FromMilliseconds(RefreshBudgetMs) };
+            for (int i = 0; i < frame.Clusters.Length; i++)
             {
+                RefreshCluster cluster = frame.Clusters[i];
+                RefreshClusterBloom bloom = frame.Blooms[i];
                 int left = cluster.Left, top = cluster.Top;
                 int width = cluster.Width, height = cluster.Height;
                 double front = cluster.StartMs;
 
-                var cover = AddRegionImage(frame.Grey, bounds.Width, left, top, width, height, scale, 1);
-                var subject = AddRegionImage(frame.Subject, bounds.Width, left, top, width, height, scale, 0);
-                var boundary = AddRegionImage(frame.Boundary, bounds.Width, left, top, width, height, scale, 0);
+                var cover = AddRegionImage(covers, frame.Grey, bounds.Width, left, top, width, height, scale, 1);
+                var subject = AddRegionImage(pigments, frame.Subject, bounds.Width, left, top, width, height, scale, 0);
+                var boundary = AddRegionImage(pigments, frame.Boundary, bounds.Width, left, top, width, height, scale, 0);
                 // Fine background marks sit above the large blocks at lower opacity, so their
                 // texture remains visible without replacing the scene-coloured foreground.
-                var background = AddRegionImage(frame.Background, bounds.Width, left, top, width, height, scale, 0);
+                var background = AddRegionImage(pigments, frame.Background, bounds.Width, left, top, width, height, scale, 0);
 
-                double bgStart = Math.Max(0, front - 18);
-                AddRefreshAnimation(storyboard, background, "Opacity", 0, 0.9, 0,
-                    bgStart, bgStart + RefreshRiseMs * 0.6, Math.Min(RefreshBudgetMs, bgStart + 205));
-
-                double subjectStart = front + 12;
-                AddRefreshAnimation(storyboard, subject, "Opacity", 0, 1, 0,
-                    subjectStart, subjectStart + RefreshRiseMs, Math.Min(RefreshBudgetMs, subjectStart + 245));
-
-                double edgeStart = front + 30;
-                AddRefreshAnimation(storyboard, boundary, "Opacity", 0, 1, 0,
-                    edgeStart, edgeStart + RefreshRiseMs * 1.35, Math.Min(RefreshBudgetMs, edgeStart + 285));
+                AddPixelPulse(storyboard, background, AddBloomImage(bloomLayer, bloom.Background, scale),
+                    RefreshPixelLayer.Background, front, 0.9);
+                AddPixelPulse(storyboard, subject, AddBloomImage(bloomLayer, bloom.Subject, scale),
+                    RefreshPixelLayer.Subject, front, 1);
+                AddPixelPulse(storyboard, boundary, AddBloomImage(bloomLayer, bloom.Boundary, scale),
+                    RefreshPixelLayer.Boundary, front, 1);
 
                 AddRefreshAnimation(storyboard, cover, "Opacity", 1, 1, 0,
                     0, front, front + RefreshUncoverMs);
@@ -1755,25 +1771,30 @@ namespace Action_Wheel.Overlay
             AddSweepGlare(storyboard, layerW, layerH, cursorX, cursorY);
             AddCursorFlare(storyboard, cursorX, cursorY);
 
-            storyboard.Completed += (_, _) => CloseMenu();
+            _refreshStoryboard = storyboard;
+            storyboard.Completed += (_, _) =>
+            {
+                if (!_closed)
+                    CloseMenu();
+            };
 
             // A few rendered frames so DWM has presented the cover before the matrix is lifted.
             int frames = 0;
-            EventHandler<object>? onRendering = null;
-            onRendering = (_, _) =>
+            _refreshOnRendering = (_, _) =>
             {
                 if (++frames < 3 && !_closed)
                     return;
-                CompositionTarget.Rendering -= onRendering;
+                CompositionTarget.Rendering -= _refreshOnRendering;
+                _refreshOnRendering = null;
                 if (_closed)
                     return;
                 restoreColour();
                 storyboard.Begin();
             };
-            CompositionTarget.Rendering += onRendering;
+            CompositionTarget.Rendering += _refreshOnRendering;
         }
 
-        private Image AddRegionImage(byte[] pixels, int sourceWidth, int left, int top, int width, int height,
+        private Image AddRegionImage(Canvas layer, byte[] pixels, int sourceWidth, int left, int top, int width, int height,
             double scale, double opacity)
         {
             var bitmap = new WriteableBitmap(width, height);
@@ -1794,8 +1815,49 @@ namespace Action_Wheel.Overlay
             };
             Canvas.SetLeft(image, left / scale);
             Canvas.SetTop(image, top / scale);
-            RefreshLayer.Children.Add(image);
+            layer.Children.Add(image);
             return image;
+        }
+
+        private static Image? AddBloomImage(Canvas layer, RefreshBloomImage? bloom, double scale)
+        {
+            if (bloom == null)
+                return null;
+
+            var bitmap = new WriteableBitmap(bloom.PixelWidth, bloom.PixelHeight);
+            using (var stream = bitmap.PixelBuffer.AsStream())
+                stream.Write(bloom.Pixels, 0, bloom.Pixels.Length);
+            bitmap.Invalidate();
+
+            var image = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Fill,
+                Width = bloom.Width / scale,
+                Height = bloom.Height / scale,
+                Opacity = 0,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(image, bloom.Left / scale);
+            Canvas.SetTop(image, bloom.Top / scale);
+            layer.Children.Add(image);
+            return image;
+        }
+
+        private static void AddPixelPulse(Storyboard storyboard, Image pigment, Image? bloom,
+            RefreshPixelLayer layer, double front, double peak)
+        {
+            RefreshEnvelope pulse = RefreshTiming.Envelope(layer, front);
+            AddRefreshAnimation(storyboard, pigment, "Opacity", 0, peak, 0,
+                pulse.StartMs, pulse.PeakMs, pulse.EndMs);
+            if (bloom != null)
+            {
+                // Blur is linear, so animating the prepared emissive blur by the exact same
+                // opacity gives the blur of the currently visible particles on every frame.
+                // Each layer has its own pulse; the grey desktop cover never enters the bloom.
+                AddRefreshAnimation(storyboard, bloom, "Opacity", 0, peak, 0,
+                    pulse.StartMs, pulse.PeakMs, pulse.EndMs);
+            }
         }
 
         /// <summary>A soft circular light front that expands from the wheel's opening click.</summary>
@@ -1830,7 +1892,7 @@ namespace Action_Wheel.Overlay
                 0, 45, RefreshBudgetMs);
         }
 
-        /// <summary>A bloom and a thin horizontal streak at the opening click.</summary>
+        /// <summary>The brief click flare and lens streak, separate from scene-coloured pixel bloom.</summary>
         private void AddCursorFlare(Storyboard storyboard, double x, double y)
         {
             const double bloomDip = 420, streakW = 1100, streakH = 5;
@@ -1842,8 +1904,8 @@ namespace Action_Wheel.Overlay
             radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xB8, 0xD8, 0xFF), Offset = 1 });
             var bloom = AddCentred(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = bloomDip, Height = bloomDip, Fill = radial },
                 x, y, out var bloomScale);
-            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, 360);
-            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 1, 0, 0, 40, 360);
+            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, 250);
+            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 0.7, 0, 0, 28, 250);
 
             var linear = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
             linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 0 });
@@ -1853,8 +1915,8 @@ namespace Action_Wheel.Overlay
             linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 1 });
             var streak = AddCentred(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = streakW, Height = streakH, Fill = linear },
                 x, y, out var streakScale);
-            AddScale(storyboard, streakScale, 0.1, 1.15, 0, 300, scaleY: false);
-            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 1, 0, 0, 35, 300);
+            AddScale(storyboard, streakScale, 0.1, 1.15, 0, 220, scaleY: false);
+            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 0.8, 0, 0, 25, 220);
         }
 
         private UIElement AddCentred(FrameworkElement element, double x, double y, out ScaleTransform scale)
