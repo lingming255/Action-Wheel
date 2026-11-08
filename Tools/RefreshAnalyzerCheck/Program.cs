@@ -115,13 +115,16 @@ static void Require(bool condition, string check)
 
 static void CheckRefreshTiming()
 {
-    Require(RefreshTiming.TotalMs == 350 && RefreshTiming.SweepMs == 210 && RefreshTiming.CoverFadeMs == 95,
-        "refresh fits its shorter interaction budget");
+    Require(RefreshTiming.TotalMs == 800 && Math.Abs(RefreshTiming.Scale(350) - 800) < 0.001,
+        "the original refresh plays in the requested 800 ms budget");
+    Require(Math.Abs(RefreshTiming.SweepMs / RefreshTiming.TotalMs - 210.0 / 350) < 0.001
+        && Math.Abs(RefreshTiming.CoverFadeMs / RefreshTiming.TotalMs - 95.0 / 350) < 0.001,
+        "the sweep and cover keep their original proportions during slow playback");
     foreach (RefreshPixelLayer layer in Enum.GetValues<RefreshPixelLayer>())
     {
         double previousEnd = -1;
         // Include out-of-range front values to check that callers cannot exceed the budget.
-        foreach (double front in new[] { -20.0, 0, 10, 70, 105, 180, 210, 500 })
+        foreach (double front in new[] { -20.0, 0, 10, 70, 105, 180, 210, 500 }.Select(RefreshTiming.Scale))
         {
             RefreshEnvelope envelope = RefreshTiming.Envelope(layer, front);
             Require(envelope.StartMs >= 0 && envelope.StartMs <= envelope.PeakMs

@@ -85,12 +85,22 @@ namespace Action_Wheel.Services
                         RefreshBloom.Build(analysis.Boundary, w, h, cluster.Left, cluster.Top,
                             cluster.Width, cluster.Height, scale));
                 });
+                // The layers are independent. Bound their one-time outline work as well so a
+                // high-resolution capture does not serialize three full-monitor passes.
+                byte[][] originalLayers = [analysis.Subject, analysis.Background, analysis.Boundary];
+                var outlinedLayers = new byte[3][];
+                Parallel.For(0, outlinedLayers.Length, new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Min(3, Environment.ProcessorCount),
+                }, i => outlinedLayers[i] = RefreshOutline.Apply(originalLayers[i], w, h, scale));
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    Subject = analysis.Subject,
-                    Background = analysis.Background,
-                    Boundary = analysis.Boundary,
+                    // Preserve each particle's coloured emission: adding a white core before
+                    // preparing bloom would wash its halo towards white instead of its own hue.
+                    Subject = outlinedLayers[0],
+                    Background = outlinedLayers[1],
+                    Boundary = outlinedLayers[2],
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

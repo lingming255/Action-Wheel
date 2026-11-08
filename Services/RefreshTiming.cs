@@ -14,9 +14,15 @@ namespace Action_Wheel.Services
     /// <summary>Shared radial-front timing and short, local flashes for the refresh effect.</summary>
     internal static class RefreshTiming
     {
-        internal const double TotalMs = 350;
-        internal const double SweepMs = 210;
-        internal const double CoverFadeMs = 95;
+        private const double ReferenceTotalMs = 350;
+        private const double ReferenceSweepMs = 210;
+        internal const double TotalMs = 800;
+        internal const double TimeScale = TotalMs / ReferenceTotalMs;
+        internal const double SweepMs = ReferenceSweepMs * TimeScale;
+        internal const double CoverFadeMs = 95 * TimeScale;
+
+        /// <summary>Slow an original 350 ms animation time without changing its relative rhythm.</summary>
+        internal static double Scale(double milliseconds) => milliseconds * TimeScale;
 
         /// <summary>
         /// Earlier pixels finish sooner and also have a shorter local lifetime. A distant pixel
@@ -24,8 +30,10 @@ namespace Action_Wheel.Services
         /// </summary>
         internal static RefreshEnvelope Envelope(RefreshPixelLayer layer, double frontMs)
         {
-            double front = Math.Clamp(frontMs, 0, SweepMs);
-            double progress = front / SweepMs;
+            // Cluster starts are already scaled. Work in the original time domain and scale
+            // the complete envelope once, including offsets, rises and local lifetimes.
+            double front = Math.Clamp(frontMs / TimeScale, 0, ReferenceSweepMs);
+            double progress = front / ReferenceSweepMs;
             double start, rise, lifetime;
             switch (layer)
             {
@@ -47,7 +55,8 @@ namespace Action_Wheel.Services
                 default:
                     throw new ArgumentOutOfRangeException(nameof(layer));
             }
-            return new RefreshEnvelope(start, start + rise, Math.Min(TotalMs, start + lifetime));
+            return new RefreshEnvelope(Scale(start), Scale(start + rise),
+                Scale(Math.Min(ReferenceTotalMs, start + lifetime)));
         }
     }
 }

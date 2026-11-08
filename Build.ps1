@@ -27,7 +27,7 @@
     VerifyFormat    - dotnet format --verify-no-changes against .editorconfig
     VerifyConfigBackup - regression-check ConfigBackup.TryImport's rejection paths (entry count,
                       entry size, unrecognised entry names, zip-slip)
-    VerifyRefresh   - check refresh layers, radial timing and coloured bloom
+    VerifyRefresh   - check refresh layers, radial timing, coloured bloom and highlight outlines
     Clean           - delete bin\ and obj\
     All             - Restore, VerifyBindings, VerifyRoundTrip, VerifyChordGate, VerifyVersionSync,
                       VerifyFormat, VerifyConfigBackup, VerifyRefresh, Debug, Release, Publish
@@ -149,6 +149,8 @@ function Invoke-VerifyRefresh {
     Invoke-Dotnet @('run', '--project', $tool, '--nologo')
     $bloomTool = Join-Path $root 'Tools\RefreshBloomCheck\RefreshBloomCheck.csproj'
     Invoke-Dotnet @('run', '--project', $bloomTool, '-c', 'Release', '--nologo')
+    $outlineTool = Join-Path $root 'Tools\RefreshOutlineCheck\RefreshOutlineCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $outlineTool, '-c', 'Release', '--nologo')
 }
 
 function Invoke-Publish {

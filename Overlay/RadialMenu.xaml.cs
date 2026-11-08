@@ -1889,7 +1889,7 @@ namespace Action_Wheel.Overlay
             RefreshLayer.Children.Add(ring);
             AddScale(storyboard, scale, 0.01, 1, 0, RefreshSweepMs);
             AddRefreshAnimation(storyboard, ring, "Opacity", 0, 0.8, 0,
-                0, 45, RefreshBudgetMs);
+                0, RefreshTiming.Scale(45), RefreshBudgetMs);
         }
 
         /// <summary>The brief click flare and lens streak, separate from scene-coloured pixel bloom.</summary>
@@ -1904,8 +1904,9 @@ namespace Action_Wheel.Overlay
             radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xB8, 0xD8, 0xFF), Offset = 1 });
             var bloom = AddCentred(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = bloomDip, Height = bloomDip, Fill = radial },
                 x, y, out var bloomScale);
-            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, 250);
-            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 0.7, 0, 0, 28, 250);
+            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, RefreshTiming.Scale(250));
+            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 0.7, 0,
+                0, RefreshTiming.Scale(28), RefreshTiming.Scale(250));
 
             var linear = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
             linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 0 });
@@ -1915,8 +1916,9 @@ namespace Action_Wheel.Overlay
             linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 1 });
             var streak = AddCentred(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = streakW, Height = streakH, Fill = linear },
                 x, y, out var streakScale);
-            AddScale(storyboard, streakScale, 0.1, 1.15, 0, 220, scaleY: false);
-            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 0.8, 0, 0, 25, 220);
+            AddScale(storyboard, streakScale, 0.1, 1.15, 0, RefreshTiming.Scale(220), scaleY: false);
+            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 0.8, 0,
+                0, RefreshTiming.Scale(25), RefreshTiming.Scale(220));
         }
 
         private UIElement AddCentred(FrameworkElement element, double x, double y, out ScaleTransform scale)
