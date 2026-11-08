@@ -238,12 +238,12 @@ namespace Action_Wheel.ViewModels
         public string TriggerDescription => (MouseTrigger)_triggerIndex switch
         {
             MouseTrigger.HoldRightPressLeft =>
-                "Hold the right mouse button, then press the left button. Release both after the menu appears.",
+                "Hold the right mouse button, then press the left button. Move to choose; release the left button to run.",
             MouseTrigger.HoldLeftPressRight =>
-                "Hold the left mouse button, then press the right button. Release both after the menu appears.",
+                "Hold the left mouse button, then press the right button. Move to choose; release the right button to run.",
             MouseTrigger.MouseButton4 => "Press Mouse Button 4 (usually Back). It is consumed only when configured as the trigger.",
             MouseTrigger.MouseButton5 => "Press Mouse Button 5 (usually Forward). It is consumed only when configured as the trigger.",
-            _ => "Press the middle mouse button. You can also drag toward an action and release to run it.",
+            _ => "Hold left and press right. You can also drag toward an action and release to run it; hold Ctrl+Alt+Space for Quick Info.",
         };
 
         private double _chordTimeoutMs = 800;
@@ -881,7 +881,10 @@ namespace Action_Wheel.ViewModels
             {
                 try
                 {
-                    ActionDispatcher.Execute(action);
+                    if (action.Kind == ActionKind.CopyText)
+                        _dispatcher.TryEnqueue(() => ActionDispatcher.Execute(action));
+                    else
+                        ActionDispatcher.Execute(action);
                 }
                 catch (Exception)
                 {

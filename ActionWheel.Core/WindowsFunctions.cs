@@ -28,6 +28,7 @@ namespace Action_Wheel.Core
                 => "System action with a confirmation dialog.",
             WindowsFunctions.ActionSettings => "Open Action Wheel button and trigger settings.",
             WindowsFunctions.ActionReload => "Reload actions.json without restarting Action Wheel.",
+            WindowsFunctions.QuickInfo => "Open the local QuickInfo folder for schedules, reference images and notes.",
             WindowsFunctions.ActionSwitchProfile => "Switch to the next saved profile.",
             _ when WindowsFunctions.TryGetProfileName(Id, out string profileName)
                 => $"Load the saved profile '{profileName}' and make it active immediately.",
@@ -73,6 +74,7 @@ namespace Action_Wheel.Core
         public const string ActionSettings = "action-wheel.settings";
         public const string ActionReload = "action-wheel.reload";
         public const string ActionProfiles = "action-wheel.profiles";
+        public const string QuickInfo = "action-wheel.quick-info";
         public const string ActionSwitchProfile = "action-wheel.switch-profile";
         public const string CommandPrompt = "developer.command-prompt";
         public const string PowerShell = "developer.powershell";
@@ -123,6 +125,7 @@ namespace Action_Wheel.Core
             new WindowsFunction(ActionReload, "Action Wheel · Reload Configuration"),
             new WindowsFunction(ActionSwitchProfile, "Action Wheel · Switch Profile"),
             new WindowsFunction(ActionProfiles, "Action Wheel · Open Profiles Folder"),
+            new WindowsFunction(QuickInfo, "Action Wheel · Open QuickInfo Folder"),
         };
 
         public static WindowsFunction ProfileChoice(string profileName) =>

@@ -483,11 +483,9 @@ namespace Action_Wheel.Settings
                 {
                     Width = 140,
                     VerticalAlignment = VerticalAlignment.Center,
-                    // Only the four dispatchable kinds - a group child can never itself be a Group
-                    // (ActionsValidator rejects that), so that fifth option is left off entirely
-                    // rather than offered and then invalidated.
-                    ItemsSource = new[] { "Do nothing", "Send shortcut", "Open app / file", "Windows function" },
-                    SelectedIndex = rowModel.KindIndex,
+                    // Groups cannot nest; copy occupies the fifth visible choice instead.
+                    ItemsSource = new[] { "Do nothing", "Send shortcut", "Open app / file", "Windows function", "Copy text" },
+                    SelectedIndex = rowModel.KindIndex == ActionValueCodec.CopyTextIndex ? 4 : rowModel.KindIndex,
                 };
 
                 var remove = new Button
@@ -601,7 +599,7 @@ namespace Action_Wheel.Settings
 
                 kind.SelectionChanged += (s2, e2) =>
                 {
-                    rowModel.KindIndex = kind.SelectedIndex;
+                    rowModel.KindIndex = kind.SelectedIndex == 4 ? ActionValueCodec.CopyTextIndex : kind.SelectedIndex;
                     RefreshValueVisibility();
                 };
 

@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Action_Wheel.Services;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -12,7 +13,10 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
+using XamlPath = Microsoft.UI.Xaml.Shapes.Path;
 using Windows.Graphics;
+using Windows.Foundation;
 using WinRT.Interop;
 // Alias rather than "using Windows.UI": both Microsoft.UI and Windows.UI declare a Colors class,
 // and importing the whole namespace makes every Colors.X reference ambiguous.
@@ -26,6 +30,7 @@ namespace Action_Wheel.Overlay
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
+        private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_NOACTIVATE = 0x08000000;
 
         // Frame bits. OverlappedPresenter.SetBorderAndTitleBar(false, false) leaves WS_DLGFRAME and
@@ -56,6 +61,10 @@ namespace Action_Wheel.Overlay
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+        private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
         private const int SW_HIDE = 0;
 
         [DllImport("dwmapi.dll")]
@@ -280,6 +289,7 @@ namespace Action_Wheel.Overlay
             // has to subtract a radius that is already the one the button will actually be drawn at.
             ApplySizes();
             UpdateButtonPositions(_appearance.OrbitRadius);
+            BuildWedges();
             ApplyActions();
             ApplyShadows();
 
@@ -412,6 +422,76 @@ namespace Action_Wheel.Overlay
 
         private Button[]? _allButtons;
 
+        private readonly XamlPath?[] _wedges = new XamlPath?[9];
+
+        private void BuildWedges()
+        {
+            double centre = MenuSize / 2.0;
+
+            for (int tag = 1; tag <= 8; tag++)
+            {
+                if (ActionsByTag[tag] == null)
+                {
+                    AllButtons[tag].Visibility = Visibility.Collapsed;
+                    continue;
+                }
+
+                double middle = -90.0 + (tag - 1) * 45.0;
+                var wedge = new XamlPath
+                {
+                    Data = CreateWedgeGeometry(centre, middle - 21.5, middle + 21.5),
+                    StrokeThickness = 1,
+                    Tag = tag.ToString(),
+                };
+
+                wedge.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(OnButtonHover), true);
+                wedge.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnButtonHover), true);
+                wedge.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnButtonPressed), true);
+                wedge.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnButtonRest), true);
+                wedge.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnButtonRest), true);
+                wedge.Tapped += (_, _) => InvokeTag(tag);
+
+                Canvas.SetZIndex(wedge, -1);
+                ButtonsCanvas.Children.Insert(0, wedge);
+                _wedges[tag] = wedge;
+            }
+        }
+
+        private static PathGeometry CreateWedgeGeometry(double centre, double startDegrees, double endDegrees)
+        {
+            static Point Polar(double centre, double radius, double degrees)
+            {
+                double radians = degrees * Math.PI / 180.0;
+                return new Point(centre + Math.Cos(radians) * radius, centre + Math.Sin(radians) * radius);
+            }
+
+            var figure = new PathFigure
+            {
+                StartPoint = Polar(centre, RingGeometry.OuterRadiusDip, startDegrees),
+                IsClosed = true,
+            };
+            figure.Segments.Add(new ArcSegment
+            {
+                Point = Polar(centre, RingGeometry.OuterRadiusDip, endDegrees),
+                Size = new Size(RingGeometry.OuterRadiusDip, RingGeometry.OuterRadiusDip),
+                SweepDirection = SweepDirection.Clockwise,
+            });
+            figure.Segments.Add(new LineSegment
+            {
+                Point = Polar(centre, RingGeometry.InnerRadiusDip, endDegrees),
+            });
+            figure.Segments.Add(new ArcSegment
+            {
+                Point = Polar(centre, RingGeometry.InnerRadiusDip, startDegrees),
+                Size = new Size(RingGeometry.InnerRadiusDip, RingGeometry.InnerRadiusDip),
+                SweepDirection = SweepDirection.Counterclockwise,
+            });
+
+            var geometry = new PathGeometry();
+            geometry.Figures.Add(figure);
+            return geometry;
+        }
+
         /// <summary>The action for a tag, or null. Indexed once instead of scanning the list per button.</summary>
         private ActionItem?[] ActionsByTag => _actionsByTag ??= BuildActionIndex();
 
@@ -464,9 +544,148 @@ namespace Action_Wheel.Overlay
             if (tag is int current)
             {
                 _buttonPainters[current]?.Hover();
+                ShowSelectionInfo(current);
                 OnMainRingHover(current);
             }
+            else
+            {
+                HideSelectionInfo();
+            }
         }
+
+        private Button? _highlightedChild;
+        private bool _trackingGesture;
+
+        private (double X, double Y, double Scale) GestureOffset(PointInt32 point)
+        {
+            double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
+            return (point.X - _screenOrigin.X - MenuSize * scale / 2,
+                point.Y - _screenOrigin.Y - MenuSize * scale / 2, scale);
+        }
+
+        private Button? GroupChildAt(PointInt32 point)
+        {
+            if (_expandedGroupTag is not int parent || !_groupButtons.TryGetValue(parent, out var buttons))
+                return null;
+            var offset = GestureOffset(point);
+            int? child = RingGeometry.GroupChildAt(offset.X, offset.Y, offset.Scale,
+                parent, buttons.Length, GroupOrbitRadius, GroupButtonSize);
+            return child is int i ? buttons[i] : null;
+        }
+
+        private void HighlightChild(Button? button)
+        {
+            if (_highlightedChild == button) return;
+            DisarmHold();
+            if (_highlightedChild is Button previous)
+            {
+                previous.RenderTransform = null;
+                previous.BorderThickness = new Thickness(0);
+                VisualStateManager.GoToState(previous, "Normal", true);
+            }
+            _highlightedChild = button;
+            if (button == null) return;
+            // The trigger's events are swallowed by MouseHook; do not rely on WinUI hover routing.
+            button.RenderTransformOrigin = new Point(0.5, 0.5);
+            button.RenderTransform = new ScaleTransform { ScaleX = 1.1, ScaleY = 1.1 };
+            button.BorderThickness = new Thickness(2);
+            button.BorderBrush = new SolidColorBrush(Colors.White);
+            if (button.Tag is string text && TryParseChildTag(text, out int parent, out int child))
+                ShowSelectionInfo(ResolveGroupChild(parent, child));
+        }
+
+        public void UpdateGesture(PointInt32 point, int? mainTag, bool allowHold)
+        {
+            if (_closed) return;
+            _trackingGesture = true;
+            var child = GroupChildAt(point);
+            bool changed = _highlightedChild != child;
+            if (child != null)
+            {
+                HighlightTag(null);
+                HighlightChild(child);
+                if (changed && allowHold && child.Tag is string text
+                    && TryParseChildTag(text, out int parent, out int index)
+                    && ResolveGroupChild(parent, index) is ActionItem action)
+                    ArmChildHold(parent, index, action, child);
+                return;
+            }
+            HighlightChild(null);
+            var offset = GestureOffset(point);
+            double distance = Math.Sqrt(offset.X * offset.X + offset.Y * offset.Y) / offset.Scale;
+            // Moving between satellites crosses main-ring sectors. Keep the group open until
+            // the pointer returns to the main ring, including while passing through child gaps.
+            if (_expandedGroupTag != null && distance > (_appearance.OrbitRadius + GroupOrbitRadius) / 2)
+            {
+                HighlightTag(null);
+                HideSelectionInfo();
+                DisarmHold();
+                return;
+            }
+            bool mainChanged = _highlightedTag != mainTag || changed;
+            HighlightTag(mainTag);
+            if (mainChanged)
+            {
+                if (allowHold && mainTag is int tag) ArmHold(tag);
+                else DisarmHold();
+            }
+        }
+
+        public bool TryInvokeGroupChildAt(PointInt32 point)
+        {
+            _trackingGesture = false;
+            DisarmHold();
+            if (_closed) return false;
+            if (GroupChildAt(point) is Button child)
+            {
+                GroupChildButton_Click(child, new RoutedEventArgs());
+                return true;
+            }
+            var offset = GestureOffset(point);
+            double distance = Math.Sqrt(offset.X * offset.X + offset.Y * offset.Y) / offset.Scale;
+            if (_expandedGroupTag != null && distance > (_appearance.OrbitRadius + GroupOrbitRadius) / 2)
+            {
+                // Releasing in a gap cancels, instead of firing an unrelated underlying main sector.
+                CloseMenu();
+                return true;
+            }
+            return false;
+        }
+
+        private void ShowSelectionInfo(int tag)
+        {
+            ShowSelectionInfo(tag is >= 0 and <= 8 ? ActionsByTag[tag] : null);
+        }
+
+        private void ShowSelectionInfo(ActionItem? action)
+        {
+            if (action == null)
+            {
+                HideSelectionInfo();
+                return;
+            }
+
+            bool copy = action.Kind == ActionKind.CopyText;
+            SelectionTitle.MaxLines = copy ? 4 : 1;
+            SelectionTitle.TextWrapping = copy ? TextWrapping.Wrap : TextWrapping.NoWrap;
+            SelectionTitle.FontSize = copy ? 11 : 13;
+            SelectionTitle.Text = copy ? action.Value : Truncate(action.Label, 18);
+            SelectionMeta.Text = action.Kind switch
+            {
+                ActionKind.Keys => action.Value,
+                ActionKind.Launch => "OPEN",
+                ActionKind.Function => "SYSTEM",
+                ActionKind.Group => "MORE",
+                ActionKind.CopyText => "松手复制",
+                _ => string.Empty,
+            };
+            CenterInfo.Visibility = Visibility.Visible;
+        }
+
+        private void HideSelectionInfo() => CenterInfo.Visibility = Visibility.Collapsed;
+
+        private static string Truncate(string value, int max) =>
+            value.Length <= max ? value : value[..(max - 1)] + "…";
 
         /// <summary>
         /// Opens <paramref name="tag"/>'s satellite ring the moment it is hovered, whether that hover
@@ -738,6 +957,7 @@ namespace Action_Wheel.Overlay
 
         private void CollapseGroup()
         {
+            HighlightChild(null);
             if (_expandedGroupTag is int tag && _groupButtons.TryGetValue(tag, out var buttons))
             {
                 foreach (var button in buttons)
@@ -786,26 +1006,12 @@ namespace Action_Wheel.Overlay
             var foreground = IconFactory.ColorOr(parentAction.Foreground, IconFactory.DefaultForeground(parentTag));
             var shadowColor = IconFactory.ColorOr(parentAction.Shadow, Colors.Black);
 
-            // The parent's own direction, using the same formula the main ring's 8 slots are laid
-            // out with - so child 0 (fan offset 0) still starts exactly there.
-            double parentAngle = (Math.PI / 4.0) * (parentTag - 1) - Math.PI / 2.0;
-
-            // A small, fixed gap between neighbours' edges, converted to the angle that gives it at
-            // this particular radius - a chord, not an arc, but the two agree closely at the small
-            // angles this produces in practice.
-            const double DesiredEdgeGap = 6.0;
-            double angularStep = 2.0 * Math.Asin(Math.Clamp((size + DesiredEdgeGap) / (2.0 * radius), -1.0, 1.0));
-
             for (int i = 0; i < count; i++)
             {
                 var child = children[i];
-
-                // 0, +1, -1, +2, -2, ... - see the remarks above.
-                int fanOffset = i % 2 == 0 ? -(i / 2) : i / 2 + 1;
-
-                double angle = parentAngle + fanOffset * angularStep;
-                double x = centre + Math.Cos(angle) * radius;
-                double y = centre + Math.Sin(angle) * radius;
+                var offset = RingGeometry.GroupChildOffset(parentTag, i, radius, size);
+                double x = centre + offset.X;
+                double y = centre + offset.Y;
 
                 var button = new Button
                 {
@@ -815,14 +1021,25 @@ namespace Action_Wheel.Overlay
                     CornerRadius = new CornerRadius(size / 2.0),
                     Background = new SolidColorBrush(background),
                     Foreground = new SolidColorBrush(foreground),
-                    Content = IconFactory.CreateIcon(child, size * RingGeometry.IconSizeRatio, new SolidColorBrush(foreground)),
+                    Content = child.Kind == ActionKind.CopyText ? new TextBlock
+                    {
+                        Text = child.Label,
+                        FontSize = 11,
+                        Width = size - 10,
+                        TextAlignment = TextAlignment.Center,
+                        TextWrapping = TextWrapping.Wrap,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        MaxLines = 3,
+                        Foreground = new SolidColorBrush(foreground),
+                    } : IconFactory.CreateIcon(child, size * RingGeometry.IconSizeRatio, new SolidColorBrush(foreground)),
                     Tag = $"{parentTag}:{i}",
                     Opacity = 0,
                     Visibility = Visibility.Collapsed,
                 };
 
                 if (!string.IsNullOrWhiteSpace(child.Label))
-                    ToolTipService.SetToolTip(button, child.Label);
+                    ToolTipService.SetToolTip(button, child.Kind == ActionKind.CopyText
+                        ? $"{child.Label}\n{child.Value}\n松手复制" : child.Label);
 
                 button.Click += GroupChildButton_Click;
 
@@ -831,8 +1048,12 @@ namespace Action_Wheel.Overlay
                 int childIndex = i;
                 button.AddHandler(UIElement.PointerPressedEvent,
                     new PointerEventHandler((s2, e2) => ArmChildHold(parentTag, childIndex, child, button)), true);
+                button.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(GroupChildButton_Hover), true);
                 button.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((s2, e2) => DisarmHold()), true);
-                button.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler((s2, e2) => DisarmHold()), true);
+                button.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler((s2, e2) =>
+                {
+                    if (!_trackingGesture) HighlightChild(null);
+                }), true);
                 button.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((s2, e2) => DisarmHold()), true);
                 button.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((s2, e2) => DisarmHold()), true);
 
@@ -1049,10 +1270,15 @@ namespace Action_Wheel.Overlay
 
             var restBackground = new SolidColorBrush(background);
             var restForeground = new SolidColorBrush(foreground);
-            var restBorder = new SolidColorBrush(inverts ? Color.FromArgb(0xFF, 0xE8, 0xF4, 0xF4) : background);
+            var restBorder = new SolidColorBrush(tag == 0
+                ? Color.FromArgb(0x59, 0x94, 0xA3, 0xB8)
+                : Color.FromArgb(0x59, 0x38, 0xBD, 0xF8));
 
-            var hoverBackground = new SolidColorBrush(inverts ? foreground : IconFactory.Lighten(background, 0.10));
-            var hoverForeground = new SolidColorBrush(inverts ? background : foreground);
+            var hoverBackground = new SolidColorBrush(tag == 0
+                ? IconFactory.Lighten(background, 0.10)
+                : Color.FromArgb(0xF2, 0x16, 0x4E, 0x63));
+            var hoverForeground = new SolidColorBrush(tag == 0 ? foreground : Color.FromArgb(0xFF, 0xE0, 0xF2, 0xFE));
+            var hoverBorder = new SolidColorBrush(Color.FromArgb(0xFF, 0x38, 0xBD, 0xF8));
 
             var pressedBackground = new SolidColorBrush(
                 inverts ? IconFactory.Darken(foreground, 0.15) : IconFactory.Darken(background, 0.13));
@@ -1077,9 +1303,16 @@ namespace Action_Wheel.Overlay
 
             void Paint(Brush fill, Brush content, Brush border, bool hover)
             {
-                button.Background = fill;
+                button.Background = tag == 0 ? fill : new SolidColorBrush(Colors.Transparent);
                 button.Foreground = content;
-                button.BorderBrush = border;
+                button.BorderBrush = tag == 0 ? border : new SolidColorBrush(Colors.Transparent);
+
+                if (tag != 0 && _wedges[tag] is XamlPath wedge)
+                {
+                    wedge.Fill = fill;
+                    wedge.Stroke = border;
+                    SetSelectedOffset(wedge, button, tag, hover ? RingGeometry.SelectedOffsetDip : 0);
+                }
 
                 var desiredContent = hover ? HoverContent() : restContent;
                 if (desiredContent != null && !ReferenceEquals(button.Content, desiredContent))
@@ -1092,8 +1325,8 @@ namespace Action_Wheel.Overlay
             void Rest() => Paint(restBackground, restForeground, restBorder, false);
             // Keep the circular outline opposite to the fill as well. Only its brush changes; the
             // template keeps the same 2 px BorderThickness in every pointer state.
-            void Hover() => Paint(hoverBackground, hoverForeground, hoverForeground, true);
-            void Pressed() => Paint(pressedBackground, hoverForeground, hoverForeground, true);
+            void Hover() => Paint(hoverBackground, hoverForeground, hoverBorder, true);
+            void Pressed() => Paint(pressedBackground, hoverForeground, hoverBorder, true);
 
             // Kept so the drag gesture can highlight a button the pointer is nowhere near.
             _buttonPainters[tag] = new ButtonPainter(Rest, Hover, Pressed);
@@ -1109,14 +1342,39 @@ namespace Action_Wheel.Overlay
         }
 
         private static int? TagOf(object sender) =>
-            sender is Button button && button.Tag is string text
+            sender is FrameworkElement element && element.Tag is string text
                 && int.TryParse(text, out int tag) && tag is >= 0 and <= 8
                 ? tag : null;
+
+        private static void SetSelectedOffset(UIElement wedge, UIElement icon, int tag, double distance)
+        {
+            double angle = (tag - 1) * Math.PI / 4.0 - Math.PI / 2.0;
+            double x = Math.Cos(angle) * distance;
+            double y = Math.Sin(angle) * distance;
+
+            SetTranslation(wedge, x, y);
+            SetTranslation(icon, x, y);
+        }
+
+        private void GroupChildButton_Hover(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_trackingGesture && sender is Button button) HighlightChild(button);
+        }
+
+        private static void SetTranslation(UIElement element, double x, double y)
+        {
+            var transform = element.RenderTransform as CompositeTransform ?? new CompositeTransform();
+            transform.TranslateX = x;
+            transform.TranslateY = y;
+            element.RenderTransform = transform;
+            element.RenderTransformOrigin = new Point(0.5, 0.5);
+        }
 
         private ButtonPainter? PainterFor(object sender) => TagOf(sender) is int tag ? _buttonPainters[tag] : null;
 
         private void OnButtonHover(object sender, PointerRoutedEventArgs e)
         {
+            if (_trackingGesture) return;
             // Also reached on release (see ApplyPointerStates), which is exactly when a held-past-
             // threshold press needs its countdown cancelled - the button is either about to raise a
             // normal Click (release before the threshold) or already handled by FireHold (release
@@ -1124,7 +1382,10 @@ namespace Action_Wheel.Overlay
             DisarmHold();
             PainterFor(sender)?.Hover();
             if (TagOf(sender) is int tag)
+            {
+                ShowSelectionInfo(tag);
                 OnMainRingHover(tag);
+            }
         }
 
         private void OnButtonPressed(object sender, PointerRoutedEventArgs e)
@@ -1136,8 +1397,10 @@ namespace Action_Wheel.Overlay
 
         private void OnButtonRest(object sender, PointerRoutedEventArgs e)
         {
+            if (_trackingGesture) return;
             DisarmHold();
             PainterFor(sender)?.Rest();
+            HideSelectionInfo();
         }
 
         private void InitializeWindow()
@@ -1183,7 +1446,7 @@ namespace Action_Wheel.Overlay
             {
                 // Set extended style
                 var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-                exStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+                exStyle |= WS_EX_TOOLWINDOW;
                 SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
                 RemoveWindowFrame(hwnd);
@@ -1277,6 +1540,8 @@ namespace Action_Wheel.Overlay
                 // XAML pixels. Clear it to black instead: with DWM alpha composition enabled above,
                 // those untouched pixels become fully transparent rather than a white 400x400 box.
                 _windowHandle = hwnd;
+                // Keeps the ring out of RefreshFrame's capture, which runs while it opens.
+                SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
                 _backgroundBrush = CreateSolidBrush(0);
                 SetWindowSubclass(hwnd, _backgroundSubclass, BackgroundSubclassId, UIntPtr.Zero);
 
@@ -1392,6 +1657,265 @@ namespace Action_Wheel.Overlay
             return new RECT { left = 0, top = 0, right = GetSystemMetrics(0), bottom = GetSystemMetrics(1) };
         }
 
+        /// <summary>Total length of the refresh, in milliseconds, from the first band to the last fade.</summary>
+        private const double RefreshBudgetMs = 500;
+        /// <summary>Time for the radial pixel front to reach the farthest monitor corner.</summary>
+        private const double RefreshSweepMs = 300;
+        private const double RefreshRiseMs = 75;
+        /// <summary>Cover fade duration for each pixel cluster.</summary>
+        private const double RefreshUncoverMs = 145;
+        /// <summary>Soft radial light-front width, in DIP.</summary>
+        private const double RefreshGlareDip = 180;
+
+        /// <summary>
+        /// Turns a centre release into a short, click-through refresh. A grey still covers the
+        /// monitor while <paramref name="restoreColour"/> brings live colour back underneath. The
+        /// cover then clears in an irregular radial wave from the opening click as background
+        /// glyphs, textured scene-colour pixels and vivid region-boundary chips flash and fade.
+        /// Twelve-by-twelve source-tile clusters keep the number of animated images bounded.
+        /// </summary>
+        /// <remarks>
+        /// Each cluster is its own Image so the sweep is nothing but Opacity and transform
+        /// animations, which composition runs off the UI thread. The bitmaps are shown at exactly
+        /// one image pixel per physical pixel, so the tile edges stay hard instead of being resampled.
+        ///
+        /// <paramref name="restoreColour"/> is only called once the cover has been rendered, so the
+        /// desktop never shows full colour before the sweep reaches it. If the menu closes first,
+        /// LauncherService restores colour from its Closed handler.
+        /// </remarks>
+        internal void PlayRefresh(RefreshFrame? frame, Action restoreColour)
+        {
+            if (_closed || _appWindow == null)
+            {
+                restoreColour();
+                return;
+            }
+
+            DisarmHold();
+            if (frame == null)
+            {
+                restoreColour();
+                CloseMenu();
+                return;
+            }
+
+            var bounds = frame.Bounds;
+            double scale = _rasterizationScale;
+            // The wave starts where the wheel was opened, even if the pointer moved before release.
+            double cursorX = frame.OriginX / scale;
+            double cursorY = frame.OriginY / scale;
+            double layerW = bounds.Width / scale, layerH = bounds.Height / scale;
+
+            MenuContainer.Visibility = Visibility.Collapsed;
+            RefreshLayer.Children.Clear();
+            RefreshLayer.Width = layerW;
+            RefreshLayer.Height = layerH;
+            RefreshLayer.Visibility = Visibility.Visible;
+
+            _screenOrigin = new PointInt32(bounds.X, bounds.Y);
+            _appWindow.Move(_screenOrigin);
+            _appWindow.Resize(new SizeInt32(bounds.Width, bounds.Height));
+
+            int exStyle = GetWindowLong(_windowHandle, GWL_EXSTYLE);
+            SetWindowLong(_windowHandle, GWL_EXSTYLE,
+                exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
+            SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                SWP_NOACTIVATE);
+
+            var storyboard = new Storyboard();
+            foreach (RefreshCluster cluster in frame.Clusters)
+            {
+                int left = cluster.Left, top = cluster.Top;
+                int width = cluster.Width, height = cluster.Height;
+                double front = cluster.StartMs;
+
+                var cover = AddRegionImage(frame.Grey, bounds.Width, left, top, width, height, scale, 1);
+                var subject = AddRegionImage(frame.Subject, bounds.Width, left, top, width, height, scale, 0);
+                var boundary = AddRegionImage(frame.Boundary, bounds.Width, left, top, width, height, scale, 0);
+                // Fine background marks sit above the large blocks at lower opacity, so their
+                // texture remains visible without replacing the scene-coloured foreground.
+                var background = AddRegionImage(frame.Background, bounds.Width, left, top, width, height, scale, 0);
+
+                double bgStart = Math.Max(0, front - 18);
+                AddRefreshAnimation(storyboard, background, "Opacity", 0, 0.9, 0,
+                    bgStart, bgStart + RefreshRiseMs * 0.6, Math.Min(RefreshBudgetMs, bgStart + 205));
+
+                double subjectStart = front + 12;
+                AddRefreshAnimation(storyboard, subject, "Opacity", 0, 1, 0,
+                    subjectStart, subjectStart + RefreshRiseMs, Math.Min(RefreshBudgetMs, subjectStart + 245));
+
+                double edgeStart = front + 30;
+                AddRefreshAnimation(storyboard, boundary, "Opacity", 0, 1, 0,
+                    edgeStart, edgeStart + RefreshRiseMs * 1.35, Math.Min(RefreshBudgetMs, edgeStart + 285));
+
+                AddRefreshAnimation(storyboard, cover, "Opacity", 1, 1, 0,
+                    0, front, front + RefreshUncoverMs);
+            }
+
+            AddSweepGlare(storyboard, layerW, layerH, cursorX, cursorY);
+            AddCursorFlare(storyboard, cursorX, cursorY);
+
+            storyboard.Completed += (_, _) => CloseMenu();
+
+            // A few rendered frames so DWM has presented the cover before the matrix is lifted.
+            int frames = 0;
+            EventHandler<object>? onRendering = null;
+            onRendering = (_, _) =>
+            {
+                if (++frames < 3 && !_closed)
+                    return;
+                CompositionTarget.Rendering -= onRendering;
+                if (_closed)
+                    return;
+                restoreColour();
+                storyboard.Begin();
+            };
+            CompositionTarget.Rendering += onRendering;
+        }
+
+        private Image AddRegionImage(byte[] pixels, int sourceWidth, int left, int top, int width, int height,
+            double scale, double opacity)
+        {
+            var bitmap = new WriteableBitmap(width, height);
+            using (var stream = bitmap.PixelBuffer.AsStream())
+            {
+                for (int row = 0; row < height; row++)
+                    stream.Write(pixels, ((top + row) * sourceWidth + left) * 4, width * 4);
+            }
+            bitmap.Invalidate();
+
+            var image = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Fill,
+                Width = width / scale,
+                Height = height / scale,
+                Opacity = opacity,
+            };
+            Canvas.SetLeft(image, left / scale);
+            Canvas.SetTop(image, top / scale);
+            RefreshLayer.Children.Add(image);
+            return image;
+        }
+
+        /// <summary>A soft circular light front that expands from the wheel's opening click.</summary>
+        private void AddSweepGlare(Storyboard storyboard, double width, double height, double originX, double originY)
+        {
+            double radius = Math.Sqrt(Math.Max(originX, width - originX) * Math.Max(originX, width - originX)
+                + Math.Max(originY, height - originY) * Math.Max(originY, height - originY));
+            double diameter = Math.Max(1, radius * 2);
+            double innerEdge = Math.Clamp(1 - RefreshGlareDip / radius, 0.72, 0.94);
+            var brush = new RadialGradientBrush();
+            brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xD8, 0xF0, 0xFF), Offset = 0 });
+            brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xD8, 0xF0, 0xFF), Offset = innerEdge });
+            brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x18, 0xD8, 0xF0, 0xFF), Offset = innerEdge + (1 - innerEdge) * 0.45 });
+            brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x52, 0xFF, 0xFF, 0xFF), Offset = 0.98 });
+            brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xFF, 0xE8, 0xD0), Offset = 1 });
+            var scale = new ScaleTransform { ScaleX = 0.01, ScaleY = 0.01 };
+            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = diameter,
+                Height = diameter,
+                Fill = brush,
+                Opacity = 0,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = scale,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(ring, originX - radius);
+            Canvas.SetTop(ring, originY - radius);
+            RefreshLayer.Children.Add(ring);
+            AddScale(storyboard, scale, 0.01, 1, 0, RefreshSweepMs);
+            AddRefreshAnimation(storyboard, ring, "Opacity", 0, 0.8, 0,
+                0, 45, RefreshBudgetMs);
+        }
+
+        /// <summary>A bloom and a thin horizontal streak at the opening click.</summary>
+        private void AddCursorFlare(Storyboard storyboard, double x, double y)
+        {
+            const double bloomDip = 420, streakW = 1100, streakH = 5;
+
+            var radial = new RadialGradientBrush();
+            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0xD0, 0xFF, 0xFF, 0xFF), Offset = 0 });
+            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x70, 0xFF, 0xF2, 0xDC), Offset = 0.12 });
+            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x26, 0xB8, 0xD8, 0xFF), Offset = 0.4 });
+            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xB8, 0xD8, 0xFF), Offset = 1 });
+            var bloom = AddCentred(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = bloomDip, Height = bloomDip, Fill = radial },
+                x, y, out var bloomScale);
+            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, 360);
+            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 1, 0, 0, 40, 360);
+
+            var linear = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
+            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 0 });
+            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x50, 0xA8, 0xD0, 0xFF), Offset = 0.3 });
+            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0xE0, 0xFF, 0xFF, 0xFF), Offset = 0.5 });
+            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x50, 0xA8, 0xD0, 0xFF), Offset = 0.7 });
+            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 1 });
+            var streak = AddCentred(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = streakW, Height = streakH, Fill = linear },
+                x, y, out var streakScale);
+            AddScale(storyboard, streakScale, 0.1, 1.15, 0, 300, scaleY: false);
+            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 1, 0, 0, 35, 300);
+        }
+
+        private UIElement AddCentred(FrameworkElement element, double x, double y, out ScaleTransform scale)
+        {
+            scale = new ScaleTransform();
+            element.Opacity = 0;
+            element.IsHitTestVisible = false;
+            element.RenderTransformOrigin = new Point(0.5, 0.5);
+            element.RenderTransform = scale;
+            Canvas.SetLeft(element, x - element.Width / 2);
+            Canvas.SetTop(element, y - element.Height / 2);
+            RefreshLayer.Children.Add(element);
+            return element;
+        }
+
+        private static void AddScale(Storyboard storyboard, ScaleTransform target, double from, double to,
+            double startMs, double endMs, bool scaleY = true)
+        {
+            foreach (var property in scaleY ? new[] { "ScaleX", "ScaleY" } : new[] { "ScaleX" })
+            {
+                var animation = new DoubleAnimation
+                {
+                    From = from,
+                    To = to,
+                    BeginTime = TimeSpan.FromMilliseconds(startMs),
+                    Duration = TimeSpan.FromMilliseconds(endMs - startMs),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                };
+                Storyboard.SetTarget(animation, target);
+                Storyboard.SetTargetProperty(animation, property);
+                storyboard.Children.Add(animation);
+            }
+        }
+
+        /// <summary>start at <paramref name="startMs"/>, peak at <paramref name="middleMs"/>, end at <paramref name="endMs"/>.</summary>
+        private static void AddRefreshAnimation(Storyboard storyboard, DependencyObject target,
+            string property, double start, double middle, double end, double startMs, double middleMs, double endMs)
+        {
+            var animation = new DoubleAnimationUsingKeyFrames();
+            animation.KeyFrames.Add(new DiscreteDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(startMs)),
+                Value = start,
+            });
+            animation.KeyFrames.Add(new EasingDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(middleMs)),
+                Value = middle,
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+            });
+            animation.KeyFrames.Add(new EasingDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(endMs)),
+                Value = end,
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+            });
+            Storyboard.SetTarget(animation, target);
+            Storyboard.SetTargetProperty(animation, property);
+            storyboard.Children.Add(animation);
+        }
+
         /// <summary>
         /// Re-reads the DPI of whichever monitor <paramref name="point"/> is actually on, and
         /// resizes the physical window if that turns out to differ from the scale
@@ -1440,14 +1964,12 @@ namespace Action_Wheel.Overlay
             // top-left goes at cursor - half the window size. Every calculation here uses physical
             // pixels because AppWindow.Move/Resize and the monitor's work area are both physical.
             int size = PhysicalMenuSize;
-            var work = GetMonitorWorkArea(position);
-
-            var origin = RingGeometry.ClampOrigin(
-                new ScreenPoint(position.X, position.Y),
-                size,
-                new ScreenRect(work.left, work.top, work.right, work.bottom));
-
-            var target = new PointInt32(origin.X, origin.Y);
+            // Keep the logical centre at the pointer. At screen edges the window is clipped;
+            // drawing and hit-testing therefore share the same centre instead of being clamped
+            // to a different one.
+            var target = new PointInt32(
+                position.X - (int)Math.Round(size / 2.0),
+                position.Y - (int)Math.Round(size / 2.0));
             _screenOrigin = target;
 
             // Position is set BEFORE Activate() so the menu does not flash somewhere else, but it
@@ -1458,6 +1980,9 @@ namespace Action_Wheel.Overlay
             _appWindow.Move(target);
             Activate();
             _appWindow.Move(target);
+            // Activation can change z-order; explicitly restore topmost after the window is shown.
+            SetWindowPos(_windowHandle, HWND_TOPMOST, target.X, target.Y, 0, 0,
+                SWP_NOSIZE | SWP_NOACTIVATE);
 
             // Same reason the Move is repeated: showing the window is when the frame is finally
             // realised, and WinUI puts WS_DLGFRAME/WS_EX_WINDOWEDGE back. Stripping them once in
@@ -1499,6 +2024,12 @@ namespace Action_Wheel.Overlay
             Canvas.SetLeft(CenterBtn, centerBtnLeft);
             Canvas.SetTop(CenterBtn, centerBtnTop);
 
+            CenterInfo.Width = centerBtnSize;
+            CenterInfo.Height = centerBtnSize;
+            CenterInfo.CornerRadius = new CornerRadius(centerBtnSize / 2.0);
+            Canvas.SetLeft(CenterInfo, centerBtnLeft);
+            Canvas.SetTop(CenterInfo, centerBtnTop);
+
         }
 
         private void ActionButton_Click(object sender, RoutedEventArgs e)
@@ -1532,7 +2063,7 @@ namespace Action_Wheel.Overlay
         {
             while (source != null)
             {
-                if (source is Button)
+                if (source is Button || source is XamlPath)
                     return true;
 
                 source = VisualTreeHelper.GetParent(source);

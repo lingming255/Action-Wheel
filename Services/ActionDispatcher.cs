@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -167,6 +168,12 @@ namespace Action_Wheel.Services
 
                     case ActionKind.Launch:
                         Launch(action);
+                        break;
+
+                    case ActionKind.CopyText:
+                        // Clipboard requires the UI thread; both dispatch callers marshal copies.
+                        if (!ShellCommands.CopyText(action.Value, out string copyError))
+                            Fail(action, copyError);
                         break;
 
                     case ActionKind.Function:
@@ -436,6 +443,11 @@ namespace Action_Wheel.Services
 
                 case WindowsFunctions.ActionProfiles:
                     LaunchBuiltIn(action, new ProfileLibrary().DirectoryPath);
+                    break;
+
+                case WindowsFunctions.QuickInfo:
+                    Directory.CreateDirectory(AppDataPaths.QuickInfoDirectoryPath);
+                    LaunchBuiltIn(action, AppDataPaths.QuickInfoDirectoryPath);
                     break;
 
                 default:

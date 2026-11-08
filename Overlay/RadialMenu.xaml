@@ -29,13 +29,14 @@
                 in code-behind; all that's left here is the scale-up effect.
             -->
             <Style x:Key="RadialButtonStyle" TargetType="Button">
-                <Setter Property="Width" Value="44"/>
-                <Setter Property="Height" Value="44"/>
+                <Setter Property="Width" Value="52"/>
+                <Setter Property="Height" Value="52"/>
                 <!-- Defaults only. Button size is a user setting, so RadialMenu.ApplySizes writes
                      Width/Height/CornerRadius onto each Button as local values and the template
                      below reads them back through TemplateBinding rather than hard-coding 44/22. -->
-                <Setter Property="CornerRadius" Value="22"/>
-                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="CornerRadius" Value="26"/>
+                <Setter Property="FontSize" Value="30"/>
+                <Setter Property="BorderThickness" Value="0"/>
                 <Setter Property="Padding" Value="0"/>
                 <Setter Property="UseSystemFocusVisuals" Value="False"/>
                 <Setter Property="Template">
@@ -58,7 +59,7 @@
                                 <Border x:Name="Bd"
                                         Background="{TemplateBinding Background}"
                                         BorderBrush="{TemplateBinding BorderBrush}"
-                                        BorderThickness="2"
+                                        BorderThickness="{TemplateBinding BorderThickness}"
                                         CornerRadius="{TemplateBinding CornerRadius}">
                                     <ContentPresenter x:Name="ContentHost"
                                                       Content="{TemplateBinding Content}"
@@ -76,8 +77,8 @@
                                         </VisualState>
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="1.12"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="1.12"/>
+                                                <Setter Target="HoverScale.ScaleX" Value="1.10"/>
+                                                <Setter Target="HoverScale.ScaleY" Value="1.10"/>
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
@@ -97,10 +98,10 @@
 
             <!-- Style for the center button. Same reason as above for needing its own template. -->
             <Style x:Key="CenterButtonStyle" TargetType="Button">
-                <Setter Property="Width" Value="40"/>
-                <Setter Property="Height" Value="40"/>
-                <Setter Property="CornerRadius" Value="20"/>
-                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="Width" Value="104"/>
+                <Setter Property="Height" Value="104"/>
+                <Setter Property="CornerRadius" Value="52"/>
+                <Setter Property="FontSize" Value="30"/>
                 <Setter Property="Padding" Value="0"/>
                 <Setter Property="UseSystemFocusVisuals" Value="False"/>
                 <Setter Property="Template">
@@ -158,9 +159,9 @@
         <!-- No RenderTransform here. RingOpenAnimation attaches a CompositeTransform with a
              centred origin: the old ScaleTransform had no origin, so scaling 0.85 -> 1 pivoted on
              the top-left corner and slid the ring 30 DIP away from the cursor on the way in. -->
-        <Grid x:Name="MenuContainer" Width="400" Height="400" Background="Transparent">
+        <Grid x:Name="MenuContainer" Width="420" Height="420" Background="Transparent">
             
-            <Canvas x:Name="ButtonsCanvas" Width="400" Height="400" Background="Transparent">
+            <Canvas x:Name="ButtonsCanvas" Width="420" Height="420" Background="Transparent">
                 <!-- 8 buttons positioned in a circle, updated at runtime -->
                 <!-- Top (0°) -->
                 <Button x:Name="Btn1" Canvas.Left="172" Canvas.Top="24" Style="{StaticResource RadialButtonStyle}" ToolTipService.ToolTip="Action 1" Click="ActionButton_Click" Tag="1" Opacity="0">
@@ -206,7 +207,28 @@
                 <Button x:Name="CenterBtn" Canvas.Left="174" Canvas.Top="174" Style="{StaticResource CenterButtonStyle}" Click="ActionButton_Click" Tag="0" Opacity="0">
                     <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF00D;" FontSize="14"/>
                 </Button>
+
+                <Border x:Name="CenterInfo" Canvas.Left="158" Canvas.Top="158"
+                        Width="104" Height="104" CornerRadius="52"
+                        Background="#F0020617" BorderBrush="#5938BDF8" BorderThickness="1"
+                        IsHitTestVisible="False" Visibility="Collapsed">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Width="88" Spacing="3">
+                        <TextBlock x:Name="SelectionTitle" Foreground="#FFE0F2FE"
+                                   FontSize="13" FontWeight="SemiBold" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                        <TextBlock x:Name="SelectionMeta" Foreground="#FF94A3B8"
+                                   FontSize="9" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                    </StackPanel>
+                </Border>
             </Canvas>
         </Grid>
+
+        <!-- Refresh: a grey still clears in an irregular diagonal front over the live desktop.
+             Background glyphs, salient-region blocks and boundary accents are rasterized off-thread;
+             PlayRefresh adds one image per layer and macro cluster, then animates only Opacity. -->
+        <Canvas x:Name="RefreshLayer" Visibility="Collapsed" IsHitTestVisible="False"
+                HorizontalAlignment="Left" VerticalAlignment="Top"/>
     </Grid>
 </Window>

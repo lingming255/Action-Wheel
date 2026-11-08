@@ -20,6 +20,32 @@ namespace Action_Wheel.Core
     /// </summary>
     public static class RingGeometry
     {
+        /// <summary>Child centre relative to the ring centre, in DIPs; shared by drawing and gestures.</summary>
+        public static (double X, double Y) GroupChildOffset(int parentTag, int childIndex,
+            double orbitRadius, double buttonSize)
+        {
+            double step = 2 * Math.Asin(Math.Clamp((buttonSize + 6) / (2 * orbitRadius), -1, 1));
+            int fanOffset = childIndex % 2 == 0 ? -(childIndex / 2) : childIndex / 2 + 1;
+            double angle = (parentTag - 1) * Math.PI / 4 - Math.PI / 2 + fanOffset * step;
+            return (Math.Cos(angle) * orbitRadius, Math.Sin(angle) * orbitRadius);
+        }
+
+        /// <summary>Hit-tests the visible child circles using a screen displacement and monitor scale.</summary>
+        public static int? GroupChildAt(double screenDx, double screenDy, double scale,
+            int parentTag, int count, double orbitRadius, double buttonSize)
+        {
+            double x = screenDx / scale;
+            double y = screenDy / scale;
+            for (int i = 0; i < count; i++)
+            {
+                var centre = GroupChildOffset(parentTag, i, orbitRadius, buttonSize);
+                double dx = x - centre.X, dy = y - centre.Y;
+                if (dx * dx + dy * dy <= buttonSize * buttonSize / 4)
+                    return i;
+            }
+            return null;
+        }
+
         /// <summary>
         /// Menu size in DIPs at the default ring, and the smallest the overlay window ever gets.
         /// </summary>
@@ -28,12 +54,16 @@ namespace Action_Wheel.Core
         /// this is what it returns for the default 44/88, so the default overlay is byte-identical
         /// to the one that was hard-coded here before.
         /// </remarks>
-        public const int MenuSizeDip = 400;
+        public const int MenuSizeDip = 420;
 
         /// <summary>Shared visual geometry used by both the live overlay and Settings preview.</summary>
-        public const double OuterButtonSizeDip = 44.0;
-        public const double CenterButtonSizeDip = 40.0;
-        public const double OrbitRadiusDip = 88.0;
+        public const double OuterButtonSizeDip = 52.0;
+        public const double CenterButtonSizeDip = 104.0;
+        public const double OrbitRadiusDip = 116.0;
+
+        public const double InnerRadiusDip = 58.0;
+        public const double OuterRadiusDip = 174.0;
+        public const double SelectedOffsetDip = 8.0;
 
         /// <summary>
         /// The centre button's diameter as a fraction of an outer one. Kept as a ratio rather than a
@@ -42,7 +72,7 @@ namespace Action_Wheel.Core
         public const double CenterButtonRatio = CenterButtonSizeDip / OuterButtonSizeDip;
 
         /// <summary>Glyph size as a fraction of the button it sits in - 14 DIP inside 44.</summary>
-        public const double IconSizeRatio = 14.0 / OuterButtonSizeDip;
+        public const double IconSizeRatio = 30.0 / OuterButtonSizeDip;
 
         /// <summary>How small and how large a user is allowed to make the buttons, in DIPs.</summary>
         public const double MinButtonSizeDip = 28.0;
@@ -68,7 +98,7 @@ namespace Action_Wheel.Core
         /// grow, this room shrank as the orbit widened, and at the largest settings the shadows were
         /// being cut off by the window edge.
         /// </remarks>
-        private const double EdgeMarginDip = 87.0;
+        private const double EdgeMarginDip = 64.88;
 
         /// <summary>
         /// The widest orbit offered, in DIPs. A flat cap rather than something derived from the
@@ -134,7 +164,7 @@ namespace Action_Wheel.Core
         /// choosing a direction. Below this the release is treated as a plain click that opened the
         /// menu, and the menu stays up to be clicked normally.
         /// </summary>
-        public const double GestureDeadZone = 28.0;
+        public const double GestureDeadZone = InnerRadiusDip;
 
         /// <summary>
         /// How long a button must stay pressed - or stay the flick gesture's chosen direction -

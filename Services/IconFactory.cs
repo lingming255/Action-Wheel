@@ -294,12 +294,12 @@ namespace Action_Wheel.Services
         /// settings preview and the real menu cannot drift apart.
         /// </summary>
         public static Color DefaultBackground(int tag) => tag == 0
-            ? Color.FromArgb(0xFF, 0xDA, 0x6B, 0x6B)
-            : Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+            ? Color.FromArgb(0xF0, 0x02, 0x06, 0x17)
+            : Color.FromArgb(0xE6, 0x0F, 0x17, 0x2A);
 
         public static Color DefaultForeground(int tag) => tag == 0
             ? Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
-            : Color.FromArgb(0xFF, 0x4A, 0x7C, 0x7E);
+            : Color.FromArgb(0xFF, 0xE0, 0xF2, 0xFE);
 
         // The colour helpers below are a thin XAML-facing skin over ColorValue in the core library.
         // The arithmetic lives there so it is one implementation rather than one per UI type.

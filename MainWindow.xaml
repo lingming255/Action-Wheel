@@ -219,6 +219,7 @@
                         <Run Text=", or quit."/>
                     </TextBlock>
 
+                    <TextBlock Text="{Binding QuickInfoStatus, Mode=OneWay}" TextWrapping="Wrap" FontSize="12" IsTextSelectionEnabled="True"/>
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <Button Content="Copy diagnostics" Command="{Binding CopyDiagnosticsCommand}"/>
                         <TextBlock Text="{Binding ActiveProfileText, Mode=OneWay}" FontSize="12" FontWeight="SemiBold"

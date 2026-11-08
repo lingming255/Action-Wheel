@@ -59,6 +59,7 @@ namespace Action_Wheel.ViewModels
         private void OnStatusChanged(object? sender, EventArgs e) => RefreshHookStatus();
 
         private void OnActionFailed(object? sender, string message) => ActionError = message;
+        public string QuickInfoStatus => _launcher?.QuickInfoStatus ?? "Quick Info unavailable";
         public string ActiveProfileText => $"Active profile: {_launcher?.ActiveProfileLabel ?? ActiveProfileSettings.Load()}";
 
         #region Hook status
@@ -81,7 +82,7 @@ namespace Action_Wheel.ViewModels
             get
             {
                 if (Status.IsRunning)
-                    return "The service has started. Try pressing your middle mouse button!";
+                    return "The service has started. Hold left and press right, or use Ctrl+Alt+Space for Quick Info.";
 
                 var reason = string.IsNullOrWhiteSpace(Status.Error)
                     ? "The service did not start."
@@ -133,7 +134,7 @@ namespace Action_Wheel.ViewModels
         public void RefreshConfiguration()
         {
             Raise(nameof(ConfigProblemVisibility), nameof(ConfigProblemMessage),
-                  nameof(CanRestoreBackup), nameof(RestoreBackupVisibility), nameof(ActiveProfileText));
+                  nameof(CanRestoreBackup), nameof(RestoreBackupVisibility), nameof(ActiveProfileText), nameof(QuickInfoStatus));
             RestoreBackupCommand.RaiseCanExecuteChanged();
         }
 
@@ -286,6 +287,7 @@ namespace Action_Wheel.ViewModels
                 .Add("Keyboard hook", Status.KeyboardHookInstalled)
                 .Add("Hook error", Status.Error)
                 .Add("Start with Windows", StartupManager.IsEnabled)
+                .Add("Quick Info", QuickInfoStatus)
                 .Build();
 
             if (ShellCommands.CopyText(report, out string error))

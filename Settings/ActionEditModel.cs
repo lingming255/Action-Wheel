@@ -486,6 +486,7 @@ namespace Action_Wheel.Settings
             1 => "For example: Ctrl+Shift+S",
             2 => "For example: notepad.exe or https://…",
             3 => "Choose a built-in function",
+            5 => "Text to copy to the clipboard",
             _ => "No hold action",
         };
 
@@ -528,6 +529,7 @@ namespace Action_Wheel.Settings
             2 => "For example: notepad.exe or https://…",
             3 => "Choose a built-in function",
             4 => "Use \"Edit group\" below to configure",
+            5 => "Text to copy to the clipboard",
             _ => "This button only closes the menu",
         };
 

@@ -69,10 +69,10 @@ namespace Action_Wheel.Core
         /// a reference to it because <c>RingOpenAnimation</c> lives in the app project and this one
         /// does not take a dependency on it.
         /// </summary>
-        public const double DefaultAnimationDurationMs = 200.0;
+        public const double DefaultAnimationDurationMs = 120.0;
 
         /// <summary>The fastest the opening animation can be played.</summary>
-        public const double MinAnimationDurationMs = 100.0;
+        public const double MinAnimationDurationMs = 60.0;
 
         /// <summary>The slowest the opening animation can be played.</summary>
         public const double MaxAnimationDurationMs = 1000.0;

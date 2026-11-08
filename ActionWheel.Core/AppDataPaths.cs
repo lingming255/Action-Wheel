@@ -20,6 +20,9 @@ namespace Action_Wheel.Core
         /// </remarks>
         public static string IconsDirectoryPath => Path.Combine(DirectoryPath, "Icons");
 
+        /// <summary>Local files the user keeps for quick access from the radial menu.</summary>
+        public static string QuickInfoDirectoryPath => Path.Combine(DirectoryPath, "QuickInfo");
+
         /// <summary>Removes activity logs left by versions released before logging was retired.</summary>
         public static void DeleteLegacyLogs()
         {

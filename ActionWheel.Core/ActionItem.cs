@@ -19,6 +19,8 @@ namespace Action_Wheel.Core
         /// instead of dispatching anything itself. Selecting it never closes the menu.
         /// </summary>
         Group,
+        /// <summary>Copy literal text to the Windows clipboard.</summary>
+        CopyText,
     }
 
     /// <summary>One button of the radial menu.</summary>

@@ -28,11 +28,11 @@ namespace Action_Wheel.Services
 
                 using var document = JsonDocument.Parse(File.ReadAllText(FilePath));
                 var root = document.RootElement;
-                int trigger = ReadInt(root, "trigger", (int)MouseTrigger.MiddleButton);
+                int trigger = ReadInt(root, "trigger", (int)MouseTrigger.HoldLeftPressRight);
                 return new TriggerPreferences
                 {
                     Trigger = Enum.IsDefined(typeof(MouseTrigger), trigger)
-                        ? (MouseTrigger)trigger : MouseTrigger.MiddleButton,
+                        ? (MouseTrigger)trigger : MouseTrigger.HoldLeftPressRight,
                     ChordTimeoutMs = Math.Clamp(ReadInt(root, "chordTimeoutMs", 800), 200, 2000),
                     MovementThreshold = Math.Clamp(ReadInt(root, "movementThreshold", 12), 2, 100),
 
@@ -114,7 +114,7 @@ namespace Action_Wheel.Services
 
     public sealed class TriggerPreferences
     {
-        public MouseTrigger Trigger { get; init; } = MouseTrigger.MiddleButton;
+        public MouseTrigger Trigger { get; init; } = MouseTrigger.HoldLeftPressRight;
         public int ChordTimeoutMs { get; init; } = 800;
         public int MovementThreshold { get; init; } = 12;
 

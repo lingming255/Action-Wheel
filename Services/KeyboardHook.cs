@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace Action_Wheel.Services
 {
     /// <summary>
-    /// Low-level global keyboard hook used only to catch Escape while the radial menu is open.
+    /// Low-level global keyboard hook used to catch Escape and the hold-to-open information wheel.
     /// The menu window carries WS_EX_NOACTIVATE, so it never takes keyboard focus and cannot
     /// receive a KeyDown of its own - the key has to be caught system-wide instead.
     /// </summary>
@@ -66,6 +66,7 @@ namespace Action_Wheel.Services
         /// </summary>
         public Func<bool>? EscapePressed { get; set; }
         public Func<bool>? EmergencyTriggerPressed { get; set; }
+        public Func<bool>? EmergencyTriggerReleased { get; set; }
         private bool _swallowEmergencyKeyUp;
 
         public KeyboardHook()
@@ -101,6 +102,7 @@ namespace Action_Wheel.Services
 
         public void Stop()
         {
+            _swallowEmergencyKeyUp = false;
             if (_hookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_hookID);
@@ -152,6 +154,14 @@ namespace Action_Wheel.Services
                     }
 
                     if (data.vkCode == VK_SPACE
+                        && _swallowEmergencyKeyUp)
+                    {
+                        // Space repeats while held. Once the first press was consumed, repeats must
+                        // not leak into the foreground text field.
+                        return true;
+                    }
+
+                    if (data.vkCode == VK_SPACE
                         && IsDown(VK_CONTROL) && IsDown(VK_MENU)
                         && EmergencyTriggerPressed?.Invoke() == true)
                     {
@@ -167,7 +177,14 @@ namespace Action_Wheel.Services
 
                     if (data.vkCode == VK_SPACE)
                     {
-                        _swallowEmergencyKeyUp = false;
+                        try
+                        {
+                            EmergencyTriggerReleased?.Invoke();
+                        }
+                        finally
+                        {
+                            _swallowEmergencyKeyUp = false;
+                        }
                         return true;
                     }
                 }

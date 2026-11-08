@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Action_Wheel.Overlay;
@@ -20,13 +20,24 @@ namespace Action_Wheel.Services
         private readonly DispatcherQueueTimer _hookHealthTimer;
         private RadialMenu? _currentMenu;
         private IReadOnlyList<ActionItem> _actions;
+        private IReadOnlyList<ActionItem> _quickInfoActions = Array.Empty<ActionItem>();
+        private int _quickInfoPage;
+        public string QuickInfoStatus { get; private set; } = string.Empty;
 
-        // Drag gesture: where the middle button went down, and which button the cursor is currently
-        // pointing at. The tag is cached so a mouse move only reaches the UI thread when the choice
-        // actually changes - the hook runs for every movement on the system.
+        private void ReloadQuickInfo()
+        {
+            _quickInfoActions = QuickInfoCatalog.Load(out string error, page: _quickInfoPage);
+            QuickInfoStatus = $"Quick Info: {_quickInfoActions.Count - 1} sectors\n{QuickInfoCatalog.FilePath}\n"
+                + (System.IO.File.Exists(QuickInfoCatalog.FilePath) ? "Catalog" : "Folder discovery")
+                + (error.Length > 0 ? $"\n{error}" : string.Empty);
+        }
+
+        // Drag gesture origins are in physical screen pixels. Selection belongs to the overlay,
+        // which hit-tests every movement, including moves within the same main-ring sector.
         private PointInt32 _gestureOrigin;
         private bool _gestureActive;
-        private int? _gestureTag;
+        private PointInt32 _keyboardGestureOrigin;
+        private bool _keyboardGestureActive;
         private IntPtr _targetWindow;
 
         private PointInt32? _lastHealthCursor;
@@ -56,6 +67,8 @@ namespace Action_Wheel.Services
         {
             Configuration = ActionConfig.LoadDetailed();
             _actions = Configuration.Actions;
+            QuickInfoCatalog.EnsureDirectory();
+            ReloadQuickInfo();
             ActiveProfileLabel = ActiveProfileSettings.Load();
 
             _mouseHook = new MouseHook();
@@ -64,9 +77,11 @@ namespace Action_Wheel.Services
             _mouseHook.AnyButtonDown += OnAnyButtonDown;
             _mouseHook.MouseMoved += OnMouseMoved;
             _mouseHook.MiddleUp += OnMiddleUp;
+            _mouseHook.GestureCanceled += OnGestureCanceled;
 
             _keyboardHook = new KeyboardHook { EscapePressed = OnEscapePressed };
             _keyboardHook.EmergencyTriggerPressed = OnEmergencyTrigger;
+            _keyboardHook.EmergencyTriggerReleased = OnEmergencyTriggerReleased;
 
             _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
             _hookHealthTimer = _dispatcherQueue.CreateTimer();
@@ -139,6 +154,7 @@ namespace Action_Wheel.Services
         public void Stop()
         {
             _gestureActive = false;
+            _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
             _mouseHook.Stop();
             _keyboardHook.Stop();
@@ -200,6 +216,7 @@ namespace Action_Wheel.Services
             ApplyTriggerSettings();
             Configuration = ActionConfig.LoadDetailed();
             _actions = Configuration.Actions;
+            ReloadQuickInfo();
             ActiveProfileLabel = ActiveProfileSettings.Load();
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -313,7 +330,6 @@ namespace Action_Wheel.Services
             // mouse path produces the button-up that disarms it again - see OnEmergencyTrigger.
             _gestureOrigin = position;
             _gestureActive = true;
-            _gestureTag = null;
             _mouseHook.TrackMovement = true;
 
             OpenMenuAt(position);
@@ -325,6 +341,9 @@ namespace Action_Wheel.Services
         /// with.
         /// </summary>
         private void OpenMenuAt(PointInt32 position)
+            => OpenMenuAt(position, _actions);
+
+        private void OpenMenuAt(PointInt32 position, IReadOnlyList<ActionItem> actions, bool quickInfo = false)
         {
             _targetWindow = ActionDispatcher.CaptureTargetWindow();
 
@@ -337,7 +356,15 @@ namespace Action_Wheel.Services
                     // Close any existing menu first
                     CloseCurrentMenu();
 
-                    var menu = new RadialMenu(_actions, _appearance);
+                    // Read after the hook returns. Each opening sees the latest Markdown snapshot.
+                    if (quickInfo)
+                    {
+                        ReloadQuickInfo();
+                        actions = _quickInfoActions;
+                        ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    var menu = new RadialMenu(actions, _appearance);
                     _currentMenu = menu;
 
                     // Only clear the reference if it still points at this exact menu. The old menu's
@@ -348,12 +375,17 @@ namespace Action_Wheel.Services
                     {
                         if (ReferenceEquals(_currentMenu, menu))
                             _currentMenu = null;
+                        // Every way out of a gesture closes its menu, so this is the one place a
+                        // cancel, Esc, a fired hold or an action can never leave the screen grey.
+                        if (ReferenceEquals(_gradedMenu, menu))
+                            EndGrade();
                     };
 
                     menu.ActionInvoked += OnActionInvoked;
 
                     // Position the menu centered at cursor
                     menu.ShowAtPosition(position);
+                    BeginGrade(menu, position);
                 }
                 catch (Exception ex)
                 {
@@ -368,40 +400,36 @@ namespace Action_Wheel.Services
         /// </summary>
         private void OnMouseMoved(object? sender, PointInt32 position)
         {
-            if (!_gestureActive)
+            if (_gestureActive)
+            {
+                var mouseTag = RingGeometry.TagForDirection(
+                    position.X - _gestureOrigin.X,
+                    position.Y - _gestureOrigin.Y);
+
+                _dispatcherQueue.TryEnqueue(() =>
+                {
+                    // Radius and child choice can change without crossing a main-ring sector.
+                    _currentMenu?.UpdateGesture(position, mouseTag, allowHold: true);
+                });
+                return;
+            }
+
+            if (!_keyboardGestureActive)
                 return;
 
-            var tag = RingGeometry.TagForDirection(
-                position.X - _gestureOrigin.X,
-                position.Y - _gestureOrigin.Y);
-
-            // Only cross to the UI thread when the choice changes, not on every pixel of movement.
-            if (tag == _gestureTag)
-                return;
-
-            _gestureTag = tag;
+            var keyboardTag = RingGeometry.TagForDirection(
+                position.X - _keyboardGestureOrigin.X,
+                position.Y - _keyboardGestureOrigin.Y);
 
             _dispatcherQueue.TryEnqueue(() =>
             {
-                _currentMenu?.HighlightTag(tag);
-
-                // The hold countdown and its on-screen indicator both live on RadialMenu, which a
-                // direct click already reaches on its own (WinUI routes the press straight to the
-                // button); ShowHoldProgress/HideHoldProgress is what lets this gesture path - cursor
-                // movement resolved against RingGeometry.TagForDirection, entirely outside WinUI's
-                // own pointer routing - reach the exact same countdown instead of running a second,
-                // separate one that would race it to the same InvokeTag(tag, hold: true) call.
-                if (tag is int t)
-                    _currentMenu?.ShowHoldProgress(t);
-                else
-                    _currentMenu?.HideHoldProgress();
+                _currentMenu?.UpdateGesture(position, keyboardTag, allowHold: false);
             });
         }
 
         /// <summary>
         /// Completes the drag gesture. Released past the dead zone, the highlighted button runs;
-        /// released without moving, this was just the click that opened the menu, so the menu stays
-        /// up and can be used by clicking.
+        /// released in the centre plays the brief visual refresh.
         /// </summary>
         private void OnMiddleUp(object? sender, PointInt32 position)
         {
@@ -415,8 +443,6 @@ namespace Action_Wheel.Services
                 position.X - _gestureOrigin.X,
                 position.Y - _gestureOrigin.Y);
 
-            _gestureTag = null;
-
             _dispatcherQueue.TryEnqueue(() =>
             {
                 // Ends whatever countdown ShowHoldProgress started, regardless of whether a tag was
@@ -425,9 +451,20 @@ namespace Action_Wheel.Services
                 // still pressed - see its remarks), the menu and _currentMenu are already gone by the
                 // time this runs, and both calls below are then safe no-ops.
                 _currentMenu?.HideHoldProgress();
+                if (_currentMenu?.TryInvokeGroupChildAt(position) == true)
+                    return;
                 if (tag != null)
                     _currentMenu?.InvokeTag(tag.Value);
+                else
+                    PlayRefresh();
             });
+        }
+
+        private void OnGestureCanceled(object? sender, EventArgs e)
+        {
+            _gestureActive = false;
+            _mouseHook.TrackMovement = false;
+            _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
         }
 
         /// <summary>
@@ -442,6 +479,9 @@ namespace Action_Wheel.Services
             if (menu == null || menu.ContainsScreenPoint(position))
                 return;
 
+            _gestureActive = false;
+            _keyboardGestureActive = false;
+            _mouseHook.TrackMovement = false;
             _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
         }
 
@@ -453,18 +493,34 @@ namespace Action_Wheel.Services
             if (_currentMenu == null)
                 return false;
 
+            _gestureActive = false;
+            _keyboardGestureActive = false;
+            _mouseHook.TrackMovement = false;
             _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
             return true;
         }
 
         private async void OnActionInvoked(object? sender, ActionItem action)
         {
+            if (action.Kind == ActionKind.Function && action.Value == QuickInfoCatalog.NextPage)
+            {
+                _quickInfoPage++;
+                if (MouseHook.TryGetCursorPosition(out var cursor))
+                {
+                    _keyboardGestureOrigin = cursor;
+                    OpenMenuAt(cursor, _quickInfoActions, quickInfo: true);
+                }
+                return;
+            }
             // The menu has already closed itself, but the window teardown is still in flight.
             // Give composition/focus a short, deterministic window to settle. Dispatcher priority
             // alone is not enough: teardown can continue in the compositor after the UI queue is
             // empty, causing occasional shortcuts to land while the overlay is disappearing.
             await Task.Delay(40).ConfigureAwait(false);
-            ActionDispatcher.Execute(action, _targetWindow);
+            if (action.Kind == ActionKind.CopyText)
+                _dispatcherQueue.TryEnqueue(() => ActionDispatcher.Execute(action));
+            else
+                ActionDispatcher.Execute(action, _targetWindow);
         }
 
         /// <summary>
@@ -488,21 +544,16 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// Ctrl+Alt+Space, the way in when the configured mouse trigger is unavailable.
+        /// Ctrl+Alt+Space opens the information wheel as a hold-to-open gesture. The resources are
+        /// already the expanded layer, so the pointer only has to travel to the desired item.
         /// </summary>
         /// <remarks>
-        /// Deliberately does not go through OnMiddleClick. That method arms the drag gesture, and
-        /// the only thing that disarms it is MiddleUp - which the keyboard never produces. Arming it
-        /// here left TrackMovement on indefinitely, so the mouse hook ran trigonometry on every
-        /// mouse movement in every application until the user happened to press and release the
-        /// middle button.
-        ///
         /// Returns true only when the chord actually did something, so Ctrl+Alt+Space still reaches
-        /// the foreground app otherwise - it is a live shortcut in several IMEs and IDEs.
+        /// the foreground app if the wheel is already occupied or the cursor cannot be read.
         /// </remarks>
         private bool OnEmergencyTrigger()
         {
-            if (_currentMenu != null)
+            if (_currentMenu != null || _gestureActive || _keyboardGestureActive)
                 return false;
 
             if (!MouseHook.TryGetCursorPosition(out var position))
@@ -510,8 +561,98 @@ namespace Action_Wheel.Services
                 return false;
             }
 
-            OpenMenuAt(position);
+            _quickInfoPage = 0;
+            _keyboardGestureOrigin = position;
+            _keyboardGestureActive = true;
+            _mouseHook.TrackMovement = true;
+            OpenMenuAt(position, _quickInfoActions, quickInfo: true);
             return true;
+        }
+
+        private bool OnEmergencyTriggerReleased()
+        {
+            if (!_keyboardGestureActive)
+                return false;
+
+            _keyboardGestureActive = false;
+            if (!_gestureActive)
+                _mouseHook.TrackMovement = false;
+
+            var position = MouseHook.TryGetCursorPosition(out var current)
+                ? current : _keyboardGestureOrigin;
+            var tag = RingGeometry.TagForDirection(
+                position.X - _keyboardGestureOrigin.X,
+                position.Y - _keyboardGestureOrigin.Y);
+
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                if (_currentMenu?.TryInvokeGroupChildAt(position) == true)
+                    return;
+                if (tag is int selected && selected < _quickInfoActions.Count
+                    && _quickInfoActions[selected].Kind != ActionKind.Group)
+                    _currentMenu?.InvokeTag(selected);
+                else if (tag == null)
+                    PlayRefresh();
+                else
+                    CloseCurrentMenu();
+            });
+
+            return true;
+        }
+
+        /// <summary>The menu whose gesture currently holds the screen grey, if any.</summary>
+        private RadialMenu? _gradedMenu;
+        private Task<RefreshFrame?>? _refreshFrame;
+
+        /// <summary>
+        /// Starts the hold half of the refresh: capture the monitor for the mosaic, then grey the
+        /// screen once the capture has the colour it needs. UI thread.
+        /// </summary>
+        private void BeginGrade(RadialMenu menu, PointInt32 position)
+        {
+            _gradedMenu = menu;
+            _refreshFrame = RefreshFrame.CaptureAsync(position, () => _dispatcherQueue.TryEnqueue(() =>
+            {
+                // The gesture may already have ended while the capture ran.
+                if (ReferenceEquals(_gradedMenu, menu))
+                    ScreenGrade.Lower();
+            }));
+        }
+
+        /// <summary>Restores colour and hands back the gesture's mosaic. UI thread.</summary>
+        private Task<RefreshFrame?>? EndGrade()
+        {
+            var frame = _refreshFrame;
+            _gradedMenu = null;
+            _refreshFrame = null;
+            ScreenGrade.Restore();
+            return frame;
+        }
+
+        /// <summary>
+        /// A centre release: the analyzed pixel layers sweep diagonally while colour returns under
+        /// the clearing grey cover. Usually capture and analysis are already complete; a faster
+        /// release waits for them rather than skipping the effect.
+        /// </summary>
+        /// <remarks>
+        /// The screen stays grey until the menu has its grey still of the monitor on screen and
+        /// calls back. The colour matrix can only change the whole desktop at once, so the still
+        /// clears in an image-guided diagonal wave over the re-coloured desktop.
+        /// If the menu closes first, its Closed handler restores colour instead.
+        /// </remarks>
+        private async void PlayRefresh()
+        {
+            var menu = _currentMenu;
+            if (menu == null)
+                return;
+
+            var pending = ReferenceEquals(_gradedMenu, menu) ? _refreshFrame : null;
+            RefreshFrame? frame = pending == null ? null : await pending;
+            menu.PlayRefresh(frame, () =>
+            {
+                if (ReferenceEquals(_gradedMenu, menu))
+                    EndGrade();
+            });
         }
 
         /// <summary>
@@ -557,6 +698,7 @@ namespace Action_Wheel.Services
             _hookHealthTimer.Stop();
             _mouseHook.Dispose();
             _keyboardHook.Dispose();
+            ScreenGrade.Shutdown();
             GC.SuppressFinalize(this);
         }
     }

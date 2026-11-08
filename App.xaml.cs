@@ -120,7 +120,7 @@ namespace Action_Wheel
             _trayIcon.ExitRequested += (s, e) => ExitApp();
             _trayIcon.ProfileSelected += (s, name) => _launcherService?.RequestProfileSwitch(name);
 
-            if (!_trayIcon.Create("Action Wheel - press the middle mouse button to open the menu"))
+            if (!_trayIcon.Create("Action Wheel - hold left and press right, or hold Ctrl+Alt+Space for Quick Info"))
             {
                 _trayIcon.Dispose();
                 _trayIcon = null;

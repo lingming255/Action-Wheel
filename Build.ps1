@@ -27,9 +27,10 @@
     VerifyFormat    - dotnet format --verify-no-changes against .editorconfig
     VerifyConfigBackup - regression-check ConfigBackup.TryImport's rejection paths (entry count,
                       entry size, unrecognised entry names, zip-slip)
+    VerifyRefresh   - check refresh layers, deterministic output and radial cluster timing
     Clean           - delete bin\ and obj\
     All             - Restore, VerifyBindings, VerifyRoundTrip, VerifyChordGate, VerifyVersionSync,
-                      VerifyFormat, VerifyConfigBackup, Debug, Release, Publish
+                      VerifyFormat, VerifyConfigBackup, VerifyRefresh, Debug, Release, Publish
 
 .PARAMETER Platform
     x64 (default), x86 or ARM64. Sets both the MSBuild platform and the runtime identifier.
@@ -42,7 +43,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Restore', 'Debug', 'Release', 'Publish', 'Package', 'Installer', 'VerifyBindings', 'VerifyRoundTrip', 'VerifyChordGate', 'VerifyVersionSync', 'VerifyFormat', 'VerifyConfigBackup', 'Clean', 'All')]
+    [ValidateSet('Restore', 'Debug', 'Release', 'Publish', 'Package', 'Installer', 'VerifyBindings', 'VerifyRoundTrip', 'VerifyChordGate', 'VerifyVersionSync', 'VerifyFormat', 'VerifyConfigBackup', 'VerifyRefresh', 'Clean', 'All')]
     [string]$Task = 'Debug',
 
     [ValidateSet('x64', 'x86', 'ARM64')]
@@ -139,6 +140,12 @@ function Invoke-VerifyFormat {
 function Invoke-VerifyConfigBackup {
     Write-Step 'Verifying ConfigBackup.TryImport rejection paths'
     $tool = Join-Path $root 'Tools\ConfigBackupCheck\ConfigBackupCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $tool, '--nologo')
+}
+
+function Invoke-VerifyRefresh {
+    Write-Step 'Verifying refresh analysis layers and radial cluster timing'
+    $tool = Join-Path $root 'Tools\RefreshAnalyzerCheck\RefreshAnalyzerCheck.csproj'
     Invoke-Dotnet @('run', '--project', $tool, '--nologo')
 }
 
@@ -287,6 +294,7 @@ function Invoke-Clean {
         'bin', 'obj', 'ActionWheel.Core\bin', 'ActionWheel.Core\obj',
         'Tools\RoundTripCheck\bin', 'Tools\RoundTripCheck\obj',
         'Tools\ChordGateCheck\bin', 'Tools\ChordGateCheck\obj',
+        'Tools\RefreshAnalyzerCheck\bin', 'Tools\RefreshAnalyzerCheck\obj',
         'Tools\ConfigBackupCheck\bin', 'Tools\ConfigBackupCheck\obj'
     )) {
         $path = Join-Path $root $directory
@@ -310,6 +318,7 @@ switch ($Task) {
     'VerifyVersionSync' { Invoke-VerifyVersionSync }
     'VerifyFormat' { Invoke-VerifyFormat }
     'VerifyConfigBackup' { Invoke-VerifyConfigBackup }
+    'VerifyRefresh' { Invoke-VerifyRefresh }
     'Clean' { Invoke-Clean }
     'All' {
         Invoke-Restore
@@ -319,6 +328,7 @@ switch ($Task) {
         Invoke-VerifyVersionSync
         Invoke-VerifyFormat
         Invoke-VerifyConfigBackup
+        Invoke-VerifyRefresh
         Invoke-Build 'Debug'
         Invoke-Build 'Release'
         Invoke-Publish

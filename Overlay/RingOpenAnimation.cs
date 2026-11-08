@@ -158,7 +158,7 @@ namespace Action_Wheel.Overlay
             double scale = metrics.DurationScale;
 
             Fade(storyboard, container, 0, 0, 90, scale);
-            Scale(storyboard, container, 0.85, 0, 120, scale);
+            Scale(storyboard, container, 0.86, 0, 120, scale);
 
             Fade(storyboard, buttons[0], 0, 0, 80, scale);
             for (int tag = 1; tag < buttons.Count; tag++)

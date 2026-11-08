@@ -4,9 +4,9 @@
 
 # Action Wheel
 
-**A radial "pie" menu for Windows — one middle click puts any shortcut or app right under your cursor.**
+**A radial "pie" menu for Windows — a left+right chord puts any shortcut or app right under your cursor.**
 
-A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor whenever you press the middle mouse button, anywhere in Windows.
+A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor when you hold the left mouse button and press the right mouse button, anywhere in Windows.
 
 [![License: MIT](https://img.shields.io/github/license/cmm-cmm/Action-Wheel?color=blue)](LICENSE.txt)
 [![Latest tag](https://img.shields.io/github/v/tag/cmm-cmm/Action-Wheel?label=version&color=success)](https://github.com/cmm-cmm/Action-Wheel/tags)
@@ -36,9 +36,9 @@ A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor wheneve
 ### 🖱️ Interaction
 
 - **Global trigger** — a low-level `WH_MOUSE_LL` hook watches for the trigger system-wide. The click is *swallowed*, so the app underneath doesn't also get it (no stray browser tabs or autoscroll).
-- **Configurable trigger** — the middle mouse button by default, but Settings can bind it to a two-button chord instead (hold right, press left, or the reverse — each with its own timeout and movement tolerance) or to side buttons 4/5. Ctrl+Alt+Space always remains available as an emergency trigger.
+- **Configurable trigger** — hold left and press right by default. Settings can switch to the reverse chord, middle button, or side buttons 4/5. Hold `Ctrl+Alt+Space` for the separate Quick Info wheel; hover a Markdown topic, move onto a child, and release Space to copy it. Images and other resources still open normally.
 - **Opens at the cursor** — the menu centres itself on the pointer and is clamped to the current monitor's work area.
-- **Pick by gesture** — keep the trigger held, flick towards a button and let go. Faster than aiming, and it is what a radial menu is for. Release without moving and the menu simply stays open to be clicked.
+- **Pick by gesture** — keep the first mouse button held, move towards a sector, and release the second button to execute. Releasing inside the centre plays a brief screen ripple refresh; releasing the first button first cancels the gesture.
 - **Hold for a second action** — press and hold a button for about half a second instead of clicking it, and it runs a separate, optional action. Configured per button, right below its main one.
 - **Dismiss any way you like** — click a button, click anywhere off the buttons, click elsewhere on screen, or press <kbd>Esc</kbd>.
 
@@ -98,8 +98,9 @@ Self-contained publishes are large (roughly 250–300 MB). That is normal for a 
 ## Using it
 
 1. Run the app. The main window reports whether the global hooks are actually installed, and whether `actions.json` was usable — the menu itself works whether or not the window is open.
-2. Press the **middle mouse button** anywhere.
-3. Click a button to run its action, or dismiss with <kbd>Esc</kbd> / a click elsewhere.
+2. Hold the **left mouse button**, then press the **right mouse button** anywhere.
+3. Move to a sector and release the right button to run its action. Release in the centre for the refresh effect; release left first, or press <kbd>Esc</kbd>, to cancel.
+4. For Quick Info, hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>, hover a topic, move onto an information button, and release <kbd>Space</kbd> to copy. See [Quick Info](Doc/quick-info.md) for the Markdown catalog.
 4. Right-click the tray icon to open the main window, open the settings window, open `actions.json` in an editor, reload the config, turn **Start with Windows** on or off, or quit.
 
 ## Configuring the buttons

@@ -68,6 +68,7 @@ namespace Action_Wheel.Services
         private IntPtr _hookID = IntPtr.Zero;
         private readonly LowLevelMouseProc _proc;
         private readonly ChordGate _chordGate = new();
+        private ChordTrigger _activeChord;
         public long LastCallbackTick { get; private set; }
 
         public MouseTrigger Trigger { get; set; } = MouseTrigger.MiddleButton;
@@ -98,6 +99,9 @@ namespace Action_Wheel.Services
 
         /// <summary>Raised when the middle mouse button is released. Completes a drag gesture.</summary>
         public event EventHandler<PointInt32>? MiddleUp;
+
+        /// <summary>Raised when the first button of an active chord is released before the trigger.</summary>
+        public event EventHandler? GestureCanceled;
 
         /// <summary>
         /// Raised on cursor movement, but only while <see cref="TrackMovement"/> is set.
@@ -150,6 +154,7 @@ namespace Action_Wheel.Services
         /// </summary>
         public void Stop()
         {
+            _activeChord = ChordTrigger.None;
             if (_hookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_hookID);
@@ -288,8 +293,8 @@ namespace Action_Wheel.Services
 
                     if (chordFired)
                     {
+                        _activeChord = chordTrigger;
                         MiddleClick?.Invoke(this, at);
-                        MiddleUp?.Invoke(this, at); // Chords open in click mode, not drag mode.
                     }
 
                     if (swallow)
@@ -306,8 +311,8 @@ namespace Action_Wheel.Services
 
                     if (chordFired)
                     {
+                        _activeChord = chordTrigger;
                         MiddleClick?.Invoke(this, at);
-                        MiddleUp?.Invoke(this, at); // Chords open in click mode, not drag mode.
                     }
 
                     if (swallow)
@@ -318,13 +323,37 @@ namespace Action_Wheel.Services
 
                 else if (msg == WM_LBUTTONUP)
                 {
-                    if (_chordGate.OnLeftUp())
+                    bool swallow = _chordGate.OnLeftUp();
+                    if (_activeChord == ChordTrigger.HoldRightPressLeft)
+                    {
+                        _activeChord = ChordTrigger.None;
+                        MiddleUp?.Invoke(this, at);
+                    }
+                    else if (_activeChord == ChordTrigger.HoldLeftPressRight)
+                    {
+                        _activeChord = ChordTrigger.None;
+                        GestureCanceled?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    if (swallow)
                         return true;
                 }
 
                 else if (msg == WM_RBUTTONUP)
                 {
-                    if (_chordGate.OnRightUp())
+                    bool swallow = _chordGate.OnRightUp();
+                    if (_activeChord == ChordTrigger.HoldLeftPressRight)
+                    {
+                        _activeChord = ChordTrigger.None;
+                        MiddleUp?.Invoke(this, at);
+                    }
+                    else if (_activeChord == ChordTrigger.HoldRightPressLeft)
+                    {
+                        _activeChord = ChordTrigger.None;
+                        GestureCanceled?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    if (swallow)
                         return true;
                 }
             }
