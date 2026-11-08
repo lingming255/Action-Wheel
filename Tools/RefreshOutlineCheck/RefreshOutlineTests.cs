@@ -12,14 +12,18 @@ byte[] original = (byte[])source.Clone();
 byte[] outlined = RefreshOutline.Apply(source, width, height, 1);
 Require(source.AsSpan().SequenceEqual(original), "source pigments remain available for coloured bloom");
 Require(Pixel(20, 20).SequenceEqual(Source(20, 20)), "large particle interiors retain their source colour");
-Require(Pixel(8, 18)[0] == 255 && Pixel(8, 18)[1] == 255 && Pixel(8, 18)[2] == 255,
-    "large-particle outline has a white line core");
+var core = Pixel(8, 18);
+Require(core[2] == 255 && core[2] > core[1] && core[1] > core[0],
+    "large-particle outline has a bright source-coloured line core");
+Require(Math.Abs(core[0] * Source(8, 18)[2] - core[2] * Source(8, 18)[0]) < 255
+    && Math.Abs(core[1] * Source(8, 18)[2] - core[2] * Source(8, 18)[1]) < 255,
+    "outline core preserves source channel ratios instead of mixing white");
 var nearRim = Pixel(10, 18);
 Require(nearRim[2] > nearRim[1] && nearRim[1] > nearRim[0], "inner edge beside the core retains the particle hue");
 Require(nearRim[2] > Source(10, 18)[2], "coloured near-edge is brighter than the unchanged interior");
 var fine = Pixel(8, 36);
 Require(fine[2] > fine[1] && fine[1] > fine[0] && fine[0] < fine[3] * 0.6,
-    "tiny particles receive a partial white core while preserving their source hue");
+    "tiny particles retain a source-coloured highlight without becoming white");
 for (int i = 0; i < source.Length; i += 4)
 {
     Require(outlined[i + 3] == source[i + 3], "outline preserves exact coverage and transparent gaps");
@@ -31,7 +35,7 @@ byte[] scaled = new byte[width * height * 4];
 Fill(scaled, width, 8, 8, 48, 32, 24, 100, 220, 255);
 byte[] highDpi = RefreshOutline.Apply(scaled, width, height, 2);
 int dpiRim = (20 * width + 10) * 4;
-Require(highDpi[dpiRim] > outlined[(18 * width + 10) * 4], "white-core thickness follows monitor DPI");
+Require(highDpi[dpiRim] > outlined[(18 * width + 10) * 4], "bright-core thickness follows monitor DPI");
 
 foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
 {
@@ -54,7 +58,7 @@ if (args.Length == 2 && args[0] == "--export")
     File.WriteAllBytes(Path.Combine(args[1], "outlined.bgra"), outlined);
     Console.WriteLine($"Exported {width}x{height} PBGRA outline fixture.");
 }
-Console.WriteLine("Refresh outline checks passed: white core, coloured edge, silhouette, gaps, fine marks, alpha and DPI.");
+Console.WriteLine("Refresh outline checks passed: source-coloured core and edge, silhouette, gaps, fine marks, alpha and DPI.");
 
 ReadOnlySpan<byte> Pixel(int x, int y) => outlined.AsSpan((y * width + x) * 4, 4);
 ReadOnlySpan<byte> Source(int x, int y) => source.AsSpan((y * width + x) * 4, 4);

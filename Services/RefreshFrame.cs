@@ -96,8 +96,8 @@ namespace Action_Wheel.Services
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    // Preserve each particle's coloured emission: adding a white core before
-                    // preparing bloom would wash its halo towards white instead of its own hue.
+                    // Bloom comes from the original pigments; the inset outlines then boost
+                    // their local brightness while retaining the same particle hue.
                     Subject = outlinedLayers[0],
                     Background = outlinedLayers[1],
                     Boundary = outlinedLayers[2],

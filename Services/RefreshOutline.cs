@@ -41,7 +41,6 @@ namespace Action_Wheel.Services
                 distance[i] = (byte)d;
             }
 
-            int probe = Math.Max(2, (int)Math.Ceiling(2.5 * scale));
             for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
             {
@@ -50,13 +49,7 @@ namespace Action_Wheel.Services
                 double inset = (d - 1) / scale;
                 double colourRim = Math.Clamp(1 - inset / 2.5, 0, 1);
                 if (colourRim <= 0) continue;
-                double white = Math.Clamp(1.25 - inset, 0, 1);
-
-                // A 1–2 DIP mark has no wide interior to frame. Antialias its white core
-                // rather than replacing the entire coloured dot with an opaque white square.
-                if (white > 0 && (Span(x, y, 1, 0) <= 2.5 * scale
-                    || Span(x, y, 0, 1) <= 2.5 * scale))
-                    white = Math.Min(white, 0.28);
+                double core = Math.Clamp(1.25 - inset, 0, 1);
 
                 int offset = i * 4;
                 byte alpha = pixels[offset + 3];
@@ -64,30 +57,18 @@ namespace Action_Wheel.Services
                 double g = pixels[offset + 1] / (double)alpha;
                 double r = pixels[offset + 2] / (double)alpha;
                 double peak = Math.Max(r, Math.Max(g, b));
-                double lift = peak > 0 ? 1 + (1 / peak - 1) * 0.45 * colourRim : 1;
+                // Lift all three channels by the same factor. The bright line core now has
+                // exactly the particle's hue, including fine dots; no white is mixed into it.
+                double strength = Math.Max(core, 0.45 * colourRim);
+                double lift = peak > 0 ? 1 + (1 / peak - 1) * strength : 1;
                 result[offset] = Channel(b);
                 result[offset + 1] = Channel(g);
                 result[offset + 2] = Channel(r);
                 // Coverage stays identical, including every gap and translucent fine mark.
                 byte Channel(double value) => (byte)Math.Clamp(
-                    Math.Round((Math.Clamp(value * lift, 0, 1) * (1 - white) + white) * alpha), 0, alpha);
+                    Math.Round(Math.Clamp(value * lift, 0, 1) * alpha), 0, alpha);
             }
             return result;
-
-            int Span(int x, int y, int dx, int dy)
-            {
-                int length = 1;
-                for (int direction = -1; direction <= 1; direction += 2)
-                    for (int step = 1; step <= probe; step++)
-                    {
-                        int px = x + dx * step * direction, py = y + dy * step * direction;
-                        if (px < 0 || py < 0 || px >= width || py >= height
-                            || pixels[(py * width + px) * 4 + 3] == 0)
-                            break;
-                        length++;
-                    }
-                return length;
-            }
         }
     }
 }
