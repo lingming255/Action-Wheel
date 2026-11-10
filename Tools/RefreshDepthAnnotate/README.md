@@ -17,6 +17,13 @@ model `depth.json` and dimensions/meaning in `metadata.json`. Image numbers are 
 two decimals: 0 is far, 1 is near. The last clipped row/column use full display slots so
 their labels fit; the actual sample centres and clipped geometry are retained in the CSV.
 
+Appearance times use the current click-distance wave with a depth stagger of at most 240 ms.
+The default simulated click is the image centre. Pass both `-OriginX 300 -OriginY 200` to
+the PowerShell command to choose a physical pixel position; out-of-image coordinates clamp
+to the image boundary. `metadata.json` records that origin and the timing formula. Depth
+numbers and heatmap colours remain depth alone, independent of the simulated click. Existing
+exports retain the timing version recorded when they were generated.
+
 For a heatmap with a fixed 0..1 colour bar and no per-block numbers, reuse that output:
 
 ```powershell

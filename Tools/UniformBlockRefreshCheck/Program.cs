@@ -11,11 +11,13 @@ internal static class UniformBlockRefreshTests
     {
         CheckWholeBlocks();
         CheckDepthAndEnvelope();
+        CheckClickWave();
+        CheckRenderedBackgroundArrival();
         CheckTimeAndBuffers();
         CheckBloomColour();
         CheckArgumentsAndCaptureAlpha();
         CheckVisibleCompositing();
-        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, depth order, whole-block fades, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending.");
+        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, click-centred radial order, bounded depth stagger, synchronized background, whole-block fades, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending.");
     }
 
     private static void CheckVisibleCompositing()
@@ -67,7 +69,7 @@ internal static class UniformBlockRefreshTests
     {
         const int width = 813, height = 469;
         byte[] capture = Solid(width, height, new Vector3(170, 65, 30));
-        var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(79, 43));
+        var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(79, 43), width / 2, height / 2);
         var blocks = renderer.Blocks.ToArray();
         Require(blocks.Length > 100, "The native scene did not produce independent blocks.");
         byte[] frame = new byte[capture.Length], bloom = new byte[4];
@@ -104,12 +106,8 @@ internal static class UniformBlockRefreshTests
     private static void CheckDepthAndEnvelope()
     {
         var renderer = new UniformBlockRefreshRenderer(417, 235,
-            Solid(417, 235, new Vector3(95, 150, 45)), Depth(41, 25));
+            Solid(417, 235, new Vector3(95, 150, 45)), Depth(41, 25), 208, 117);
         var blocks = renderer.Blocks.ToArray();
-        double[] early = blocks.Where(block => block.Depth < .25f).Select(block => block.StartMs).Order().ToArray();
-        double[] late = blocks.Where(block => block.Depth > .75f).Select(block => block.StartMs).Order().ToArray();
-        Require(early.Length > 0 && late.Length > 0 && late[late.Length / 2] - early[early.Length / 2] > 500,
-            "Block appearances no longer scan in depth order.");
         Require(blocks.Select(block => block.StartMs).Distinct().Count() > 30,
             "Many independent blocks collapsed into one shared animation time.");
         var opacity = Enumerable.Range(0, 81)
@@ -125,6 +123,138 @@ internal static class UniformBlockRefreshTests
             "Blocks do not fade as a whole on both sides of the light pulse.");
     }
 
+    private static void CheckClickWave()
+    {
+        const int width = 137, height = 79;
+        byte[] capture = Solid(width, height, new Vector3(95, 150, 45));
+        foreach ((int originX, int originY) in new[] { (68, 39), (0, 0), (136, 78), (21, 57) })
+        {
+            var farDepth = new UniformBlockRefreshRenderer(width, height, capture,
+                new RefreshDepthMap(1, 1, [0]), originX, originY);
+            var nearDepth = new UniformBlockRefreshRenderer(width, height, capture,
+                new RefreshDepthMap(1, 1, [1]), originX, originY);
+            var farBlocks = farDepth.Blocks.ToArray();
+            var nearBlocks = nearDepth.Blocks.ToArray();
+            var ordered = farBlocks.OrderBy(block => Radius(block, originX, originY)).ToArray();
+            for (int index = 1; index < ordered.Length; index++)
+                Require(ordered[index].StartMs >= ordered[index - 1].StartMs - .001,
+                    "Equal-depth blocks do not appear in radial order from the click.");
+            Require(ordered[^1].StartMs - ordered[0].StartMs > 1400,
+                "The click wave no longer drives most of the appearance timing.");
+            Require(Radius(ordered[0], originX, originY) <= 3,
+                "The wave did not begin at a cell next to the click.");
+
+            double smallestStagger = double.MaxValue, largestStagger = 0;
+            for (int index = 0; index < farBlocks.Length; index++)
+            {
+                double stagger = nearBlocks[index].StartMs - farBlocks[index].StartMs;
+                Require(stagger >= -.001 && stagger <= 240.001,
+                    "Depth reversed the scan or overwhelmed the radial wave.");
+                smallestStagger = Math.Min(smallestStagger, stagger);
+                largestStagger = Math.Max(largestStagger, stagger);
+                Require(nearBlocks[index].StartMs >= 0 && nearBlocks[index].StartMs + 600 <= nearDepth.DurationMs,
+                    "A late block is cut off before its whole fade finishes.");
+                CheckBackgroundEnvelope(nearBlocks[index]);
+            }
+            Require(smallestStagger < largestStagger * .15 && largestStagger > 200,
+                "Depth layers are absent or create an initial hole around the click.");
+            var nearby = nearBlocks.OrderBy(block => Radius(block, originX, originY)).ElementAt(nearBlocks.Length / 10);
+            var distant = farBlocks.OrderBy(block => Radius(block, originX, originY)).ElementAt(farBlocks.Length * 9 / 10);
+            Require(nearby.StartMs < distant.StartMs,
+                "Depth delayed a nearby block behind a much more distant one.");
+        }
+
+        var left = new UniformBlockRefreshRenderer(width, height, capture,
+            new RefreshDepthMap(1, 1, [.5f]), 0, 0).Blocks.ToArray();
+        var right = new UniformBlockRefreshRenderer(width, height, capture,
+            new RefreshDepthMap(1, 1, [.5f]), width - 1, height - 1).Blocks.ToArray();
+        Require(left[0].StartMs < right[0].StartMs && right[^1].StartMs < left[^1].StartMs,
+            "Moving the click did not move the source of the wave.");
+        var clampedLeft = new UniformBlockRefreshRenderer(width, height, capture,
+            new RefreshDepthMap(1, 1, [.5f]), int.MinValue, int.MinValue).Blocks.ToArray();
+        var clampedRight = new UniformBlockRefreshRenderer(width, height, capture,
+            new RefreshDepthMap(1, 1, [.5f]), int.MaxValue, int.MaxValue).Blocks.ToArray();
+        Require(left.SequenceEqual(clampedLeft) && right.SequenceEqual(clampedRight),
+            "Out-of-monitor clicks did not clamp to the captured monitor.");
+        Require(left[^1].CellWidth < left[0].CellWidth && left[^1].CellHeight < left[0].CellHeight,
+            "The radial checks did not exercise clipped edge cells.");
+
+        foreach ((int w, int h) in new[] { (1, 1), (1, 17), (19, 1) })
+        {
+            var renderer = new UniformBlockRefreshRenderer(w, h, Solid(w, h, new Vector3(100)),
+                new RefreshDepthMap(1, 1, [1]), 0, 0);
+            foreach (var block in renderer.Blocks)
+                Require(double.IsFinite(block.StartMs) && block.StartMs >= 0
+                    && block.StartMs + 600 <= renderer.DurationMs,
+                    "A degenerate monitor produced invalid or unfinished click-wave timing.");
+        }
+        Console.WriteLine("Click-wave checks: radial ordering at four origins, bounded/de-emphasized central depth, moved and clamped sources, clipped/degenerate edges, complete tails and shared background timing.");
+    }
+
+    private static double Radius(UniformBlockRefreshRenderer.Block block, int originX, int originY)
+    {
+        double dx = block.CellLeft + (block.CellWidth - 1) * .5 - originX;
+        double dy = block.CellTop + (block.CellHeight - 1) * .5 - originY;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    private static void CheckBackgroundEnvelope(UniformBlockRefreshRenderer.Block block)
+    {
+        Require(UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs - 1) == 256
+            && UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs) == 256,
+            "Background recovery preceded its block's arrival.");
+        int previous = 256;
+        for (int age = 50; age <= 400; age += 50)
+        {
+            int current = UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs + age);
+            Require(current >= 0 && current < previous,
+                "Background recovery did not move smoothly with the arriving block.");
+            previous = current;
+        }
+        Require(previous == 0 && UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs + 600) == 0,
+            "Background did not fully restore before the block faded out.");
+    }
+
+    private static void CheckRenderedBackgroundArrival()
+    {
+        const int width = 601, height = 367;
+        byte[] capture = Solid(width, height, new Vector3(150));
+        var depth = new RefreshDepthMap(1, 1, [.5f]);
+        var geometry = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2)
+            .Blocks.ToArray();
+        // Set only the pigment sampler's 16 points to black. Unsampled gap pixels remain grey,
+        // giving visible background correction with no emitted light to contaminate the check.
+        foreach (var block in geometry)
+        for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++)
+        {
+            int px = block.CellLeft + Math.Min(block.CellWidth - 1, (int)((x + .5f) * block.CellWidth / 4));
+            int py = block.CellTop + Math.Min(block.CellHeight - 1, (int)((y + .5f) * block.CellHeight / 4));
+            Array.Clear(capture, (py * width + px) * 4, 3);
+        }
+        var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
+        Require(renderer.Blocks.ToArray().All(block => block.Colour == Vector3.Zero),
+            "The isolated background check unexpectedly emitted bloom.");
+        var target = renderer.Blocks[renderer.Blocks.Length / 2];
+        int gapX = target.CellLeft + 1, gapY = target.CellTop;
+        Require(gapY < target.Top && capture[(gapY * width + gapX) * 4] == 150,
+            "The background integration sample is not an unsampled grey gap.");
+        byte[] frame = new byte[capture.Length], bloom = new byte[4];
+        int pixel = (gapY * width + gapX) * 4;
+        renderer.Render(target.StartMs - 1, frame, bloom);
+        byte[] beforeArrival = frame.AsSpan(pixel, 4).ToArray();
+        Require(beforeArrival[3] > 0, "The isolated gap has no background correction to restore.");
+        renderer.Render(target.StartMs, frame, bloom);
+        Require(frame.AsSpan(pixel, 4).SequenceEqual(beforeArrival),
+            "Rendered gap recovery began before the block arrived.");
+        renderer.Render(target.StartMs + 200, frame, bloom);
+        Require(frame[pixel + 3] > 0 && frame[pixel + 3] < beforeArrival[3],
+            "Rendered gap did not partially recover with its arriving block.");
+        renderer.Render(target.StartMs + 400, frame, bloom);
+        Require(frame.AsSpan(pixel, 4).ToArray().All(value => value == 0),
+            "Rendered gap retained background correction after its block's recovery finished.");
+    }
+
     private static void CheckTimeAndBuffers()
     {
         foreach ((int width, int height) in new[] { (1, 1), (7, 5), (37, 19), (641, 411) })
@@ -132,7 +262,7 @@ internal static class UniformBlockRefreshTests
             byte[] capture = Scene(width, height), sourceBefore = (byte[])capture.Clone();
             var depth = Depth(17, 11);
             float[] depthBefore = (float[])depth.Values.Clone();
-            var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth);
+            var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
             Require(renderer.DurationMs == 3000 && ((IRefreshRenderer)renderer).FrameIntervalMs > 0,
                 "The intended cycle or playback interval changed.");
             byte[] a = new byte[capture.Length], b = new byte[capture.Length], clean = new byte[capture.Length], bloom = new byte[4];
@@ -184,8 +314,8 @@ internal static class UniformBlockRefreshTests
         byte[] capture = Scene(width, height), changedAlpha = (byte[])capture.Clone();
         for (int alpha = 3; alpha < changedAlpha.Length; alpha += 4) changedAlpha[alpha] ^= 255;
         var depth = Depth(17, 11);
-        var original = new UniformBlockRefreshRenderer(width, height, capture, depth);
-        var alphaChanged = new UniformBlockRefreshRenderer(width, height, changedAlpha, depth);
+        var original = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
+        var alphaChanged = new UniformBlockRefreshRenderer(width, height, changedAlpha, depth, width / 2, height / 2);
         byte[] a = new byte[capture.Length], b = new byte[capture.Length], bloom = new byte[4];
         foreach (double elapsed in new[] { 0, 450, 1100, 2100, 2999 })
         {
@@ -199,11 +329,11 @@ internal static class UniformBlockRefreshTests
         ThrowsArgument(() => original.Render(1100, a, new byte[3]), "Incomplete bloom output was accepted.");
         ThrowsArgument(() => original.Render(1100, a, new byte[8]), "Oversized bloom output was accepted.");
         Require(capture.AsSpan().SequenceEqual(before), "An invalid buffer call changed the capture.");
-        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(0, 11, [])),
+        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(0, 11, []), 0, 0),
             "Zero-sized depth was accepted.");
-        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(17, -1, [])),
+        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(17, -1, []), 0, 0),
             "Negative-sized depth was accepted.");
-        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(17, 11, new float[186])),
+        ThrowsArgument(() => new UniformBlockRefreshRenderer(width, height, capture, new RefreshDepthMap(17, 11, new float[186]), 0, 0),
             "Incomplete depth input was accepted.");
     }
 
@@ -214,7 +344,7 @@ internal static class UniformBlockRefreshTests
         foreach (Vector3 channelColour in new[] { new Vector3(200, 0, 0), new Vector3(0, 0, 200) })
         {
             byte[] capture = Solid(width, height, channelColour);
-            var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(43, 25));
+            var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(43, 25), width / 2, height / 2);
             var blocks = renderer.Blocks.ToArray();
             bool[] core = new bool[width * height];
             foreach (var block in blocks)
@@ -252,7 +382,7 @@ internal static class UniformBlockRefreshTests
         {
             byte[] capture = Scene(width, height);
             var watch = Stopwatch.StartNew();
-            var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(128, 72));
+            var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(128, 72), width / 2, height / 2);
             double prepare = watch.Elapsed.TotalMilliseconds;
             byte[] frame = new byte[capture.Length], bloom = new byte[4];
             renderer.Render(0, frame, bloom);

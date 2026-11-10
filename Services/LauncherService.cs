@@ -630,13 +630,13 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// A centre release starts the two reference depth-scan effects. Capture and learned
+        /// A centre release starts the click-centred block wave. Capture and learned
         /// depth usually prepare during the hold; a faster release waits for them.
         /// </summary>
         /// <remarks>
         /// The screen stays grey until the menu has its grey still of the monitor on screen and
         /// calls back. The colour matrix can only change the whole desktop at once; the cover
-        /// handoff hides that transition before the reference-effect playback begins.
+        /// handoff hides that transition before block playback begins.
         /// If the menu closes first, its Closed handler restores colour instead.
         /// </remarks>
         private async void PlayRefresh()

@@ -58,7 +58,7 @@ namespace Action_Wheel.Services
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    Renderer = new UniformBlockRefreshRenderer(w, h, pixels, depth),
+                    Renderer = new UniformBlockRefreshRenderer(w, h, pixels, depth, originX, originY),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

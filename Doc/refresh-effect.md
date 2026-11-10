@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current implementation: uniform blocks (2026-11-11)
+## Current implementation: click-centred uniform blocks (2026-11-11)
 
 The user chose a simpler visual after trying the reference reconstruction: each pixel block
 is one solid colour with a fixed square shape. The whole block fades in/out and changes
@@ -14,7 +14,8 @@ gain or other per-pixel animation within a block. The preceding implementation i
 backup under `bin/Backups/refresh-before-uniform-blocks-20261111`.
 
 The capture path now selects `UniformBlockRefreshRenderer`. It keeps the independent learned
-depth map, depth-order scan and approximately three-second duration. Each cell samples one
+depth map and approximately three-second duration. Distance from the original gesture click
+now leads the outward wave; depth supplies a small local timing stagger. Each cell samples one
 original-image colour and one depth value during preparation. Fixed integer rectangles are
 drawn at native output resolution; their sharp edges never pass through a low-resolution
 upsampler. The per-cell envelope is evaluated directly from elapsed time, so skipped display
@@ -24,7 +25,7 @@ Current coloured emission drives a reusable low-resolution bloom buffer. Only th
 upsampled; the native core excludes that spatially varying halo. A core's source-over layer
 has one RGB and alpha throughout its footprint, while the live background can still show
 through according to that alpha. The existing 0.3 reference LUT background grade is retained
-and restored by the depth scan; no additional exposure, white glare texture or global dimming
+and restored behind the same arriving blocks; no additional exposure, white glare texture or global dimming
 is added. All effects are composed into one native PBGRA image with a bounded worker and one
 acknowledged upload, using the existing cover handoff and shared close timer.
 
@@ -35,20 +36,36 @@ the static-input and independent-depth limitations below also apply to this vers
 
 The native grid uses an even cell size near `0.0181 * min(width,height)` (minimum four pixels),
 with a small fixed inset. Each cell averages 16 capture samples for its pigment and samples
-depth at its centre. The same RGB proportions receive a fixed brightness lift. Start time is
-`140 + depth * 2100` ms; each block lasts 600 ms, fades in over 100 ms and fades out from
+depth at its centre. The same RGB proportions receive a fixed brightness lift. The physical
+click, relative to the captured monitor, is passed explicitly from `RefreshFrame`. Radius `r`
+is the distance to the cell's physical pixel centre divided by the distance to the farthest
+screen pixel corner. It is zero for a one-pixel image; origins clamp to monitor bounds.
+Start time is `140 + 1960*r + 240*depth*smoothstep(0,.15,r)` ms. Distance supplies the main
+ordering, while the existing far-before-near depth direction staggers a local band by at most
+240 ms and tapers away at the origin. Depth may reorder neighbours, but cannot reverse a radial
+separation exceeding 240 ms. Each block lasts 600 ms, fades in over 100 ms and fades out from
 220 to 600 ms. Maximum opacity is 0.88, and whole-block brightness ranges from 0.75 to 1.
 The renderer requests 60 Hz display updates and evaluates continuous elapsed time, without
 the archived pipeline's 30 Hz history simulation.
 
 The 0.3 LUT correction is prepared once using a 1280-side work buffer and encoded at native
-resolution. Its depth-restoration mask is now one scalar per cell. Bloom uses four reusable
+resolution. Its mask is one scalar per cell, fading from full correction to none over the
+first 400 ms after that same block's arrival. Core, bloom and background therefore share
+the click-centred wave. The latest possible block ends by 2940 ms, before the 3000 ms close.
+All distance calculations happen once at preparation, with no added per-frame distance work.
+Bloom uses four reusable
 RGB float grids sized according to the native cell spacing: about 5.9 MiB at 1080p or 4.7 MiB
 at 4K. The additional retained native background correction is about 7.9/31.6 MiB respectively;
 capture/playback/UI buffers and the depth model are additional. The construction-only work
 textures and encoder can be collected afterward. No full-screen buffer is allocated per frame.
 
-### Uniform-block validation (2026-11-11)
+Before this timing change, the clean depth-only uniform-block version was preserved at
+`archive/refresh-before-click-depth-wave-20261111` (`650e8da`; runtime from `d88a9cf`).
+`bin/Backups/refresh-before-click-depth-wave-20261111` contains source ZIP, complete runtime
+and local models, with copied files hash-verified. The annotation helper accepts an optional
+physical click and records its new timing formula; previously exported depth plots are unchanged.
+
+### Uniform-block validation before click timing (2026-11-11)
 
 All six `Build.ps1 -Task VerifyRefresh` suites passed. New checks cover 12 whole native core
 rectangles pixel-for-pixel, hard boundary samples, independent depth timing, whole-block fades,
@@ -76,6 +93,30 @@ Debug built with zero warnings/errors and Release publishing completed. The publ
 and remained alive for five seconds. Published/deployed SHA-256 matched; the running path and
 enabled startup entry both point to the usual `quick-info-win-x64` executable. No desktop
 animation was automatically triggered; visual acceptance remains with the user.
+
+### Click-wave validation (2026-11-11)
+
+All six refresh suites passed again, and Debug built with zero warnings/errors. The active
+renderer checks now cover equal-depth radial order at four centre/corner/off-centre clicks,
+moving/clamping the source, depth stagger bounded to 240 ms and attenuated near the click,
+clipped edge cells, 1x1 and single-row/column inputs, and complete fades before close. A real
+rendered-gap check isolates background correction from emitted bloom and verifies no recovery
+before arrival, partial recovery at age 200 ms and full recovery at age 400 ms. Existing uniform
+core, hard-edge, compositing, PBGRA, stateless-time and cancellation checks remain passing.
+The annotation helper ran the actual model with default-centre and explicit clamped-corner
+origins, exported different arrival times, and rejected an unpaired coordinate.
+
+Release active-frame p50/p95 measured 4.67/5.71 ms at native 1080p and 11.56/14.20 ms at 4K,
+with maxima of 6.13/20.08 ms and about 51 KiB of managed allocations per five frames. These
+synthetic renderer measurements exclude capture, depth inference and UI upload. Read-only
+review found no actionable issue; visual propagation/layering remains user acceptance.
+
+Release publish completed at `refresh-click-depth-wave-20261111-win-x64`. Its executable
+was copied to the usual `quick-info-win-x64` directory, restarted and remained alive for
+five seconds. Published/deployed SHA-256 matched
+`4AF315D951EC2C2F6BA370141DE834329926F3809D2931703FB178E11450205B`;
+the running path and enabled startup entry both point to that usual executable. No desktop
+effect was automatically triggered.
 
 ## Archived implementation: the two reference pipelines (2026-11-10)
 

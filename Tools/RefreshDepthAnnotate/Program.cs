@@ -7,8 +7,8 @@ using System.Text;
 using System.Text.Json;
 using Action_Wheel.Services;
 
-if (args.Length != 2)
-    throw new ArgumentException("Usage: RefreshDepthAnnotate <input image> <output folder>");
+if (args.Length is not (2 or 4))
+    throw new ArgumentException("Usage: RefreshDepthAnnotate <input image> <output folder> [origin X origin Y]");
 string input = Path.GetFullPath(args[0]), output = Path.GetFullPath(args[1]);
 Directory.CreateDirectory(output);
 using var original = new Bitmap(input);
@@ -16,6 +16,10 @@ using var capture = new Bitmap(original.Width, original.Height, PixelFormat.Form
 using (Graphics graphics = Graphics.FromImage(capture))
     graphics.DrawImageUnscaled(original, 0, 0);
 int width = capture.Width, height = capture.Height;
+int originX = args.Length == 4 ? int.Parse(args[2], CultureInfo.InvariantCulture) : (width - 1) / 2;
+int originY = args.Length == 4 ? int.Parse(args[3], CultureInfo.InvariantCulture) : (height - 1) / 2;
+originX = Math.Clamp(originX, 0, width - 1);
+originY = Math.Clamp(originY, 0, height - 1);
 var bits = capture.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
 byte[] bgra = new byte[checked(width * height * 4)];
 try
@@ -27,7 +31,7 @@ finally { capture.UnlockBits(bits); }
 
 // Use the application's real preprocessing, model and block sampling, without approximations.
 RefreshDepthMap depth = RefreshDepthEstimator.Estimate(bgra, width, height);
-var renderer = new UniformBlockRefreshRenderer(width, height, bgra, depth);
+var renderer = new UniformBlockRefreshRenderer(width, height, bgra, depth, originX, originY);
 var blocks = renderer.Blocks.ToArray();
 int cell = blocks.Max(block => block.CellWidth);
 int columns = blocks.Select(block => block.CellLeft).Distinct().Count();
@@ -53,9 +57,12 @@ var metadata = new {
     Blocks = blocks.Length, ModelWidth = depth.Width, ModelHeight = depth.Height,
     MinimumBlockDepth = blocks.Min(block => block.Depth), MaximumBlockDepth = blocks.Max(block => block.Depth),
     Meaning = "Relative inverse depth: 0 far, 1 near; cell centre sampled by actual renderer",
-    StartTime = "140 + 2100 * depth milliseconds",
+    OriginX = originX, OriginY = originY,
+    OriginDefault = args.Length == 2 ? "Image centre; pass X Y to simulate a specific click" : "Explicit physical pixel coordinates (clamped to image)",
+    StartTime = "140 + 1960 * radius + 240 * depth * smoothstep(0, 0.15, radius) milliseconds",
+    Radius = "Distance from click to physical cell centre, divided by distance to farthest screen pixel corner; 0 for a 1x1 image",
     Padding = "Right/bottom partial cells are displayed as full slots; samples still use actual clipped centres",
-    RendererBaselineCommit = "d88a9cf"
+    TimingVersion = "click-distance-depth-v1"
 };
 File.WriteAllText(Path.Combine(output, "metadata.json"), JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine(JsonSerializer.Serialize(metadata));
