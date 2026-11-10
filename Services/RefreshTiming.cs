@@ -24,7 +24,7 @@ namespace Action_Wheel.Services
         /// <summary>Slow an original 350 ms animation time without changing its relative rhythm.</summary>
         internal static double Scale(double milliseconds) => milliseconds * TimeScale;
 
-        /// <summary>Radial arrival at a physical monitor position, independent of render batches.</summary>
+        /// <summary>Circular reference timing; live gestures use a shared <see cref="RefreshWavefront"/>.</summary>
         internal static double FrontAt(double x, double y, int width, int height, int originX, int originY)
         {
             if (width <= 0 || height <= 0)

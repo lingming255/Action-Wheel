@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../Services/RefreshAnalyzer.cs" Link="RefreshAnalyzer.cs" />
     <Compile Include="../../Services/RefreshTiming.cs" Link="RefreshTiming.cs" />
+    <Compile Include="../../Services/RefreshWavefront.cs" Link="RefreshWavefront.cs" />
   </ItemGroup>
 </Project>

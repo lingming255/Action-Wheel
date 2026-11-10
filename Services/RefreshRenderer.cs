@@ -26,7 +26,8 @@ namespace Action_Wheel.Services
             RefreshEnvelope Envelope, LightSample[] Light);
 
         public RefreshRenderer(int width, int height, int tile, double scale, int originX, int originY,
-            byte[] grey, byte[][] originalLayers, byte[][] outlinedLayers, RefreshParticle[] particles)
+            byte[] grey, byte[][] originalLayers, byte[][] outlinedLayers, RefreshParticle[] particles,
+            RefreshWavefront? wavefront = null)
         {
             if (width <= 0 || height <= 0 || tile <= 0 || !double.IsFinite(scale) || scale <= 0)
                 throw new ArgumentOutOfRangeException(nameof(width));
@@ -50,8 +51,8 @@ namespace Action_Wheel.Services
             for (int x = 0; x < width; x += tile)
             {
                 int w = Math.Min(tile, width - x), h = Math.Min(tile, height - y);
-                double front = RefreshTiming.FrontAt(x + w * 0.5, y + h * 0.5,
-                    width, height, originX, originY);
+                double front = wavefront?.FrontAt(x + w * 0.5, y + h * 0.5)
+                    ?? RefreshTiming.FrontAt(x + w * 0.5, y + h * 0.5, width, height, originX, originY);
                 cover.Add(new CoverTile(x, y, w, h, front));
             }
             _cover = cover.ToArray();

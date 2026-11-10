@@ -19,6 +19,7 @@ namespace Action_Wheel.Services
         public required int ClusterPx { get; init; }
         public required RefreshCluster[] Clusters { get; init; }
         public required RefreshParticle[] Particles { get; init; }
+        public required RefreshWavefront Wavefront { get; init; }
     }
 
     /// <summary>
@@ -67,9 +68,12 @@ namespace Action_Wheel.Services
             var subject = new byte[byteCount];
             var background = new byte[byteCount];
             var boundary = new byte[byteCount];
+            // One coherent, evolving contour drives every layer. Its RNG is independent of
+            // rasterization so adding edge variation never changes pigment geometry or colour.
+            var wavefront = new RefreshWavefront(width, height, originX, originY, seed);
             RefreshParticle[] particles = Rasterize(source, width, height, tile, columns, rows, red, green, blue,
                 labels, depth, boundaryStrength, boundaryNeighbour,
-                subject, background, boundary, seed, originX, originY);
+                subject, background, boundary, seed, wavefront);
 
             int clusterPx = tile * ClusterTiles;
             var clusters = BuildClusters(width, height, tile, columns, rows, clusterPx,
@@ -82,6 +86,7 @@ namespace Action_Wheel.Services
                 ClusterPx = clusterPx,
                 Clusters = clusters,
                 Particles = particles,
+                Wavefront = wavefront,
             };
         }
 
@@ -287,7 +292,7 @@ namespace Action_Wheel.Services
         private static RefreshParticle[] Rasterize(byte[] source, int width, int height, int tile,
             int columns, int rows, byte[] red, byte[] green, byte[] blue, int[] labels,
             float[] depth, float[] boundaryStrength, int[] boundaryNeighbour,
-            byte[] subject, byte[] background, byte[] boundary, int seed, int originX, int originY)
+            byte[] subject, byte[] background, byte[] boundary, int seed, RefreshWavefront wavefront)
         {
             var random = new Random(seed);
             var occupied = new bool[labels.Length];
@@ -384,8 +389,7 @@ namespace Action_Wheel.Services
 
             void AddParticle(int x, int y, int particleWidth, int particleHeight, RefreshPixelLayer layer)
             {
-                double start = RefreshTiming.FrontAt(x + particleWidth * 0.5, y + particleHeight * 0.5,
-                    width, height, originX, originY);
+                double start = wavefront.FrontAt(x + particleWidth * 0.5, y + particleHeight * 0.5);
                 particles.Add(new RefreshParticle(x, y, particleWidth, particleHeight, layer, start));
             }
 

@@ -2,10 +2,12 @@ using Action_Wheel.Services;
 using System.Diagnostics;
 
 CheckBehaviour();
+RefreshWavefrontTests.Run();
 if (args.Length == 2 && args[0] == "--export") Export(args[1]);
 foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
 {
     const int tile = 11;
+    var wavefront = new RefreshWavefront(size.W, size.H, size.W / 2, size.H / 2, 1729);
     var grey = new byte[size.W * size.H * 4];
     var source = new byte[grey.Length];
     var fine = new byte[grey.Length];
@@ -23,7 +25,7 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
         int w = Math.Min(tile - 1, size.W - x), h = Math.Min(tile - 1, size.H - y);
         Fill(source, size.W, x, y, w, h, 40, 180, 255, 170);
         particles.Add(new RefreshParticle(x, y, w, h, RefreshPixelLayer.Subject,
-            RefreshTiming.FrontAt(x + w * 0.5, y + h * 0.5, size.W, size.H, size.W / 2, size.H / 2)));
+            wavefront.FrontAt(x + w * 0.5, y + h * 0.5)));
     }
     for (int y = 0; y < size.H; y += 3)
     for (int x = 0; x < size.W; x += 3)
@@ -32,12 +34,12 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
         int w = Math.Min(2, size.W - x), h = Math.Min(2, size.H - y);
         Fill(fine, size.W, x, y, w, h, 40, 180, 255, 70);
         particles.Add(new RefreshParticle(x, y, w, h, RefreshPixelLayer.Background,
-            RefreshTiming.FrontAt(x + w * 0.5, y + h * 0.5, size.W, size.H, size.W / 2, size.H / 2)));
+            wavefront.FrontAt(x + w * 0.5, y + h * 0.5)));
     }
     byte[][] layers = [source, fine, edge];
     var prepare = Stopwatch.StartNew();
     var renderer = new RefreshRenderer(size.W, size.H, tile, 1, size.W / 2, size.H / 2,
-        grey, layers, layers, particles.ToArray());
+        grey, layers, layers, particles.ToArray(), wavefront);
     prepare.Stop();
     var output = new byte[grey.Length];
     var bloom = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
@@ -144,7 +146,8 @@ static void Export(string directory)
     RefreshAnalysis analysis = RefreshAnalyzer.Build(source, width, height, 11, 1729, 160, 180);
     byte[][] original = [analysis.Subject, analysis.Background, analysis.Boundary];
     byte[][] outlined = original.Select(layer => RefreshOutline.Apply(layer, width, height, 1)).ToArray();
-    var renderer = new RefreshRenderer(width, height, 11, 1, 160, 180, grey, original, outlined, analysis.Particles);
+    var renderer = new RefreshRenderer(width, height, 11, 1, 160, 180,
+        grey, original, outlined, analysis.Particles, analysis.Wavefront);
     var frame = new byte[source.Length];
     var bloom = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
     Directory.CreateDirectory(directory);

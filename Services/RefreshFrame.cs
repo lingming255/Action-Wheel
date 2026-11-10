@@ -72,7 +72,7 @@ namespace Action_Wheel.Services
                 {
                     Grey = grey,
                     Renderer = new RefreshRenderer(w, h, tile, scale, originX, originY,
-                        grey, originalLayers, outlinedLayers, analysis.Particles),
+                        grey, originalLayers, outlinedLayers, analysis.Particles, analysis.Wavefront),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

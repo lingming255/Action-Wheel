@@ -173,6 +173,9 @@ static void CheckParticleTiming(RefreshAnalysis result, int width, int height, i
                 "every particle footprint stays inside the capture");
             Require(particle.StartMs is >= 0 and <= RefreshTiming.SweepMs,
                 "every particle arrives inside the sweep window");
+            Require(Math.Abs(particle.StartMs - result.Wavefront.FrontAt(
+                particle.Left + particle.Width * 0.5, particle.Top + particle.Height * 0.5)) < 0.000001,
+                "every actual footprint follows the shared evolving edge");
             RefreshEnvelope pulse = RefreshTiming.Envelope(layer, particle.StartMs);
             Require(pulse.StartMs <= pulse.PeakMs && pulse.PeakMs < pulse.EndMs && pulse.EndMs <= RefreshTiming.TotalMs,
                 "individual particle pulses finish within the animation budget");
@@ -206,9 +209,10 @@ static void CheckParticleTiming(RefreshAnalysis result, int width, int height, i
         double dx = particle.Left + particle.Width * 0.5 - originX;
         double dy = particle.Top + particle.Height * 0.5 - originY;
         return dx * dx + dy * dy;
-    }).First(group => group.Count() > 1);
-    Require(equalDistance.Max(particle => particle.StartMs) - equalDistance.Min(particle => particle.StartMs) < 0.000001,
-        "actual symbols at equal radial distances rise together without macro noise");
+    }).Where(group => group.Count() > 1);
+    Require(equalDistance.Any(group => group.Max(particle => particle.StartMs)
+        - group.Min(particle => particle.StartMs) > 1),
+        "the coherent irregular edge reaches equal-radius symbols at different times");
     Require(result.Particles.Any(particle => particle.Layer != RefreshPixelLayer.Background
         && (particle.Width > tile || particle.Height > tile)), "the fixture exercises merged large blocks");
 }
