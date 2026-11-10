@@ -151,8 +151,12 @@ namespace Action_Wheel.Services
                 _cancellation.ThrowIfCancellationRequested();
                 int last = (y + 1) * _workWidth;
                 for (int pixel = y * _workWidth; pixel < last; pixel++)
-                    _spectrumFrame.Pixels[pixel] = Vector3.Max(Vector3.Zero,
-                        _spectrumFrame.Pixels[pixel] - _source.Pixels[pixel]) * (_overlayGain * 255);
+                {
+                    Vector3 delta = Vector3.Max(Vector3.Zero, _spectrumFrame.Pixels[pixel] - _source.Pixels[pixel]);
+                    float saturation = UniformBlockRefreshRenderer.SaturationAt(_elapsedMs - _starts[pixel]);
+                    _spectrumFrame.Pixels[pixel] = UniformBlockRefreshRenderer.AdjustSaturation(delta, saturation)
+                        * (_overlayGain * 255);
+                }
             }
         }
 

@@ -12,8 +12,9 @@ internal static class SpectrumOverlayTests
         CheckExternalEnvelope();
         CheckOverlay();
         CheckDistanceArrival();
+        CheckSaturationEnvelope();
         CheckCompositing();
-        Console.WriteLine("Spectrum overlay checks passed: actual reference atlas/rain/Gaussian/HSL with independent host timing, native base preservation at zero gain, positive light addition, shared depth/distance arrival, origin retiming, PBGRA, stateless elapsed time, cancellation/reuse and transparent ending.");
+        Console.WriteLine("Spectrum overlay checks passed: actual reference atlas/rain/Gaussian/HSL with independent host timing, native base preservation at zero gain, positive light addition, shared depth/distance arrival and saturation envelope, origin retiming, PBGRA, stateless elapsed time, cancellation/reuse and transparent ending.");
     }
 
     private static RefreshSpectrumEffect Spectrum(int width, int height)
@@ -87,10 +88,10 @@ internal static class SpectrumOverlayTests
             var baseRenderer = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
             var disabled = new SpectrumOverlayRefreshRenderer(width, height, capture, depth, width / 2, height / 2, 0);
             var overlay = new SpectrumOverlayRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
-            Require(overlay.DurationMs == 2550 && overlay.BloomWidth == 1 && overlay.BloomHeight == 1,
+            Require(overlay.DurationMs == 3000 && overlay.BloomWidth == 1 && overlay.BloomHeight == 1,
                 "The experimental layer changed the shared lifetime or output shape.");
             byte[] a = new byte[capture.Length], b = new byte[capture.Length], clean = new byte[capture.Length], light = new byte[4];
-            foreach (double time in new[] { 0, 180, 700, 1300, 2100, 2549.9 })
+            foreach (double time in new[] { 0, 180, 700, 1300, 2100, 2790, 2999.9 })
             {
                 baseRenderer.Render(time, a, light);
                 disabled.Render(time, b, light);
@@ -104,7 +105,7 @@ internal static class SpectrumOverlayTests
             Require(a.AsSpan().SequenceEqual(b), "A time jump or backward render altered a stateless ASCII frame.");
             overlay.Render(chosen, b, light);
             Require(a.AsSpan().SequenceEqual(b), "Repeated elapsed time changed the ASCII frame.");
-            foreach (double time in new[] { 0, 180, 700, 1300, 2100, 2549.9 })
+            foreach (double time in new[] { 0, 180, 700, 1300, 2100, 2790, 2999.9 })
             {
                 Array.Fill(b, (byte)239); Array.Fill(light, (byte)239);
                 overlay.Render(time, b, light);
@@ -134,7 +135,7 @@ internal static class SpectrumOverlayTests
             Require(geometry.Zip(overlay.BlocksRenderer.Blocks.ToArray()).All(pair =>
                 (pair.First with { StartMs = 0 }) == (pair.Second with { StartMs = 0 })),
                 "Retiming the ASCII experiment changed native geometry or pigment.");
-            foreach (double time in new[] { -1, double.NaN, double.PositiveInfinity, 2550, 3000 })
+            foreach (double time in new[] { -1, double.NaN, double.PositiveInfinity, 3000, 3250 })
             {
                 Array.Fill(b, (byte)239); Array.Fill(light, (byte)239);
                 overlay.Render(time, b, light);
@@ -203,10 +204,10 @@ internal static class SpectrumOverlayTests
                     double depth = PlaneDepth((x + .5) / workWidth, (y + .5) / workHeight);
                     double offsetX = centerX - (originX + .5), offsetY = centerY - (originY + .5);
                     double distance = farthest == 0 ? 0 : Math.Clamp(Math.Sqrt(offsetX * offsetX + offsetY * offsetY) / farthest, 0, 1);
-                    double expected = 119 + 1590 * Math.Abs(depth - originDepth) / range + 280 * distance;
+                    double expected = 119 + 1590 * Math.Abs(depth - originDepth) / range + 700 * distance;
                     double actual = starts[y * workWidth + x];
                     Require(Math.Abs(actual - expected) < .002, "The ASCII layer does not share the independent depth/distance arrival formula.");
-                    Require(actual >= 119 && actual + 510 <= 2550, "Distance delay exceeds the existing animation lifetime.");
+                    Require(actual >= 119 && actual + 510 <= 3000, "Distance delay exceeds the existing animation lifetime.");
                 }
             }
         }
@@ -221,11 +222,60 @@ internal static class SpectrumOverlayTests
             "Flat-depth ASCII pixels do not activate progressively away from the release pixel.");
         Require(At(40, 35) == At(60, 35) && At(50, 25) == At(50, 45),
             "Equal spatial distances at equal depth have different ASCII arrival times.");
-        Console.WriteLine("Spectrum distance arrival: independent 119+1590*depth+280*distance oracle, actual clamped release pixel, flat-depth radial order, equal-distance symmetry, 1280 work scaling, 1x1/narrow/corner cases and unchanged duration passed.");
+        Console.WriteLine("Spectrum distance arrival: independent 119+1590*depth+700*distance oracle, actual clamped release pixel, flat-depth radial order, equal-distance symmetry, 1280 work scaling, 1x1/narrow/corner cases and 3000ms duration passed.");
     }
 
     private static double PlaneDepth(double u, double v)
         => (Math.Clamp(u * 9 - .5, 0, 8) + Math.Clamp(v * 7 - .5, 0, 6)) / 14;
+
+    private static void CheckSaturationEnvelope()
+    {
+        const int width = 97, height = 73;
+        var renderer = new SpectrumOverlayRefreshRenderer(width, height, Scene(width, height), Depth(17, 11), width / 2, height / 2);
+        T Field<T>(string name) => (T)typeof(SpectrumOverlayRefreshRenderer)
+            .GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(renderer)!;
+        var source = Field<ReferenceTexture>("_source");
+        var actualDelta = Field<ReferenceTexture>("_spectrumFrame");
+        float[] depth = Field<float[]>("_depth"), envelope = Field<float[]>("_envelope");
+        double[] starts = Field<double[]>("_starts");
+        var reference = Spectrum(width, height);
+        reference.Prepare(source, depth);
+        var ungraded = new ReferenceTexture(width, height);
+        byte[] output = new byte[width * height * 4], light = new byte[4];
+        int fadedSamples = 0, peakSamples = 0;
+        float maximumError = 0;
+        foreach (double time in new[] { 130, 250, 500, 900, 1500, 2100, 2700 })
+        {
+            renderer.Render(time, output, light);
+            reference.RenderWithEnvelope(source, depth, time / (1000 * .85), envelope, ungraded);
+            for (int pixel = 0; pixel < starts.Length; pixel++)
+            {
+                Vector3 positive = Vector3.Max(Vector3.Zero, ungraded.Pixels[pixel] - source.Pixels[pixel]);
+                double age = time - starts[pixel];
+                double rise = Math.Clamp(age / 85, 0, 1), fall = Math.Clamp((age - 187) / 323, 0, 1);
+                double band = age <= 0 || age >= 510 ? 0 : rise * rise * (3 - 2 * rise) * (1 - fall * fall * (3 - 2 * fall));
+                float saturation = (float)(.45 + .55 * band);
+                float luma = .2126f * positive.X + .7152f * positive.Y + .0722f * positive.Z;
+                Vector3 expected = (new Vector3(luma) * (1 - saturation) + positive * saturation) * (.35f * 255);
+                Vector3 actual = actualDelta.Pixels[pixel];
+                maximumError = Math.Max(maximumError, Maximum(Vector3.Abs(actual - expected)));
+                Require(Minimum(actual) >= 0 && Maximum(actual) <= 89.251f,
+                    "Host saturation made the ASCII light negative or exceeded its unchanged gain.");
+                float originalChroma = Maximum(positive) - Minimum(positive);
+                if (originalChroma > .01f)
+                {
+                    Require(Math.Abs((Maximum(actual) - Minimum(actual)) - originalChroma * saturation * (.35f * 255)) < .001,
+                        "ASCII chroma does not follow the whole-pixel age envelope.");
+                    if (saturation < .98f) fadedSamples++;
+                    if (saturation > .995f) peakSamples++;
+                }
+            }
+            CheckPbgra(output);
+        }
+        Require(maximumError < .001f && fadedSamples > 100 && peakSamples > 20,
+            "The independent Rec709 ASCII saturation oracle failed or did not cover both fades and full colour.");
+        Console.WriteLine($"Spectrum host saturation: positive reference-A delta, independent Rec709/age oracle, fade/full-colour chroma, nonnegative unchanged gain and PBGRA passed; maximum error={maximumError:F6} byte.");
+    }
 
     public static void Measure()
     {

@@ -60,11 +60,11 @@ var metadata = new {
     OriginX = originX, OriginY = originY,
     OriginDepth = renderer.OriginDepth,
     OriginDefault = args.Length == 2 ? "Image centre; pass X Y to simulate a specific release" : "Explicit physical pixel release coordinates (clamped to image)",
-    StartTime = "119 + 1590 * abs(depth - originDepth) / max(originDepth, 1 - originDepth) + 280 * normalizedScreenDistance milliseconds",
+    StartTime = "119 + 1590 * abs(depth - originDepth) / max(originDepth, 1 - originDepth) + 700 * normalizedScreenDistance milliseconds",
     TimingDepth = "Raw cell-centre depth compared to bilinear model depth at actual pointer pixel; same-depth cells farther from that pixel start later",
     ScreenDistance = "Cell-centre Euclidean distance to the release pixel centre, divided by distance from that pixel to the farthest monitor pixel centre; 1x1 uses zero",
     Padding = "Right/bottom partial cells are displayed as full slots; samples still use actual clipped centres",
-    TimingVersion = "pointer-bidirectional-depth-distance-v2"
+    TimingVersion = "pointer-bidirectional-depth-distance-v3"
 };
 File.WriteAllText(Path.Combine(output, "metadata.json"), JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine(JsonSerializer.Serialize(metadata));

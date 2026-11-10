@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current experiment: bidirectional blocks, ASCII rain and distance stagger (2026-11-11)
+## Current experiment: colour pulse and longer distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
 its own publish at `bin/Publish/refresh-bidirectional-depth-20261111-win-x64`. The experiment
@@ -25,20 +25,30 @@ atlas selection, sampling and rain geometry; the host's independent two-front en
 replaces the scan band. The same 0.85 time scale accelerates rain motion. Only the positive
 RGB difference from A's source image is upsampled and added to the native base, so this
 branch is an overlay experiment rather than the original sequential A-then-B pipeline.
-Both layers retime from the same release-pixel depth and finish within 2550 ms. Playback
+Both layers retime from the same release-pixel depth and finish within 3000 ms. Playback
 targets 30 Hz, skips missed display frames and evaluates elapsed time without history.
 
 The user then requested farther screen pixels to start later as well. This branch now uses
-`119 + 1590*abs(d-d0)/max(d0,1-d0) + 280*r` ms. `r` is the Euclidean distance from a cell/work
+`119 + 1590*abs(d-d0)/max(d0,1-d0) + 700*r` ms. `r` is the Euclidean distance from a cell/work
 sample centre to the actual release-pixel centre, divided by the release's distance to the
 farthest monitor pixel centre. Native edge coordinates are shared by both layers; 1x1 uses
-zero distance. The original 1870 ms travel budget is split between 1590 ms of depth sweep and
-at most 280 ms of spatial stagger, keeping the same 2550 ms total and complete 510 ms fades.
+zero distance. After the user liked the effect but found same-depth spreading too fast, the
+spatial stagger was increased from 280 to 700 ms. Depth travel stays 1590 ms and each pulse
+stays 510 ms; the total now closes at 3000 ms, after the latest complete fade at 2919 ms.
 At equal depth, nearer regions appear earlier. This weighted timing does not guarantee
 spatial connectivity or rigid depth ordering when screen distance also changes. No per-frame
 distance work is added. The preceding ASCII version `0578f0e` is preserved at
 `archive/refresh-ascii-before-distance-delay-20261111`; its matching backup contains a source
 ZIP verified against all 172 Git blobs, complete runtime and models with verified hashes.
+
+The user also requested saturation motion. Whole-block colour and its emitted bloom now use
+`s = .45 + .55 * opacity/.88`, interpolating between Rec709 grey and the prepared pigment.
+This keeps luma, reaches the original colour at the pulse peak and softens colour at either
+end. The ASCII layer applies the same local-age colour envelope to its positive light delta;
+the source image and original reference A shader remain unchanged. Prepared geometry and
+pigment stay immutable; there is no added colour texture inside a native block. The previously
+accepted `8156f2e` is archived at `archive/refresh-before-saturation-delay-20261111`, with
+172 source blobs and all six runtime/model files verified in the matching backup directory.
 
 ## Plain bidirectional block foundation (2026-11-11)
 
@@ -272,6 +282,34 @@ the unique running path and enabled startup entry match. Published/deployed SHA-
 `E02F3707BD3C2BCB88760AA3430BD8769A5434143FEA1C0F6E7A2BD8C1709DB3`.
 The plain `160a753` branch and no-distance ASCII `0578f0e` publish/archive remain available.
 No desktop animation was automatically triggered.
+
+### Saturation pulse and 700 ms staggering validation (2026-11-11)
+
+Both affected suites passed. New checks cover whole-block saturation rising/falling with
+opacity, full original pigment at peak, Rec709 luma preservation, neutral colours and an
+independent packed-core colour oracle. Exterior bloom is bounded by the same desaturation
+envelope. The ASCII positive-delta oracle agrees within 0.000008 byte, with nonnegative light,
+unchanged host gain, PBGRA, native-base identity at gain zero and unchanged source/reference A.
+Timing checks retain both depth directions at equal screen distance and verify up to 700 ms
+staggering at equal depth, a complete last pulse at 2919 ms, and transparent ending at 3000 ms.
+Jump/repeat, dirty buffers, cancellation and work/native coordinate checks remain passing.
+
+Debug built with zero warnings/errors; read-only review found no actionable issue. The real
+model annotation tool exported 700 timings matching an independent formula within 0.0005 ms
+CSV rounding, with version `pointer-bidirectional-depth-distance-v3`; older exports remain.
+Final isolated Release p50/p95/max measured 18.96/23.28/23.40 ms at 1080p and
+34.24/37.57/37.75 ms at 4K. Warmed release retiming p50/p95 was 4.70/5.20 ms and
+4.78/5.79 ms, and preparation 289/375 ms in that run. Five frames allocated about 165 KB
+across managed threads. These synthetic samples retain the 300–2000 ms benchmark interval
+and exclude capture, depth and UI; they do not establish desktop fps or a speedup. 4K still
+exceeds the 30 Hz rendering budget before UI upload. Visual acceptance stays with the user.
+
+Release publish `refresh-saturation-delay-20261111-win-x64` was deployed to the usual
+`quick-info-win-x64` directory and restarted. PID 61172 survived five seconds, and the
+unique running path and enabled startup entry match. Published/deployed SHA-256 is
+`AB0D8CF296217D5164882BD6943C823FF6930844A6258562B1A7722EE1E67D5A`.
+No desktop animation was automatically triggered; the accepted preceding version remains
+available in the complete archive above.
 
 ## Archived implementation: the two reference pipelines (2026-11-10)
 

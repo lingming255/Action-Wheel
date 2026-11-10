@@ -9,7 +9,7 @@ namespace Action_Wheel.Services
 {
     /// <summary>
     /// Native-resolution, solid colour blocks. Geometry and pigment stay fixed for a gesture;
-    /// elapsed time changes only each whole block's opacity and brightness. Bloom is drawn
+    /// elapsed time changes each whole block's opacity, brightness and saturation. Bloom is drawn
     /// outside active cores, so a blurred light field never textures their interiors.
     /// One playback worker owns the instance and its reusable buffers.
     /// </summary>
@@ -146,12 +146,22 @@ namespace Action_Wheel.Services
                 : MaximumOpacity * Smooth(0, RefreshDepthSweep.RiseMs, ageMs)
                     * (1 - Smooth(RefreshDepthSweep.FadeStartMs, RefreshDepthSweep.LifetimeMs, ageMs));
 
+        /// <summary>Start/end softly coloured; the full pulse retains its prepared pigment.</summary>
+        internal static float SaturationAt(double ageMs) => .45f + .55f * (OpacityAt(ageMs) / MaximumOpacity);
+
+        internal static Vector3 AdjustSaturation(Vector3 colour, float saturation)
+        {
+            float luma = colour.X * .2126f + colour.Y * .7152f + colour.Z * .0722f;
+            return Vector3.Lerp(new Vector3(luma), colour, saturation);
+        }
+
         internal static uint CoreAt(Block block, double elapsedMs)
         {
             float opacity = OpacityAt(elapsedMs - block.StartMs);
             float brightness = .75f + .25f * (opacity / MaximumOpacity);
             int alpha = Math.Clamp((int)MathF.Round(opacity * 255), 0, 255);
-            Vector3 colour = block.Colour * (brightness * alpha);
+            Vector3 colour = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs))
+                * (brightness * alpha);
             int r = Math.Clamp((int)MathF.Round(colour.X), 0, alpha);
             int g = Math.Clamp((int)MathF.Round(colour.Y), 0, alpha);
             int b = Math.Clamp((int)MathF.Round(colour.Z), 0, alpha);
@@ -196,7 +206,8 @@ namespace Action_Wheel.Services
                     ref State state = ref _states[index];
                     state.Core = CoreAt(block, elapsedMs);
                     state.BackgroundAmount = BackgroundAmountAt(block, elapsedMs);
-                    state.Emission = block.Colour * (opacity * brightness * BloomGain);
+                    state.Emission = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs))
+                        * (opacity * brightness * BloomGain);
                     if (state.Emission == Vector3.Zero) continue;
                     anyEmission = true;
                     StampEmission(block, state.Emission);

@@ -6,11 +6,11 @@ namespace Action_Wheel.Services
     internal static class RefreshDepthSweep
     {
         internal const double TimeScale = .85;
-        internal const double DurationMs = 3000 * TimeScale;
+        internal const double DurationMs = 3000;
         internal const double StartDelayMs = 140 * TimeScale;
-        internal const double TravelMs = 2200 * TimeScale;
-        internal const double DistanceDelayMs = 280;
-        internal const double DepthTravelMs = TravelMs - DistanceDelayMs;
+        internal const double DepthTravelMs = 1590;
+        internal const double DistanceDelayMs = 700;
+        internal const double TravelMs = DepthTravelMs + DistanceDelayMs;
         internal const double LifetimeMs = 600 * TimeScale;
         internal const double RiseMs = 100 * TimeScale;
         internal const double FadeStartMs = 220 * TimeScale;

@@ -11,6 +11,7 @@ internal static class UniformBlockRefreshTests
     {
         CheckWholeBlocks();
         CheckDepthAndEnvelope();
+        CheckSaturationEnvelope();
         CheckPreparedPropagation();
         CheckBidirectionalTiming();
         CheckClickWave();
@@ -125,8 +126,44 @@ internal static class UniformBlockRefreshTests
             "Blocks do not fade as a whole on both sides of the light pulse.");
         Require(UniformBlockRefreshRenderer.OpacityAt(RefreshDepthSweep.RiseMs) > .8f
             && UniformBlockRefreshRenderer.OpacityAt(RefreshDepthSweep.LifetimeMs) == 0
-            && renderer.DurationMs == 2550 && RefreshDepthSweep.LifetimeMs == 510,
-            "The requested modest 15% speedup did not preserve a complete whole-block pulse.");
+            && renderer.DurationMs == 3000 && RefreshDepthSweep.LifetimeMs == 510,
+            "Longer spatial staggering changed the requested whole-block lifetime or close time.");
+    }
+
+    private static void CheckSaturationEnvelope()
+    {
+        var colour = new Vector3(.8f, .2f, .1f);
+        float expectedLuma = .8f * .2126f + .2f * .7152f + .1f * .0722f;
+        Require(UniformBlockRefreshRenderer.SaturationAt(0) == .45f
+            && UniformBlockRefreshRenderer.SaturationAt(510) == .45f
+            && Math.Abs(UniformBlockRefreshRenderer.SaturationAt(120) - 1) < .000001,
+            "Saturation did not move from soft colour to full pigment and back.");
+        Require(UniformBlockRefreshRenderer.SaturationAt(30) < UniformBlockRefreshRenderer.SaturationAt(60)
+            && UniformBlockRefreshRenderer.SaturationAt(300) > UniformBlockRefreshRenderer.SaturationAt(450),
+            "Saturation does not rise and fall with the whole-block pulse.");
+        foreach (double age in new[] { -1, 0, 10, 40, 85, 120, 187, 300, 480, 510, double.NaN })
+        {
+            float saturation = UniformBlockRefreshRenderer.SaturationAt(age);
+            Vector3 adjusted = UniformBlockRefreshRenderer.AdjustSaturation(colour, saturation);
+            Vector3 expected = new(expectedLuma + (colour.X - expectedLuma) * saturation,
+                expectedLuma + (colour.Y - expectedLuma) * saturation,
+                expectedLuma + (colour.Z - expectedLuma) * saturation);
+            Require(saturation >= .45f && saturation <= 1
+                && Vector3.Distance(adjusted, expected) < .000001f
+                && Math.Abs(adjusted.X * .2126f + adjusted.Y * .7152f + adjusted.Z * .0722f - expectedLuma) < .000001,
+                "Whole-block saturation changed luma or failed the independent colour oracle.");
+            var block = new UniformBlockRefreshRenderer.Block(0, 0, 4, 4, 1, 1, 2, 2, colour, .5f, 119);
+            uint core = UniformBlockRefreshRenderer.CoreAt(block, 119 + age);
+            CheckPackedPbgra(core);
+            float opacity = UniformBlockRefreshRenderer.OpacityAt(age);
+            int alpha = (int)MathF.Round(opacity * 255);
+            Vector3 expectedRgb = expected * (alpha * (.75f + .25f * opacity / .88f));
+            Require(Largest(Vector3.Abs(Rgb(core) - expectedRgb)) <= .51f,
+                "The native core did not apply one colour envelope to the whole block.");
+        }
+        Require(Vector3.Distance(UniformBlockRefreshRenderer.AdjustSaturation(new Vector3(.3f), .45f), new Vector3(.3f)) < .000001,
+            "Saturation tinted a neutral pigment.");
+        Console.WriteLine("Saturation envelope checks: whole-block rise/fall, original pigment at peak, Rec709 luma preservation, independent native-core colour oracle and neutral pigments.");
     }
 
     private static void CheckPreparedPropagation()
@@ -289,9 +326,9 @@ internal static class UniformBlockRefreshTests
         {
             double close = RefreshDepthSweep.StartAt(d, d0, 0);
             double far = RefreshDepthSweep.StartAt(d, d0, 1);
-            Require(Math.Abs(far - close - 280) < .000001
+            Require(Math.Abs(far - close - 700) < .000001
                 && far + RefreshDepthSweep.LifetimeMs <= RefreshDepthSweep.DurationMs,
-                "Screen-distance delay was not bounded to 280ms or truncated a fade.");
+                "Screen-distance delay was not bounded to 700ms or truncated a fade.");
         }
         Require(Math.Abs(RefreshDepthSweep.StartAt(.25f, .5f, .3)
             - RefreshDepthSweep.StartAt(.75f, .5f, .3)) < .000001,
@@ -299,7 +336,10 @@ internal static class UniformBlockRefreshTests
         Require(RefreshDepthSweep.FarthestDistance(1, 1, 0, 0) == 0
             && RefreshDepthSweep.DistanceAt(.5, .5, 0, 0, 0) == 0,
             "Single-pixel distance was undefined.");
-        Console.WriteLine("Bidirectional depth timing checks: both branches progress away from pointer depth at fixed screen distance, equal offsets share speed, shorter side finishes earlier, spatial delay is bounded to 280ms and all fades finish within 2550ms.");
+        Require(RefreshDepthSweep.StartAt(1, 0, 1) == 2409
+            && RefreshDepthSweep.StartAt(1, 0, 1) + RefreshDepthSweep.LifetimeMs == 2919,
+            "The most distant depth/spatial endpoint lost its full pulse before close.");
+        Console.WriteLine("Bidirectional depth timing checks: both branches progress away from pointer depth at fixed screen distance, equal offsets share speed, shorter side finishes earlier, spatial delay is bounded to 700ms and all fades finish within 3000ms.");
     }
 
     private static void CheckClickWave()
@@ -327,7 +367,7 @@ internal static class UniformBlockRefreshTests
                 double dy = block.CellTop + (block.CellHeight - 1) * .5 - y;
                 double expected = 119 + 1590 * Math.Abs(block.Depth - (double)renderer.OriginDepth)
                     / Math.Max(renderer.OriginDepth, 1 - (double)renderer.OriginDepth)
-                    + 280 * Math.Sqrt(dx * dx + dy * dy) / farthest;
+                    + 700 * Math.Sqrt(dx * dx + dy * dy) / farthest;
                 Require(Math.Abs(block.StartMs - expected) < .000001,
                     "Arrival differs from the independent native-coordinate depth/distance oracle.");
                 Require((blocks[index] with { StartMs = 0 }) == (original[index] with { StartMs = 0 }),
@@ -346,7 +386,7 @@ internal static class UniformBlockRefreshTests
                 for (int i = 1; i < ordered.Length; i++)
                     Require(ordered[i].StartMs >= ordered[i - 1].StartMs - .000001,
                         "A same-depth remote block appeared before a closer block.");
-                Require(ordered[^1].StartMs - ordered[0].StartMs <= 280.000001,
+                Require(ordered[^1].StartMs - ordered[0].StartMs <= 700.000001,
                     "Spatial staggering overpowered the depth scan budget.");
             }
         }
@@ -381,7 +421,7 @@ internal static class UniformBlockRefreshTests
                 new RefreshDepthMap(1, 1, [.3f]), w - 1, h - 1);
             var flatBlocks = flat.Blocks.ToArray();
             Require(flatBlocks.All(block => double.IsFinite(block.StartMs)
-                && block.StartMs >= 119 && block.StartMs <= 399),
+                && block.StartMs >= 119 && block.StartMs <= 819),
                 "Flat-depth or degenerate-image spatial delays were invalid.");
             if (w == 1 && h == 1)
                 Require(flatBlocks[0].StartMs == 119, "The single pointer pixel was delayed.");
@@ -473,7 +513,7 @@ internal static class UniformBlockRefreshTests
             Require(a.AsSpan().SequenceEqual(b), "Jumping/backward elapsed time changed a stateless frame.");
             renderer.Render(913.25, b, bloom);
             Require(a.AsSpan().SequenceEqual(b), "Repeated elapsed time changed a frame.");
-            foreach (double elapsed in new[] { 0, 110, 700, 1500, 2350, RefreshDepthSweep.DurationMs - .01 })
+            foreach (double elapsed in new[] { 0, 110, 700, 1500, 2350, 2790, RefreshDepthSweep.DurationMs - .01 })
             {
                 Array.Fill(b, (byte)239);
                 Array.Fill(bloom, (byte)239);
@@ -557,6 +597,9 @@ internal static class UniformBlockRefreshTests
             Vector3 strongestBackground = Vector3.Max(source,
                 Vector3.Lerp(source, ReferenceEffectMath.Lut(lut, source), .3f)) * 255;
             int active = channelColour.X > 0 ? 0 : 2;
+            Vector3 pigment = blocks[0].Colour;
+            float luma = pigment.X * .2126f + pigment.Y * .7152f + pigment.Z * .0722f;
+            float maximumGreyHalo = .55f * luma * .88f * .8f * .95f * 255 + 2;
             int litExterior = 0;
             for (int pixel = 0; pixel < core.Length; pixel++)
             {
@@ -569,8 +612,8 @@ internal static class UniformBlockRefreshTests
                 if (Component(visible, active) > Component(strongestBackground, active) + 1.5f) litExterior++;
                 for (int channel = 0; channel < 3; channel++)
                     if (channel != active)
-                        Require(Component(visible, channel) <= Component(strongestBackground, channel) + 1.5f,
-                            "Exterior bloom introduced white or an unrelated colour channel.");
+                        Require(Component(visible, channel) <= Component(strongestBackground, channel) + maximumGreyHalo,
+                            "Exterior bloom exceeded the bounded desaturation of its source pigment.");
             }
             Require(litExterior > 10, "Current blocks did not emit visible light outside their solid cores.");
         }
