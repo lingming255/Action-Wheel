@@ -4,9 +4,82 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current implementation: the two reference pipelines
+## Current implementation: uniform blocks (2026-11-11)
 
-The active capture path calls only `RefreshDepthEstimator` and `JianyingRefreshRenderer`.
+The user chose a simpler visual after trying the reference reconstruction: each pixel block
+is one solid colour with a fixed square shape. The whole block fades in/out and changes
+brightness/opacity together. There are no characters, digital-rain patterns, interior SDF
+gain or other per-pixel animation within a block. The preceding implementation is archived at
+`archive/refresh-before-uniform-blocks-20261111` (`d613596`), with source, executable and model
+backup under `bin/Backups/refresh-before-uniform-blocks-20261111`.
+
+The capture path now selects `UniformBlockRefreshRenderer`. It keeps the independent learned
+depth map, depth-order scan and approximately three-second duration. Each cell samples one
+original-image colour and one depth value during preparation. Fixed integer rectangles are
+drawn at native output resolution; their sharp edges never pass through a low-resolution
+upsampler. The per-cell envelope is evaluated directly from elapsed time, so skipped display
+frames do not require history catch-up.
+
+Current coloured emission drives a reusable low-resolution bloom buffer. Only the halo is
+upsampled; the native core excludes that spatially varying halo. A core's source-over layer
+has one RGB and alpha throughout its footprint, while the live background can still show
+through according to that alpha. The existing 0.3 reference LUT background grade is retained
+and restored by the depth scan; no additional exposure, white glare texture or global dimming
+is added. All effects are composed into one native PBGRA image with a bounded worker and one
+acknowledged upload, using the existing cover handoff and shared close timer.
+
+This is an intentionally simplified design rather than a complete reproduction of both
+reference shaders. `JianyingRefreshRenderer`, its original textures and the reference checks
+remain available for comparison and rollback. Model inference still uses the captured still;
+the static-input and independent-depth limitations below also apply to this version.
+
+The native grid uses an even cell size near `0.0181 * min(width,height)` (minimum four pixels),
+with a small fixed inset. Each cell averages 16 capture samples for its pigment and samples
+depth at its centre. The same RGB proportions receive a fixed brightness lift. Start time is
+`140 + depth * 2100` ms; each block lasts 600 ms, fades in over 100 ms and fades out from
+220 to 600 ms. Maximum opacity is 0.88, and whole-block brightness ranges from 0.75 to 1.
+The renderer requests 60 Hz display updates and evaluates continuous elapsed time, without
+the archived pipeline's 30 Hz history simulation.
+
+The 0.3 LUT correction is prepared once using a 1280-side work buffer and encoded at native
+resolution. Its depth-restoration mask is now one scalar per cell. Bloom uses four reusable
+RGB float grids sized according to the native cell spacing: about 5.9 MiB at 1080p or 4.7 MiB
+at 4K. The additional retained native background correction is about 7.9/31.6 MiB respectively;
+capture/playback/UI buffers and the depth model are additional. The construction-only work
+textures and encoder can be collected afterward. No full-screen buffer is allocated per frame.
+
+### Uniform-block validation (2026-11-11)
+
+All six `Build.ps1 -Task VerifyRefresh` suites passed. New checks cover 12 whole native core
+rectangles pixel-for-pixel, hard boundary samples, independent depth timing, whole-block fades,
+pure-red/blue exterior bloom without white contamination, direct-time jump/backward/repeated
+determinism, PBGRA, full overwrite of dirty buffers, cancellation/reuse, immutable inputs,
+undefined capture alpha and invalid buffer/depth/alias rejection. A 10,000-case independent
+visible-composition oracle measured maximum errors of 0.977 byte for additive bloom and
+0.957 byte for core source-over composition. Ending and invalid timestamps clear both buffers.
+
+In the same Release verification run, native 1080p active-frame p50/p95 were 4.88/5.59 ms,
+and native 4K 11.94/13.89 ms. The archived reference pipeline measured 32.73/38.13 ms and
+48.76/56.37 ms respectively over the same 0.4–2.4 s interval. This compares two different
+visual designs, not mathematically equivalent implementations. Preparation measured 202 ms
+for the first 1080p instance and 105 ms for the subsequent 4K instance; JIT/warmup and scheduling
+make these unsuitable for a claim that 4K prepares faster. Five frames allocated about 51 KiB
+across all managed threads. None of these measurements include capture, depth inference or UI
+upload, and they do not establish actual desktop fps. Complex appearance remains user acceptance.
+
+Exterior bloom is excluded once a core has nonzero byte alpha. Strong overlapping neighbouring
+halos can therefore change at that first opacity step; user review will determine whether that
+boundary needs adjustment while preserving uniform interiors.
+
+Debug built with zero warnings/errors and Release publishing completed. The published
+`refresh-uniform-blocks-20261111-win-x64` executable was copied to `quick-info-win-x64`, started
+and remained alive for five seconds. Published/deployed SHA-256 matched; the running path and
+enabled startup entry both point to the usual `quick-info-win-x64` executable. No desktop
+animation was automatically triggered; visual acceptance remains with the user.
+
+## Archived implementation: the two reference pipelines (2026-11-10)
+
+Before the uniform-block change, the capture path called `RefreshDepthEstimator` and `JianyingRefreshRenderer`.
 The preceding radial particles, irregular wavefront, outlines, scene exposure, 20% background
 dim and extra core enhancement are not called. They remain in source and Git for comparison;
 the overbright revision is archived at `archive/refresh-additive-bright-before-jianying-20261110`.
@@ -32,7 +105,7 @@ new playback starts. Playback and its one-shot close timer share `IRefreshRender
 outstanding. Cancellation is checked between reference steps and during full-resolution output.
 Model/capture failure produces no effect and safely restores desktop colour.
 
-## Model and display boundaries
+## Model and reference display boundaries
 
 The original `nh_depth_for_light_scanning` file exists locally but requires Jianying's internal
 ByteNN/cv runtime; no independently usable SDK/API was found. At the user's explicit choice,
@@ -65,7 +138,7 @@ Moving desktop content can misalign with this capture-relative correction; stron
 require opaque coverage. This is SDR, with no HDR output or continuous desktop recapture.
 Only the cursor's monitor receives the effect; other monitors regain colour when the matrix lifts.
 
-## Validation
+## Reference reconstruction validation (2026-11-10)
 
 All five `Build.ps1 -Task VerifyRefresh` suites passed, including the new reference check.
 The latter verifies independent shader HSL arithmetic including out-of-range inputs, source
@@ -122,7 +195,7 @@ Complex desktop appearance, motion and multi-monitor acceptance remain with the 
 
 The user identified the reference tracks as `彩色像素` and `光谱扫描`. The local Jianying cache is a junction from `%LOCALAPPDATA%\JianyingPro\User Data\Cache` to `D:\Caches\R1my\jianying-media-cache`. Two resource packages updated at 21:10 contain readable Lua/GLSL. Their Chinese titles are absent from the package manifests; associating A with `光谱扫描` and B with `彩色像素` remains an inference from their parameters and rendering code, not a verified title-to-ID mapping.
 
-**Implementation status:** the user rejected the overbright additive-only revision (`e280851`) and requested both complete pixel/scanning/light pipelines. The active path now reimplements the two audited postprocessing chains, with an independently runnable Depth Anything V2 Small model chosen by the user. This is a source reconstruction, not the original Jianying engine or a claim of identical output. Model, frame-rate, render-target adaptation and static-input differences are stated below.
+**Reference reconstruction status:** the user rejected the overbright additive-only revision (`e280851`) and requested both complete pixel/scanning/light pipelines. The archived `JianyingRefreshRenderer` reimplements those audited postprocessing chains with an independently runnable Depth Anything V2 Small model. The user subsequently chose the simplified uniform-block design above. The reconstruction remains available as a source comparison, not the original Jianying engine or a claim of identical output.
 
 A is `effect\7399492904915389696\5373a80f847b81bdfa9eba25aa6aab49`:
 
@@ -147,6 +220,7 @@ A CPU port of the readable shader mathematics alone would still need matching de
 ## Code locations
 
 - `Services/RefreshFrame.cs`: original capture, initial grey handoff and depth preparation.
+- `Services/UniformBlockRefreshRenderer.cs`: active native solid-block scan, whole-block envelopes and same-colour exterior bloom.
 - `Services/RefreshDepthEstimator.cs`: pinned local ONNX model, normalization and CPU inference.
 - `Services/JianyingRefreshRenderer.cs`: fixed-step A-then-B stack and full-resolution correction.
 - `Services/RefreshOutputEncoder.cs`: cached/SIMD native-resolution colour correction.
@@ -159,3 +233,4 @@ A CPU port of the readable shader mathematics alone would still need matching de
 - `Services/LauncherService.cs`: trigger, hold-time colour grading and safe recovery.
 - `Tools/ReferenceRefreshCheck/`: reconstruction checks. `Build.ps1 -Task VerifyRefresh` also
   retains the legacy Analyzer/Bloom/Outline/Renderer suites as regressions for archived code.
+- `Tools/UniformBlockRefreshCheck/`: checks for the active uniform-block renderer.

@@ -18,8 +18,13 @@ Install that exact model from the manifest before running. The application verif
 it does not download models or substitute a visual heuristic. The model's Apache 2.0 licence
 is included here. ONNX Runtime 1.23.2 is the CPU inference dependency.
 
+Since 2026-11-11, the active host uses `UniformBlockRefreshRenderer`: native solid-colour blocks
+with whole-block fades/brightness/opacity and same-colour exterior bloom. The independent model
+and pixel LUT are retained; the character atlas, colour bar and spectrum LUT remain inputs to
+the archived full reference implementation and its checks. Details are in `Doc/refresh-effect.md`.
+
 The host processes a captured still with one depth inference. It does not reproduce Jianying's
-live-video DIS flow/depth accumulation. Both postprocessing chains advance together at 30 Hz;
+live-video DIS flow/depth accumulation. In the archived reference renderer both postprocessing chains advance together at 30 Hz;
 that update rate and A-then-B stack order are explicit host choices, since the cached resources
 do not determine the user's project frame rate or stack evaluation order. The source defaults
 and approximately three-second scan cycle are retained. The work canvas is capped at a longest
@@ -35,5 +40,5 @@ These CPU optimizations retain the depth bands, defaults and 30 Hz history; disp
 still limited by render and upload time. Memory tradeoffs and measured timings are in
 `Doc/refresh-effect.md`.
 
-Legacy Wheel particles, radial easing, irregular wavefront, outlines and exposure correction
-are retained in source/history for comparison but are not called by this playback path.
+Legacy Wheel particles, radial easing, irregular wavefront, outlines, exposure correction and
+the full A/B reference chain are retained in source/history for comparison and rollback.

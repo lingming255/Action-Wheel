@@ -1673,7 +1673,7 @@ namespace Action_Wheel.Overlay
 
         /// <summary>
         /// Presents the hold's grey cover, restores live colour beneath it, then plays the
-        /// two reference depth-scan pipelines in a topmost, click-through image.
+        /// uniform depth-scanned blocks and bloom in a topmost, click-through image.
         /// </summary>
         /// <remarks>
         /// One bounded worker uploads the latest finished capture-relative correction. The
@@ -1721,7 +1721,7 @@ namespace Action_Wheel.Overlay
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
-            // The final correction includes both reference effects and their background LUT.
+            // One image contains the native blocks, same-colour bloom and background correction.
             var bitmap = new WriteableBitmap(bounds.Width, bounds.Height);
             using (var stream = bitmap.PixelBuffer.AsStream())
                 stream.Write(frame.Grey, 0, frame.Grey.Length);

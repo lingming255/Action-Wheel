@@ -6,14 +6,14 @@ using Windows.Graphics;
 namespace Action_Wheel.Services
 {
     /// <summary>
-    /// Original monitor capture and learned depth for the reference-effect stack. Capture happens
+    /// Original monitor capture and learned depth for the uniform-block scan. Capture happens
     /// before <see cref="ScreenGrade"/> lowers saturation; inference prepares on the hold worker.
     /// </summary>
     internal sealed class RefreshFrame
     {
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
-        /// <summary>Renders the two depth-scan pipelines into reusable playback buffers.</summary>
+        /// <summary>Renders solid blocks and their same-colour bloom into reusable playback buffers.</summary>
         public required IRefreshRenderer Renderer { get; init; }
         public required RectInt32 Bounds { get; init; }
         /// <summary>Original click position relative to the captured monitor, in physical pixels.</summary>
@@ -58,7 +58,7 @@ namespace Action_Wheel.Services
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    Renderer = new JianyingRefreshRenderer(w, h, pixels, depth),
+                    Renderer = new UniformBlockRefreshRenderer(w, h, pixels, depth),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

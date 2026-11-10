@@ -75,8 +75,8 @@ namespace Action_Wheel.Overlay
                         }))
                             return;
                         await uploaded.Task.WaitAsync(token).ConfigureAwait(false);
-                        // A fixed-step renderer has no new state between reference ticks.
-                        // Avoid computing and uploading identical images at twice that rate.
+                        // Respect the renderer's display budget. Elapsed-time renderers can
+                        // skip directly to the latest state without extending playback.
                         int delay = (int)Math.Max(1, Math.Ceiling(_renderer.FrameIntervalMs
                             - (clock.Elapsed.TotalMilliseconds - begin)));
                         await Task.Delay(delay, token).ConfigureAwait(false);

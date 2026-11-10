@@ -27,7 +27,7 @@
     VerifyFormat    - dotnet format --verify-no-changes against .editorconfig
     VerifyConfigBackup - regression-check ConfigBackup.TryImport's rejection paths (entry count,
                       entry size, unrecognised entry names, zip-slip)
-    VerifyRefresh   - check refresh layers, particle timing, bloom, outlines and bounded rendering
+    VerifyRefresh   - check uniform blocks and archived refresh pipelines, bloom and bounded rendering
     Clean           - delete bin\ and obj\
     All             - Restore, VerifyBindings, VerifyRoundTrip, VerifyChordGate, VerifyVersionSync,
                       VerifyFormat, VerifyConfigBackup, VerifyRefresh, Debug, Release, Publish
@@ -144,7 +144,7 @@ function Invoke-VerifyConfigBackup {
 }
 
 function Invoke-VerifyRefresh {
-    Write-Step 'Verifying refresh layers, per-particle radial timing and rendering'
+    Write-Step 'Verifying uniform blocks and archived refresh pipelines'
     $tool = Join-Path $root 'Tools\RefreshAnalyzerCheck\RefreshAnalyzerCheck.csproj'
     Invoke-Dotnet @('run', '--project', $tool, '--nologo')
     $bloomTool = Join-Path $root 'Tools\RefreshBloomCheck\RefreshBloomCheck.csproj'
@@ -155,6 +155,8 @@ function Invoke-VerifyRefresh {
     Invoke-Dotnet @('run', '--project', $rendererTool, '-c', 'Release', '--nologo')
     $referenceTool = Join-Path $root 'Tools\ReferenceRefreshCheck\ReferenceRefreshCheck.csproj'
     Invoke-Dotnet @('run', '--project', $referenceTool, '-c', 'Release', '--nologo')
+    $blocksTool = Join-Path $root 'Tools\UniformBlockRefreshCheck\UniformBlockRefreshCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $blocksTool, '-c', 'Release', '--nologo')
 }
 
 function Invoke-Publish {
