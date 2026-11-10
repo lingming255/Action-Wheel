@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current implementation: click-centred uniform blocks (2026-11-11)
+## Current implementation: release-centred depth-speed wave (2026-11-11)
 
 The user chose a simpler visual after trying the reference reconstruction: each pixel block
 is one solid colour with a fixed square shape. The whole block fades in/out and changes
@@ -14,8 +14,9 @@ gain or other per-pixel animation within a block. The preceding implementation i
 backup under `bin/Backups/refresh-before-uniform-blocks-20261111`.
 
 The capture path now selects `UniformBlockRefreshRenderer`. It keeps the independent learned
-depth map and approximately three-second duration. Distance from the original gesture click
-now leads the outward wave; depth supplies a small local timing stagger. Each cell samples one
+depth map and approximately three-second duration. A positive-cost neighbour wave spreads
+from the mouse release, travelling faster through near depth and slower through far depth,
+with a small delay at depth boundaries. Each cell samples one
 original-image colour and one depth value during preparation. Fixed integer rectangles are
 drawn at native output resolution; their sharp edges never pass through a low-resolution
 upsampler. The per-cell envelope is evaluated directly from elapsed time, so skipped display
@@ -37,13 +38,27 @@ the static-input and independent-depth limitations below also apply to this vers
 The native grid uses an even cell size near `0.0181 * min(width,height)` (minimum four pixels),
 with a small fixed inset. Each cell averages 16 capture samples for its pigment and samples
 depth at its centre. The same RGB proportions receive a fixed brightness lift. The physical
-click, relative to the captured monitor, is passed explicitly from `RefreshFrame`. Radius `r`
-is the distance to the cell's physical pixel centre divided by the distance to the farthest
-screen pixel corner. It is zero for a one-pixel image; origins clamp to monitor bounds.
-Start time is `140 + 1960*r + 240*depth*smoothstep(0,.15,r)` ms. Distance supplies the main
-ordering, while the existing far-before-near depth direction staggers a local band by at most
-240 ms and tapers away at the origin. Depth may reorder neighbours, but cannot reverse a radial
-separation exceeding 240 ms. Each block lasts 600 ms, fades in over 100 ms and fades out from
+release, relative to the captured monitor, is passed explicitly from `LauncherService` via
+`RefreshFrame.PrepareRelease`. Mouse and keyboard releases both pass their recorded position.
+Capture, model inference, geometry, colour and background prepare during the hold. Releasing
+only retimes the prepared grid, once and before playback; a replaced menu is ignored after
+awaiting preparation. A release over a monitor seam clamps to the original capture bounds.
+
+`RefreshPropagation` smooths block depth once with a replicated-edge 3x3 binomial filter,
+retaining raw depth for inspection. Dijkstra traverses immediate eight-neighbour cells from
+the release-containing cell. Each edge costs
+`centreDistance*(1700/farthestPixelCornerRadius)*(.85+.55*(1-meanDepth)) + 50*abs(depthDifference)`
+milliseconds. Depth is relative inverse depth, so near surfaces transmit about 1.65 times as
+fast as far surfaces before timing guards. Depth boundaries introduce modest accumulated
+delay. There is no independent offset based on depth difference from the origin: every
+non-source arrival has an earlier adjacent predecessor, so arrived regions stay connected.
+
+The source starts at 140 ms. Only if necessary, one common compression factor limits total
+travel to 2200 ms and adjacent arrival gaps to 220 ms; faster scenes retain their natural
+finish time. The latter guard keeps pulses overlapping on tiny/degenerate grids. Scaling
+preserves ordering instead of clamping distant cells into one simultaneous end band.
+The eight-neighbour distance is a grid approximation with up to about 8.24% octagonal
+directional variation on flat depth, to be assessed visually. Each block lasts 600 ms, fades in over 100 ms and fades out from
 220 to 600 ms. Maximum opacity is 0.88, and whole-block brightness ranges from 0.75 to 1.
 The renderer requests 60 Hz display updates and evaluates continuous elapsed time, without
 the archived pipeline's 30 Hz history simulation.
@@ -51,8 +66,8 @@ the archived pipeline's 30 Hz history simulation.
 The 0.3 LUT correction is prepared once using a 1280-side work buffer and encoded at native
 resolution. Its mask is one scalar per cell, fading from full correction to none over the
 first 400 ms after that same block's arrival. Core, bloom and background therefore share
-the click-centred wave. The latest possible block ends by 2940 ms, before the 3000 ms close.
-All distance calculations happen once at preparation, with no added per-frame distance work.
+the release-centred wave. The latest possible block ends by 2940 ms, before the 3000 ms close.
+Propagation is prepared before playback, with no added per-frame path solving.
 Bloom uses four reusable
 RGB float grids sized according to the native cell spacing: about 5.9 MiB at 1080p or 4.7 MiB
 at 4K. The additional retained native background correction is about 7.9/31.6 MiB respectively;
@@ -63,7 +78,13 @@ Before this timing change, the clean depth-only uniform-block version was preser
 `archive/refresh-before-click-depth-wave-20261111` (`650e8da`; runtime from `d88a9cf`).
 `bin/Backups/refresh-before-click-depth-wave-20261111` contains source ZIP, complete runtime
 and local models, with copied files hash-verified. The annotation helper accepts an optional
-physical click and records its new timing formula; previously exported depth plots are unchanged.
+physical origin and records its timing rule; previously exported depth plots are unchanged.
+
+The preceding click-distance/depth-offset version (`ec5da05`) is preserved at
+`archive/refresh-before-depth-speed-20261111`. Its source ZIP (167 verified files), complete
+runtime and local models are under `bin/Backups/refresh-before-depth-speed-20261111` with
+matching copied-file hashes. The annotation helper now simulates a release and exports the
+actual neighbour travel times, with raw depth values and the timing rule recorded separately.
 
 ### Uniform-block validation before click timing (2026-11-11)
 
@@ -94,7 +115,7 @@ and remained alive for five seconds. Published/deployed SHA-256 matched; the run
 enabled startup entry both point to the usual `quick-info-win-x64` executable. No desktop
 animation was automatically triggered; visual acceptance remains with the user.
 
-### Click-wave validation (2026-11-11)
+### Click-wave validation before depth-speed propagation (2026-11-11)
 
 All six refresh suites passed again, and Debug built with zero warnings/errors. The active
 renderer checks now cover equal-depth radial order at four centre/corner/off-centre clicks,
@@ -117,6 +138,33 @@ five seconds. Published/deployed SHA-256 matched
 `4AF315D951EC2C2F6BA370141DE834329926F3809D2931703FB178E11450205B`;
 the running path and enabled startup entry both point to that usual executable. No desktop
 effect was automatically triggered.
+
+### Depth-speed propagation validation (2026-11-11)
+
+All six refresh suites passed and Debug built with zero warnings/errors. New checks verify
+uniform near scenes finish sooner than uniform far scenes, different-depth regions at equal
+distance advance at different speeds, a narrow depth stripe delays crossing, and every
+arrival-time sublevel set remains eight-connected to its unique release cell. Flat-field
+directional error stays within 8.3% of Euclidean distance. Repeated and clamped origins,
+clipped cells, 1x1 and single-row/column inputs, bounded neighbour gaps, complete fades,
+immutable raw depth and unchanged geometry/colour after retiming also pass. Existing core,
+background, PBGRA, compositing, cancellation and stateless render checks remain passing.
+Read-only review found no actionable production issue. The actual-model annotation helper
+exported 700 identical raw depths with different centred/corner arrival times and the new
+solver metadata; existing large-image exports were preserved.
+
+Warmed release retiming measured p50 2.74/2.57 ms and maximum 3.39/3.21 ms at native
+1080p/4K (6420/5814 blocks). Active-frame p50/p95 measured 4.63/7.23 ms and 11.29/13.38 ms,
+with maxima 8.04/14.08 ms and about 50 KiB managed allocation per five frames. These are
+synthetic CPU measurements, excluding capture, inference and UI upload. Retiming reuses
+the prepared grid, colour and background; it does not rerun the model. Complex appearance,
+including any visible grid-direction bias, remains user acceptance.
+
+Release publish at `refresh-depth-speed-20261111-win-x64` completed and was deployed to the
+usual `quick-info-win-x64/Action Wheel.exe`. It survived a five-second startup check; running
+path and enabled startup entry match that executable. Published/deployed SHA-256 is
+`3708D6F5F6970C0AE51C2893751E3440F775C443978EFA1133526D73DB0A7A6F`.
+No desktop animation was automatically triggered.
 
 ## Archived implementation: the two reference pipelines (2026-11-10)
 
@@ -262,6 +310,7 @@ A CPU port of the readable shader mathematics alone would still need matching de
 
 - `Services/RefreshFrame.cs`: original capture, initial grey handoff and depth preparation.
 - `Services/UniformBlockRefreshRenderer.cs`: active native solid-block scan, whole-block envelopes and same-colour exterior bloom.
+- `Services/RefreshPropagation.cs`: prepared depth-speed travel times from the release cell through immediate neighbours.
 - `Services/RefreshDepthEstimator.cs`: pinned local ONNX model, normalization and CPU inference.
 - `Services/JianyingRefreshRenderer.cs`: fixed-step A-then-B stack and full-resolution correction.
 - `Services/RefreshOutputEncoder.cs`: cached/SIMD native-resolution colour correction.

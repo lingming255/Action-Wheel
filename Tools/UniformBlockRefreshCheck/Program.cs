@@ -11,13 +11,14 @@ internal static class UniformBlockRefreshTests
     {
         CheckWholeBlocks();
         CheckDepthAndEnvelope();
+        CheckPreparedPropagation();
         CheckClickWave();
         CheckRenderedBackgroundArrival();
         CheckTimeAndBuffers();
         CheckBloomColour();
         CheckArgumentsAndCaptureAlpha();
         CheckVisibleCompositing();
-        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, click-centred radial order, bounded depth stagger, synchronized background, whole-block fades, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending.");
+        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, connected release-centred propagation, depth-dependent speed, boundary latency, synchronized background, whole-block fades, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending.");
     }
 
     private static void CheckVisibleCompositing()
@@ -123,79 +124,155 @@ internal static class UniformBlockRefreshTests
             "Blocks do not fade as a whole on both sides of the light pulse.");
     }
 
+    private static void CheckPreparedPropagation()
+    {
+        const int side = 264, cell = 8, columns = 33, seedRow = 16;
+        int seed = seedRow * columns + seedRow;
+        double[] near = new RefreshPropagation(side, side, cell, Enumerable.Repeat(1f, columns * columns).ToArray())
+            .Arrivals(131, 131).ToArray();
+        double[] far = new RefreshPropagation(side, side, cell, new float[columns * columns])
+            .Arrivals(131, 131).ToArray();
+        Require(far.Max() - near.Max() > 350,
+            "Uniform near/far scenes were normalized to the same duration instead of retaining speed differences.");
+        for (int index = 0; index < near.Length; index++)
+            if (index != seed) Require(near[index] < far[index], "Near surfaces did not propagate faster than far surfaces.");
+
+        // Infer the flat-field speed from one axial step, then compare all directions against
+        // the Euclidean lower bound. Eight-neighbour paths should stay within 8.3% of a circle.
+        double unit = (near[seed + 1] - near[seed]) / cell;
+        for (int row = 0; row < columns; row++)
+        for (int column = 0; column < columns; column++)
+        {
+            double distance = Math.Sqrt(Math.Pow(row - seedRow, 2) + Math.Pow(column - seedRow, 2)) * cell;
+            double travel = near[row * columns + column] - near[seed];
+            Require(travel >= distance * unit - .001 && travel <= distance * unit * 1.083 + .001,
+                "Flat-field propagation acquired excessive directional grid bias.");
+            Require(Math.Abs(near[row * columns + column] - near[(columns - 1 - row) * columns + column]) < .001,
+                "A symmetric flat depth field has asymmetric propagation.");
+        }
+
+        float[] split = new float[columns * columns];
+        for (int row = 0; row < seedRow; row++) Array.Fill(split, 1, row * columns, columns);
+        double[] layers = new RefreshPropagation(side, side, cell, split).Arrivals(131, 131).ToArray();
+        Require(layers[4 * columns + seedRow] + 150 < layers[28 * columns + seedRow],
+            "Equal-distance near/far regions in one scene did not show different propagation speeds.");
+
+        const int stripeSide = 512, stripeColumns = 64;
+        float[] stripe = Enumerable.Repeat(.9f, stripeColumns * stripeColumns).ToArray();
+        double[] clear = new RefreshPropagation(stripeSide, stripeSide, cell, stripe).Arrivals(0, 260).ToArray();
+        for (int row = 0; row < stripeColumns; row++) stripe[row * stripeColumns + 8] = 0;
+        double[] obstructed = new RefreshPropagation(stripeSide, stripeSide, cell, stripe).Arrivals(0, 260).ToArray();
+        int beyondBoundary = 32 * stripeColumns + 16;
+        Require(obstructed[beyondBoundary] > clear[beyondBoundary] + 35,
+            "Crossing a narrow depth boundary added no perceptible latency beyond its small spatial width.");
+
+        const int width = 137, height = 79, smallCell = 4;
+        int smallColumns = (width + smallCell - 1) / smallCell, rows = (height + smallCell - 1) / smallCell;
+        float[] raw = Enumerable.Range(0, smallColumns * rows).Select(index => (index * 37 % 101) / 100f).ToArray();
+        float[] before = (float[])raw.Clone();
+        var solver = new RefreshPropagation(width, height, smallCell, raw);
+        foreach ((int x, int y) in new[] { (68, 39), (0, 0), (136, 78), (21, 57) })
+        {
+            double[] times = solver.Arrivals(x, y).ToArray();
+            CheckArrivalField(times, smallColumns, rows, y / smallCell * smallColumns + x / smallCell);
+        }
+        double[] first = solver.Arrivals(0, 0).ToArray();
+        Require(first.AsSpan().SequenceEqual(solver.Arrivals(int.MinValue, int.MinValue)),
+            "An offscreen negative origin did not clamp to the captured grid.");
+        double[] last = solver.Arrivals(width - 1, height - 1).ToArray();
+        Require(last.AsSpan().SequenceEqual(solver.Arrivals(int.MaxValue, int.MaxValue)),
+            "An offscreen positive origin did not clamp to the captured grid.");
+        Require(first.AsSpan().SequenceEqual(solver.Arrivals(0, 0)), "Reusing the solver retained stale frontier state.");
+        Require(raw.AsSpan().SequenceEqual(before), "Propagation smoothing modified the original depth values.");
+
+        foreach ((int w, int h) in new[] { (1, 1), (1, 17), (19, 1), (7, 5) })
+        {
+            int c = (w + 3) / 4, r = (h + 3) / 4;
+            double[] times = new RefreshPropagation(w, h, 4, new float[c * r]).Arrivals(0, 0).ToArray();
+            CheckArrivalField(times, c, r, 0);
+        }
+        ThrowsArgument(() => new RefreshPropagation(0, 1, 4, []), "An invalid propagation grid was accepted.");
+        ThrowsArgument(() => new RefreshPropagation(7, 5, 4, [0]), "Missing per-cell propagation depths were accepted.");
+        ThrowsArgument(() => new RefreshPropagation(1, 1, 4, [float.NaN]), "A nonfinite propagation depth was accepted.");
+        Console.WriteLine("Prepared propagation checks: near/far speed, same-scene layers, depth-edge latency, flat-field isotropy, all-sublevel connectivity at four origins, bounded adjacent gaps, clamped/degenerate/residual cells and immutable depth.");
+    }
+
+    private static void CheckArrivalField(double[] times, int columns, int rows, int seed)
+    {
+        Require(times.Length == columns * rows && times.All(time => double.IsFinite(time)
+            && time >= 140 && time + 600 <= 3000.001), "A propagation arrival is invalid or loses its complete fade.");
+        Require(times[seed] == 140 && times.Where((_, index) => index != seed).All(time => time > times[seed]),
+            "Propagation did not begin uniquely at the release-containing cell.");
+        foreach (int current in Enumerable.Range(0, times.Length))
+        foreach (int next in Neighbours(current, columns, rows))
+            Require(Math.Abs(times[current] - times[next]) <= 220.001,
+                "Adjacent light pulses no longer overlap before their whole-block fade finishes.");
+
+        // Independently flood every sublevel set, including equal-time batches. Every reached
+        // cell must be connected through already reached neighbours to the one release cell.
+        var visited = new bool[times.Length];
+        var flood = new Queue<int>();
+        foreach (double threshold in times.Distinct().Order())
+        {
+            Array.Clear(visited);
+            flood.Clear();
+            flood.Enqueue(seed); visited[seed] = true;
+            int count = 0;
+            while (flood.TryDequeue(out int current))
+            {
+                count++;
+                foreach (int next in Neighbours(current, columns, rows))
+                    if (!visited[next] && times[next] <= threshold)
+                    { visited[next] = true; flood.Enqueue(next); }
+            }
+            Require(count == times.Count(time => time <= threshold),
+                "A disconnected remote island lit before propagation could reach it through adjacent cells.");
+        }
+    }
+
+    private static IEnumerable<int> Neighbours(int index, int columns, int rows)
+    {
+        int row = index / columns, column = index % columns;
+        for (int y = Math.Max(0, row - 1); y <= Math.Min(rows - 1, row + 1); y++)
+        for (int x = Math.Max(0, column - 1); x <= Math.Min(columns - 1, column + 1); x++)
+            if (y * columns + x != index) yield return y * columns + x;
+    }
+
     private static void CheckClickWave()
     {
         const int width = 137, height = 79;
         byte[] capture = Solid(width, height, new Vector3(95, 150, 45));
-        foreach ((int originX, int originY) in new[] { (68, 39), (0, 0), (136, 78), (21, 57) })
+        var depth = Depth(23, 17);
+        float[] rawDepth = (float[])depth.Values.Clone();
+        var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth, 0, 0);
+        var original = renderer.Blocks.ToArray();
+        int cell = original[0].CellWidth, columns = (width + cell - 1) / cell, rows = (height + cell - 1) / cell;
+        foreach ((int x, int y) in new[] { (68, 39), (0, 0), (136, 78), (21, 57), (1, 1), (2, 3) })
         {
-            var farDepth = new UniformBlockRefreshRenderer(width, height, capture,
-                new RefreshDepthMap(1, 1, [0]), originX, originY);
-            var nearDepth = new UniformBlockRefreshRenderer(width, height, capture,
-                new RefreshDepthMap(1, 1, [1]), originX, originY);
-            var farBlocks = farDepth.Blocks.ToArray();
-            var nearBlocks = nearDepth.Blocks.ToArray();
-            var ordered = farBlocks.OrderBy(block => Radius(block, originX, originY)).ToArray();
-            for (int index = 1; index < ordered.Length; index++)
-                Require(ordered[index].StartMs >= ordered[index - 1].StartMs - .001,
-                    "Equal-depth blocks do not appear in radial order from the click.");
-            Require(ordered[^1].StartMs - ordered[0].StartMs > 1400,
-                "The click wave no longer drives most of the appearance timing.");
-            Require(Radius(ordered[0], originX, originY) <= 3,
-                "The wave did not begin at a cell next to the click.");
-
-            double smallestStagger = double.MaxValue, largestStagger = 0;
-            for (int index = 0; index < farBlocks.Length; index++)
+            renderer.SetOrigin(x, y);
+            var blocks = renderer.Blocks.ToArray();
+            CheckArrivalField(blocks.Select(block => block.StartMs).ToArray(), columns, rows, y / cell * columns + x / cell);
+            for (int index = 0; index < blocks.Length; index++)
             {
-                double stagger = nearBlocks[index].StartMs - farBlocks[index].StartMs;
-                Require(stagger >= -.001 && stagger <= 240.001,
-                    "Depth reversed the scan or overwhelmed the radial wave.");
-                smallestStagger = Math.Min(smallestStagger, stagger);
-                largestStagger = Math.Max(largestStagger, stagger);
-                Require(nearBlocks[index].StartMs >= 0 && nearBlocks[index].StartMs + 600 <= nearDepth.DurationMs,
-                    "A late block is cut off before its whole fade finishes.");
-                CheckBackgroundEnvelope(nearBlocks[index]);
+                Require((blocks[index] with { StartMs = 0 }) == (original[index] with { StartMs = 0 }),
+                    "Retiming at release changed prepared geometry, pigment or raw depth.");
+                CheckBackgroundEnvelope(blocks[index]);
             }
-            Require(smallestStagger < largestStagger * .15 && largestStagger > 200,
-                "Depth layers are absent or create an initial hole around the click.");
-            var nearby = nearBlocks.OrderBy(block => Radius(block, originX, originY)).ElementAt(nearBlocks.Length / 10);
-            var distant = farBlocks.OrderBy(block => Radius(block, originX, originY)).ElementAt(farBlocks.Length * 9 / 10);
-            Require(nearby.StartMs < distant.StartMs,
-                "Depth delayed a nearby block behind a much more distant one.");
         }
-
-        var left = new UniformBlockRefreshRenderer(width, height, capture,
-            new RefreshDepthMap(1, 1, [.5f]), 0, 0).Blocks.ToArray();
-        var right = new UniformBlockRefreshRenderer(width, height, capture,
-            new RefreshDepthMap(1, 1, [.5f]), width - 1, height - 1).Blocks.ToArray();
-        Require(left[0].StartMs < right[0].StartMs && right[^1].StartMs < left[^1].StartMs,
-            "Moving the click did not move the source of the wave.");
-        var clampedLeft = new UniformBlockRefreshRenderer(width, height, capture,
-            new RefreshDepthMap(1, 1, [.5f]), int.MinValue, int.MinValue).Blocks.ToArray();
-        var clampedRight = new UniformBlockRefreshRenderer(width, height, capture,
-            new RefreshDepthMap(1, 1, [.5f]), int.MaxValue, int.MaxValue).Blocks.ToArray();
-        Require(left.SequenceEqual(clampedLeft) && right.SequenceEqual(clampedRight),
-            "Out-of-monitor clicks did not clamp to the captured monitor.");
-        Require(left[^1].CellWidth < left[0].CellWidth && left[^1].CellHeight < left[0].CellHeight,
-            "The radial checks did not exercise clipped edge cells.");
-
-        foreach ((int w, int h) in new[] { (1, 1), (1, 17), (19, 1) })
-        {
-            var renderer = new UniformBlockRefreshRenderer(w, h, Solid(w, h, new Vector3(100)),
-                new RefreshDepthMap(1, 1, [1]), 0, 0);
-            foreach (var block in renderer.Blocks)
-                Require(double.IsFinite(block.StartMs) && block.StartMs >= 0
-                    && block.StartMs + 600 <= renderer.DurationMs,
-                    "A degenerate monitor produced invalid or unfinished click-wave timing.");
-        }
-        Console.WriteLine("Click-wave checks: radial ordering at four origins, bounded/de-emphasized central depth, moved and clamped sources, clipped/degenerate edges, complete tails and shared background timing.");
-    }
-
-    private static double Radius(UniformBlockRefreshRenderer.Block block, int originX, int originY)
-    {
-        double dx = block.CellLeft + (block.CellWidth - 1) * .5 - originX;
-        double dy = block.CellTop + (block.CellHeight - 1) * .5 - originY;
-        return Math.Sqrt(dx * dx + dy * dy);
+        renderer.SetOrigin(0, 0);
+        Require(original.SequenceEqual(renderer.Blocks.ToArray()), "Returning to the initial release cell changed the prepared scene.");
+        renderer.SetOrigin(int.MinValue, int.MinValue);
+        Require(original.SequenceEqual(renderer.Blocks.ToArray()), "Renderer origin retiming did not clamp negative coordinates.");
+        renderer.SetOrigin(width - 1, height - 1);
+        var last = renderer.Blocks.ToArray();
+        renderer.SetOrigin(int.MaxValue, int.MaxValue);
+        Require(last.SequenceEqual(renderer.Blocks.ToArray()), "Renderer origin retiming did not clamp positive coordinates.");
+        Require(original[0].StartMs < last[0].StartMs && last[^1].StartMs < original[^1].StartMs,
+            "Moving the release position did not move the source of the light wave.");
+        Require(last[^1].CellWidth < last[0].CellWidth && last[^1].CellHeight < last[0].CellHeight,
+            "The release checks did not exercise clipped edge cells.");
+        Require(depth.Values.AsSpan().SequenceEqual(rawDepth), "Release retiming modified the model's raw depth map.");
+        Console.WriteLine("Release retiming checks: moved/same-cell origins, immutable geometry/pigment/depth, connected propagation, full tails and shared background timing.");
     }
 
     private static void CheckBackgroundEnvelope(UniformBlockRefreshRenderer.Block block)
@@ -384,6 +461,20 @@ internal static class UniformBlockRefreshTests
             var watch = Stopwatch.StartNew();
             var renderer = new UniformBlockRefreshRenderer(width, height, capture, Depth(128, 72), width / 2, height / 2);
             double prepare = watch.Elapsed.TotalMilliseconds;
+            (int X, int Y)[] origins = [(0, 0), (width - 1, height - 1),
+                (width / 4, height * 3 / 4), (width * 3 / 4, height / 4)];
+            foreach (var origin in origins) renderer.SetOrigin(origin.X, origin.Y);
+            var retimes = new List<double>();
+            for (int sample = 0; sample < 12; sample++)
+            {
+                var origin = origins[sample % origins.Length];
+                watch.Restart();
+                renderer.SetOrigin(origin.X, origin.Y);
+                retimes.Add(watch.Elapsed.TotalMilliseconds);
+            }
+            retimes.Sort();
+            Console.WriteLine($"Prepared release retime native {width}x{height}: {renderer.Blocks.Length} blocks, warmed p50={retimes[retimes.Count / 2]:F2}ms, p95/max={retimes[^1]:F2}ms (synchronous solve only, before UI upload/depth/capture).");
+            renderer.SetOrigin(width / 2, height / 2);
             byte[] frame = new byte[capture.Length], bloom = new byte[4];
             renderer.Render(0, frame, bloom);
             renderer.Render(100, frame, bloom);

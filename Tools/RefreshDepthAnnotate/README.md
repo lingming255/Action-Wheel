@@ -17,10 +17,12 @@ model `depth.json` and dimensions/meaning in `metadata.json`. Image numbers are 
 two decimals: 0 is far, 1 is near. The last clipped row/column use full display slots so
 their labels fit; the actual sample centres and clipped geometry are retained in the CSV.
 
-Appearance times use the current click-distance wave with a depth stagger of at most 240 ms.
-The default simulated click is the image centre. Pass both `-OriginX 300 -OriginY 200` to
+Appearance times use the current neighbour-propagated depth-speed wave: near cells transmit
+faster, distant cells slower, with modest delay across depth boundaries. Timing depth receives
+one small binomial smoothing; exported depth numbers remain raw. The default simulated mouse
+release is the image centre. Pass both `-OriginX 300 -OriginY 200` to
 the PowerShell command to choose a physical pixel position; out-of-image coordinates clamp
-to the image boundary. `metadata.json` records that origin and the timing formula. Depth
+to the image boundary. `metadata.json` records that origin and the travel-cost rule. Depth
 numbers and heatmap colours remain depth alone, independent of the simulated click. Existing
 exports retain the timing version recorded when they were generated.
 

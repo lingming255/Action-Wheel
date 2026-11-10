@@ -14,11 +14,27 @@ namespace Action_Wheel.Services
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
         /// <summary>Renders solid blocks and their same-colour bloom into reusable playback buffers.</summary>
-        public required IRefreshRenderer Renderer { get; init; }
+        public required UniformBlockRefreshRenderer Renderer { get; init; }
         public required RectInt32 Bounds { get; init; }
-        /// <summary>Original click position relative to the captured monitor, in physical pixels.</summary>
-        public required int OriginX { get; init; }
-        public required int OriginY { get; init; }
+        /// <summary>Wave origin relative to the captured monitor, in physical pixels.</summary>
+        public int OriginX { get; private set; }
+        public int OriginY { get; private set; }
+        private bool _releasePrepared;
+
+        /// <summary>
+        /// UI thread, after capture completes and before playback. The first release freezes
+        /// timing, so a duplicate completion cannot retime a renderer already owned by a worker.
+        /// Keep the original capture monitor if a release crosses its edge.
+        /// </summary>
+        internal void PrepareRelease(PointInt32 release)
+        {
+            if (_releasePrepared) return;
+            int originX = (int)Math.Clamp((long)release.X - Bounds.X, 0, Bounds.Width - 1);
+            int originY = (int)Math.Clamp((long)release.Y - Bounds.Y, 0, Bounds.Height - 1);
+            Renderer.SetOrigin(originX, originY);
+            OriginX = originX; OriginY = originY;
+            _releasePrepared = true;
+        }
 
         /// <summary>
         /// Captures and builds on a worker thread. <paramref name="grabbed"/> runs as soon as the

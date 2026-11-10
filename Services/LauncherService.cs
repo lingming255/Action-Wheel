@@ -456,7 +456,7 @@ namespace Action_Wheel.Services
                 if (tag != null)
                     _currentMenu?.InvokeTag(tag.Value);
                 else
-                    PlayRefresh();
+                    PlayRefresh(position);
             });
         }
 
@@ -592,7 +592,7 @@ namespace Action_Wheel.Services
                     && _quickInfoActions[selected].Kind != ActionKind.Group)
                     _currentMenu?.InvokeTag(selected);
                 else if (tag == null)
-                    PlayRefresh();
+                    PlayRefresh(position);
                 else
                     CloseCurrentMenu();
             });
@@ -630,7 +630,7 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// A centre release starts the click-centred block wave. Capture and learned
+        /// A centre release starts the depth-speed block wave at that release position. Capture and learned
         /// depth usually prepare during the hold; a faster release waits for them.
         /// </summary>
         /// <remarks>
@@ -639,19 +639,35 @@ namespace Action_Wheel.Services
         /// handoff hides that transition before block playback begins.
         /// If the menu closes first, its Closed handler restores colour instead.
         /// </remarks>
-        private async void PlayRefresh()
+        private async void PlayRefresh(PointInt32 release)
         {
             var menu = _currentMenu;
             if (menu == null)
                 return;
 
-            var pending = ReferenceEquals(_gradedMenu, menu) ? _refreshFrame : null;
-            RefreshFrame? frame = pending == null ? null : await pending;
-            menu.PlayRefresh(frame, () =>
+            try
             {
-                if (ReferenceEquals(_gradedMenu, menu))
-                    EndGrade();
-            });
+                var pending = ReferenceEquals(_gradedMenu, menu) ? _refreshFrame : null;
+                RefreshFrame? frame = pending == null ? null : await pending;
+                // A canceled/replaced gesture must never retime or start the old menu after
+                // its background preparation completes. Rebase only the small prepared grid.
+                if (!ReferenceEquals(_currentMenu, menu)) return;
+                frame?.PrepareRelease(release);
+                menu.PlayRefresh(frame, () =>
+                {
+                    if (ReferenceEquals(_gradedMenu, menu))
+                        EndGrade();
+                });
+            }
+            catch (Exception)
+            {
+                // Decorative preparation failure must not escape async void or strand grey.
+                if (ReferenceEquals(_currentMenu, menu))
+                {
+                    _ = EndGrade();
+                    CloseCurrentMenu();
+                }
+            }
         }
 
         /// <summary>

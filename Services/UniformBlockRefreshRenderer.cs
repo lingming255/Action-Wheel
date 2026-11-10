@@ -17,8 +17,6 @@ namespace Action_Wheel.Services
     {
         private const float MosaicFraction = 0.0181f;
         private const double BlockLifetimeMs = 600;
-        private const double WaveTravelMs = 1960;
-        private const double DepthStaggerMs = 240;
         private const float MaximumOpacity = 0.88f;
         private const float BloomGain = 0.8f;
         private static readonly byte[] RequiredAlpha = BuildRequiredAlpha();
@@ -36,6 +34,8 @@ namespace Action_Wheel.Services
         private readonly int _width, _height, _cellSize, _columns;
         private readonly byte[] _capture, _background;
         private readonly Block[] _blocks;
+        private readonly RefreshPropagation _propagation;
+        private int _originX = -1, _originY = -1;
         private readonly State[] _states;
         private readonly int _bloomStep, _bloomWidth, _bloomHeight, _bandCount;
         private readonly Vector3[] _emission, _horizontal, _near, _far;
@@ -73,16 +73,12 @@ namespace Action_Wheel.Services
                     throw new ArgumentException("Depth values must be finite and normalized.", nameof(depth));
 
             _width = width; _height = height; _capture = capture;
-            originX = Math.Clamp(originX, 0, width - 1);
-            originY = Math.Clamp(originY, 0, height - 1);
-            double farX = Math.Max(originX, width - 1 - originX);
-            double farY = Math.Max(originY, height - 1 - originY);
-            double maximumRadius = Math.Sqrt(farX * farX + farY * farY);
             _cellSize = Math.Max(4, 2 * (int)MathF.Floor(MosaicFraction * Math.Min(width, height) / 2));
             _columns = (width + _cellSize - 1) / _cellSize;
             int rows = (height + _cellSize - 1) / _cellSize;
             _blocks = new Block[checked(_columns * rows)];
             _states = new State[_blocks.Length];
+            var blockDepth = new float[_blocks.Length];
             int margin = Math.Max(1, (int)Math.Round(_cellSize * 0.10));
             for (int row = 0; row < rows; row++)
             for (int column = 0; column < _columns; column++)
@@ -98,18 +94,13 @@ namespace Action_Wheel.Services
                 // white centre, thresholded white glare, hue transfer or animated colour field.
                 float maximum = Math.Max(colour.X, Math.Max(colour.Y, colour.Z));
                 if (maximum > 0) colour *= 1 + .35f * (.92f / maximum - 1);
-                double dx = left + (cellWidth - 1) * .5 - originX;
-                double dy = top + (cellHeight - 1) * .5 - originY;
-                double radius = maximumRadius > 0
-                    ? Math.Clamp(Math.Sqrt(dx * dx + dy * dy) / maximumRadius, 0, 1) : 0;
-                // Distance leads the wave. Depth only delays nearby surfaces within a narrow
-                // band, tapering to zero at the click so it cannot create a depth-sized hole.
-                double startMs = 140 + WaveTravelMs * radius
-                    + DepthStaggerMs * d * Smooth(0, .15, radius);
+                blockDepth[row * _columns + column] = d;
                 _blocks[row * _columns + column] = new Block(left, top, cellWidth, cellHeight,
                     left + insetX, top + insetY, cellWidth - insetX * 2, cellHeight - insetY * 2,
-                    colour, d, startMs);
+                    colour, d, 0);
             }
+            _propagation = new RefreshPropagation(width, height, _cellSize, blockDepth);
+            SetOrigin(originX, originY);
 
             // Bloom work stays proportional to block count, rather than native monitor pixels.
             _bloomStep = Math.Max(1, _cellSize / 4);
@@ -128,6 +119,18 @@ namespace Action_Wheel.Services
             Map(_x0, _x1, _xWeight, _bloomWidth, _bloomStep);
             Map(_y0, _y1, _yWeight, _bloomHeight, _bloomStep);
             _background = BuildBackground(width, height, capture);
+        }
+
+        /// <summary>Retimes the prepared grid at release, before any playback worker starts.</summary>
+        internal void SetOrigin(int originX, int originY)
+        {
+            originX = Math.Clamp(originX, 0, _width - 1);
+            originY = Math.Clamp(originY, 0, _height - 1);
+            if (originX == _originX && originY == _originY) return;
+            ReadOnlySpan<double> arrivals = _propagation.Arrivals(originX, originY);
+            for (int index = 0; index < _blocks.Length; index++)
+                _blocks[index] = _blocks[index] with { StartMs = arrivals[index] };
+            _originX = originX; _originY = originY;
         }
 
         /// <summary>The same scalar applies to every pixel of a block; age is in milliseconds.</summary>
