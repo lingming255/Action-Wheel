@@ -16,7 +16,6 @@ namespace Action_Wheel.Services
     internal sealed class UniformBlockRefreshRenderer : IRefreshRenderer
     {
         private const float MosaicFraction = 0.0181f;
-        private const double BlockLifetimeMs = 600;
         private const float MaximumOpacity = 0.88f;
         private const float BloomGain = 0.8f;
         private static readonly byte[] RequiredAlpha = BuildRequiredAlpha();
@@ -34,7 +33,7 @@ namespace Action_Wheel.Services
         private readonly int _width, _height, _cellSize, _columns;
         private readonly byte[] _capture, _background;
         private readonly Block[] _blocks;
-        private readonly RefreshPropagation _propagation;
+        private readonly RefreshDepthMap _depthMap;
         private int _originX = -1, _originY = -1;
         private readonly State[] _states;
         private readonly int _bloomStep, _bloomWidth, _bloomHeight, _bandCount;
@@ -50,12 +49,13 @@ namespace Action_Wheel.Services
         private bool _horizontalPass;
         private CancellationToken _cancellation;
 
-        public double DurationMs => 3000;
+        public double DurationMs => RefreshDepthSweep.DurationMs;
         public double FrameIntervalMs => 1000.0 / 60;
         // The final bitmap already contains core, background correction and bloom.
         public int BloomWidth => 1;
         public int BloomHeight => 1;
         internal ReadOnlySpan<Block> Blocks => _blocks;
+        internal float OriginDepth { get; private set; }
 
         public UniformBlockRefreshRenderer(int width, int height, byte[] capture, RefreshDepthMap depth,
             int originX, int originY)
@@ -73,12 +73,12 @@ namespace Action_Wheel.Services
                     throw new ArgumentException("Depth values must be finite and normalized.", nameof(depth));
 
             _width = width; _height = height; _capture = capture;
+            _depthMap = depth;
             _cellSize = Math.Max(4, 2 * (int)MathF.Floor(MosaicFraction * Math.Min(width, height) / 2));
             _columns = (width + _cellSize - 1) / _cellSize;
             int rows = (height + _cellSize - 1) / _cellSize;
             _blocks = new Block[checked(_columns * rows)];
             _states = new State[_blocks.Length];
-            var blockDepth = new float[_blocks.Length];
             int margin = Math.Max(1, (int)Math.Round(_cellSize * 0.10));
             for (int row = 0; row < rows; row++)
             for (int column = 0; column < _columns; column++)
@@ -94,12 +94,10 @@ namespace Action_Wheel.Services
                 // white centre, thresholded white glare, hue transfer or animated colour field.
                 float maximum = Math.Max(colour.X, Math.Max(colour.Y, colour.Z));
                 if (maximum > 0) colour *= 1 + .35f * (.92f / maximum - 1);
-                blockDepth[row * _columns + column] = d;
                 _blocks[row * _columns + column] = new Block(left, top, cellWidth, cellHeight,
                     left + insetX, top + insetY, cellWidth - insetX * 2, cellHeight - insetY * 2,
                     colour, d, 0);
             }
-            _propagation = new RefreshPropagation(width, height, _cellSize, blockDepth);
             SetOrigin(originX, originY);
 
             // Bloom work stays proportional to block count, rather than native monitor pixels.
@@ -127,16 +125,20 @@ namespace Action_Wheel.Services
             originX = Math.Clamp(originX, 0, _width - 1);
             originY = Math.Clamp(originY, 0, _height - 1);
             if (originX == _originX && originY == _originY) return;
-            ReadOnlySpan<double> arrivals = _propagation.Arrivals(originX, originY);
+            OriginDepth = RefreshDepthSweep.SampleOrigin(_depthMap, _width, _height, originX, originY);
             for (int index = 0; index < _blocks.Length; index++)
-                _blocks[index] = _blocks[index] with { StartMs = arrivals[index] };
+                _blocks[index] = _blocks[index] with
+                {
+                    StartMs = RefreshDepthSweep.StartAt(_blocks[index].Depth, OriginDepth),
+                };
             _originX = originX; _originY = originY;
         }
 
         /// <summary>The same scalar applies to every pixel of a block; age is in milliseconds.</summary>
         internal static float OpacityAt(double ageMs)
-            => !double.IsFinite(ageMs) || ageMs <= 0 || ageMs >= BlockLifetimeMs ? 0
-                : MaximumOpacity * Smooth(0, 100, ageMs) * (1 - Smooth(220, BlockLifetimeMs, ageMs));
+            => !double.IsFinite(ageMs) || ageMs <= 0 || ageMs >= RefreshDepthSweep.LifetimeMs ? 0
+                : MaximumOpacity * Smooth(0, RefreshDepthSweep.RiseMs, ageMs)
+                    * (1 - Smooth(RefreshDepthSweep.FadeStartMs, RefreshDepthSweep.LifetimeMs, ageMs));
 
         internal static uint CoreAt(Block block, double elapsedMs)
         {
@@ -151,9 +153,9 @@ namespace Action_Wheel.Services
         }
 
         // Reveal the ungraded desktop behind the same arriving light pulse. Bloom already uses
-        // this block's age, so all three layers propagate from the gesture's physical origin.
+        // this block's age, so all three layers follow the same two depth fronts.
         internal static int BackgroundAmountAt(Block block, double elapsedMs)
-            => (int)MathF.Round(256 * (1 - Smooth(0, 400, elapsedMs - block.StartMs)));
+            => (int)MathF.Round(256 * (1 - Smooth(0, RefreshDepthSweep.BackgroundRestoreMs, elapsedMs - block.StartMs)));
 
         public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,
             CancellationToken cancellation = default)

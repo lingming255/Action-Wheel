@@ -17,9 +17,11 @@ model `depth.json` and dimensions/meaning in `metadata.json`. Image numbers are 
 two decimals: 0 is far, 1 is near. The last clipped row/column use full display slots so
 their labels fit; the actual sample centres and clipped geometry are retained in the CSV.
 
-Appearance times use the current neighbour-propagated depth-speed wave: near cells transmit
-faster, distant cells slower, with modest delay across depth boundaries. Timing depth receives
-one small binomial smoothing; exported depth numbers remain raw. The default simulated mouse
+Appearance times use two depth fronts moving away from the actual pointer depth towards
+far and near. Start is `119 + 1870*abs(depth-originDepth)/max(originDepth,1-originDepth)` ms;
+both directions share one depth speed, with all timing 15% shorter than the preceding version.
+The model is sampled at the actual pointer pixel for `originDepth`; exported block depths
+remain raw cell-centre values. The default simulated mouse
 release is the image centre. Pass both `-OriginX 300 -OriginY 200` to
 the PowerShell command to choose a physical pixel position; out-of-image coordinates clamp
 to the image boundary. `metadata.json` records that origin and the travel-cost rule. Depth

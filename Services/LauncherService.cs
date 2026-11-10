@@ -630,7 +630,7 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// A centre release starts the depth-speed block wave at that release position. Capture and learned
+        /// A centre release starts two depth fronts from the pointer's depth. Capture and learned
         /// depth usually prepare during the hold; a faster release waits for them.
         /// </summary>
         /// <remarks>

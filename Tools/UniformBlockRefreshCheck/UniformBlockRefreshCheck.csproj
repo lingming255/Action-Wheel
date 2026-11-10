@@ -11,6 +11,7 @@
     <Compile Include="../../Services/RefreshOutputEncoder.cs" Link="RefreshOutputEncoder.cs" />
     <Compile Include="../../Services/UniformBlockRefreshRenderer.cs" Link="UniformBlockRefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshPropagation.cs" Link="RefreshPropagation.cs" />
+    <Compile Include="../../Services/RefreshDepthSweep.cs" Link="RefreshDepthSweep.cs" />
     <Compile Include="../../Services/RefreshDepthEstimator.cs" Link="RefreshDepthEstimator.cs" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
     <EmbeddedResource Include="../../Assets/RefreshReference/*.rgb.gz"

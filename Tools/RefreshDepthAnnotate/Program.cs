@@ -58,12 +58,12 @@ var metadata = new {
     MinimumBlockDepth = blocks.Min(block => block.Depth), MaximumBlockDepth = blocks.Max(block => block.Depth),
     Meaning = "Relative inverse depth: 0 far, 1 near; cell centre sampled by actual renderer",
     OriginX = originX, OriginY = originY,
+    OriginDepth = renderer.OriginDepth,
     OriginDefault = args.Length == 2 ? "Image centre; pass X Y to simulate a specific release" : "Explicit physical pixel release coordinates (clamped to image)",
-    StartTime = "140ms + eight-neighbour shortest travel time, with common compression only if needed for 2200ms travel / 220ms neighbour-gap limits",
-    TravelCost = "centreDistance * (1700 / farthestPixelCornerRadius) * (0.85 + 0.55 * (1 - meanTimingDepth)) + 50 * abs(timingDepthDifference) milliseconds",
-    TimingDepth = "One 3x3 binomial smoothing of block depth; CSV depth remains raw. Release-containing cell starts at 140ms",
+    StartTime = "119 + 1870 * abs(depth - originDepth) / max(originDepth, 1 - originDepth) milliseconds",
+    TimingDepth = "Raw cell-centre depth, compared to bilinear model depth at actual pointer pixel; equal-depth regions share timing regardless of spatial separation",
     Padding = "Right/bottom partial cells are displayed as full slots; samples still use actual clipped centres",
-    TimingVersion = "release-depth-speed-v1"
+    TimingVersion = "pointer-bidirectional-depth-v1"
 };
 File.WriteAllText(Path.Combine(output, "metadata.json"), JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine(JsonSerializer.Serialize(metadata));

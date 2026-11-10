@@ -1673,7 +1673,7 @@ namespace Action_Wheel.Overlay
 
         /// <summary>
         /// Presents the hold's grey cover, restores live colour beneath it, then plays the
-        /// uniform blocks and bloom following the depth-speed wave in a topmost, click-through image.
+        /// uniform blocks and bloom following two depth fronts in a topmost, click-through image.
         /// </summary>
         /// <remarks>
         /// One bounded worker uploads the latest finished capture-relative correction. The

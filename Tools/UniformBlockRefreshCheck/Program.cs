@@ -12,13 +12,14 @@ internal static class UniformBlockRefreshTests
         CheckWholeBlocks();
         CheckDepthAndEnvelope();
         CheckPreparedPropagation();
+        CheckBidirectionalTiming();
         CheckClickWave();
         CheckRenderedBackgroundArrival();
         CheckTimeAndBuffers();
         CheckBloomColour();
         CheckArgumentsAndCaptureAlpha();
         CheckVisibleCompositing();
-        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, connected release-centred propagation, depth-dependent speed, boundary latency, synchronized background, whole-block fades, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending.");
+        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, bidirectional depth order, actual pointer-depth sampling, equal-depth simultaneous arrival, faster envelopes, synchronized background, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending. Archived neighbour propagation checks also remain passing.");
     }
 
     private static void CheckVisibleCompositing()
@@ -122,6 +123,10 @@ internal static class UniformBlockRefreshTests
             && opacity.Take(peak).Any(value => value > 0 && value < opacity[peak])
             && opacity.Skip(peak + 1).Any(value => value > 0 && value < opacity[peak]),
             "Blocks do not fade as a whole on both sides of the light pulse.");
+        Require(UniformBlockRefreshRenderer.OpacityAt(RefreshDepthSweep.RiseMs) > .8f
+            && UniformBlockRefreshRenderer.OpacityAt(RefreshDepthSweep.LifetimeMs) == 0
+            && renderer.DurationMs == 2550 && RefreshDepthSweep.LifetimeMs == 510,
+            "The requested modest 15% speedup did not preserve a complete whole-block pulse.");
     }
 
     private static void CheckPreparedPropagation()
@@ -194,7 +199,7 @@ internal static class UniformBlockRefreshTests
         ThrowsArgument(() => new RefreshPropagation(0, 1, 4, []), "An invalid propagation grid was accepted.");
         ThrowsArgument(() => new RefreshPropagation(7, 5, 4, [0]), "Missing per-cell propagation depths were accepted.");
         ThrowsArgument(() => new RefreshPropagation(1, 1, 4, [float.NaN]), "A nonfinite propagation depth was accepted.");
-        Console.WriteLine("Prepared propagation checks: near/far speed, same-scene layers, depth-edge latency, flat-field isotropy, all-sublevel connectivity at four origins, bounded adjacent gaps, clamped/degenerate/residual cells and immutable depth.");
+        Console.WriteLine("Archived prepared propagation checks: near/far speed, same-scene layers, depth-edge latency, flat-field isotropy, all-sublevel connectivity at four origins, bounded adjacent gaps, clamped/degenerate/residual cells and immutable depth.");
     }
 
     private static void CheckArrivalField(double[] times, int columns, int rows, int seed)
@@ -238,26 +243,81 @@ internal static class UniformBlockRefreshTests
             if (y * columns + x != index) yield return y * columns + x;
     }
 
+    private static void CheckBidirectionalTiming()
+    {
+        foreach (float origin in new[] { 0f, .1f, .25f, .5f, .6f, .9f, 1f })
+        {
+            Require(RefreshDepthSweep.StartAt(origin, origin) == RefreshDepthSweep.StartDelayMs,
+                "The pointer's own depth did not begin the scan.");
+            double previousFar = RefreshDepthSweep.StartAt(origin, origin);
+            double previousNear = previousFar;
+            for (int step = 1; step <= 100; step++)
+            {
+                float farther = origin * (1 - step / 100f);
+                float nearer = origin + (1 - origin) * step / 100f;
+                double far = RefreshDepthSweep.StartAt(farther, origin);
+                double near = RefreshDepthSweep.StartAt(nearer, origin);
+                Require(far >= previousFar - .001 && near >= previousNear - .001,
+                    "A bidirectional depth branch scanned backwards or skipped its starting layer.");
+                Require(double.IsFinite(far) && double.IsFinite(near)
+                    && Math.Max(far, near) + RefreshDepthSweep.LifetimeMs <= RefreshDepthSweep.DurationMs,
+                    "An endpoint or interior depth loses the complete fade after the faster scan.");
+                previousFar = far; previousNear = near;
+            }
+            float span = Math.Min(origin, 1 - origin) * .75f;
+            Require(Math.Abs(RefreshDepthSweep.StartAt(origin - span, origin)
+                - RefreshDepthSweep.StartAt(origin + span, origin)) < .001,
+                "Equally separated far/near layers were given different scan speeds.");
+        }
+        Require(RefreshDepthSweep.StartAt(1, .75f) < RefreshDepthSweep.StartAt(0, .75f)
+            && RefreshDepthSweep.StartAt(0, .25f) < RefreshDepthSweep.StartAt(1, .25f),
+            "The shorter depth branch was stretched to finish with the longer branch.");
+        double closeFar = RefreshDepthSweep.StartAt(.59f, .6f);
+        double closeNear = RefreshDepthSweep.StartAt(.61f, .6f);
+        Require(Math.Abs(closeFar - closeNear) < .001 && closeFar > RefreshDepthSweep.StartDelayMs
+            && closeFar - RefreshDepthSweep.StartDelayMs < 40,
+            "Slightly smaller/larger depth layers did not follow the initial depth continuously.");
+        foreach (float invalid in new[] { -1f, 2f, float.NaN, float.PositiveInfinity })
+        {
+            ThrowsArgument(() => RefreshDepthSweep.StartAt(invalid, .5f), "Invalid scan depth was accepted.");
+            ThrowsArgument(() => RefreshDepthSweep.StartAt(.5f, invalid), "Invalid pointer depth was accepted.");
+        }
+        Console.WriteLine("Bidirectional depth timing checks: both branches progress away from pointer depth, equal-depth offsets share speed, shorter side finishes earlier, endpoints are finite and all fades finish within the faster cycle.");
+    }
+
     private static void CheckClickWave()
     {
         const int width = 137, height = 79;
         byte[] capture = Solid(width, height, new Vector3(95, 150, 45));
-        var depth = Depth(23, 17);
+        var depth = new RefreshDepthMap(width, height,
+            Enumerable.Range(0, width * height).Select(index => index % width / (float)(width - 1)).ToArray());
         float[] rawDepth = (float[])depth.Values.Clone();
         var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth, 0, 0);
         var original = renderer.Blocks.ToArray();
-        int cell = original[0].CellWidth, columns = (width + cell - 1) / cell, rows = (height + cell - 1) / cell;
+        int cell = original[0].CellWidth;
         foreach ((int x, int y) in new[] { (68, 39), (0, 0), (136, 78), (21, 57), (1, 1), (2, 3) })
         {
             renderer.SetOrigin(x, y);
             var blocks = renderer.Blocks.ToArray();
-            CheckArrivalField(blocks.Select(block => block.StartMs).ToArray(), columns, rows, y / cell * columns + x / cell);
+            Require(Math.Abs(renderer.OriginDepth - x / (float)(width - 1)) < .000001,
+                "Pointer depth was taken from a cell centre instead of the actual pointer pixel.");
+            var byDepthDistance = blocks.OrderBy(block => Math.Abs(block.Depth - renderer.OriginDepth)).ToArray();
+            for (int index = 1; index < byDepthDistance.Length; index++)
+                Require(byDepthDistance[index].StartMs >= byDepthDistance[index - 1].StartMs - .001,
+                    "The scan was ordered by screen position instead of distance from pointer depth.");
             for (int index = 0; index < blocks.Length; index++)
             {
                 Require((blocks[index] with { StartMs = 0 }) == (original[index] with { StartMs = 0 }),
                     "Retiming at release changed prepared geometry, pigment or raw depth.");
+                Require(double.IsFinite(blocks[index].StartMs)
+                    && blocks[index].StartMs >= RefreshDepthSweep.StartDelayMs
+                    && blocks[index].StartMs + RefreshDepthSweep.LifetimeMs <= renderer.DurationMs,
+                    "A bidirectional block has invalid timing or an incomplete fade.");
                 CheckBackgroundEnvelope(blocks[index]);
             }
+            foreach (var sameDepth in blocks.GroupBy(block => block.Depth))
+                Require(sameDepth.Select(block => block.StartMs).Distinct().Count() == 1,
+                    "Equal-depth remote blocks did not appear together.");
         }
         renderer.SetOrigin(0, 0);
         Require(original.SequenceEqual(renderer.Blocks.ToArray()), "Returning to the initial release cell changed the prepared scene.");
@@ -268,11 +328,35 @@ internal static class UniformBlockRefreshTests
         renderer.SetOrigin(int.MaxValue, int.MaxValue);
         Require(last.SequenceEqual(renderer.Blocks.ToArray()), "Renderer origin retiming did not clamp positive coordinates.");
         Require(original[0].StartMs < last[0].StartMs && last[^1].StartMs < original[^1].StartMs,
-            "Moving the release position did not move the source of the light wave.");
+            "Moving from the far endpoint to the near endpoint did not reverse scan order.");
         Require(last[^1].CellWidth < last[0].CellWidth && last[^1].CellHeight < last[0].CellHeight,
             "The release checks did not exercise clipped edge cells.");
         Require(depth.Values.AsSpan().SequenceEqual(rawDepth), "Release retiming modified the model's raw depth map.");
-        Console.WriteLine("Release retiming checks: moved/same-cell origins, immutable geometry/pigment/depth, connected propagation, full tails and shared background timing.");
+        renderer.SetOrigin(1, 1);
+        double atFirstPixel = renderer.Blocks[0].StartMs;
+        renderer.SetOrigin(2, 1);
+        Require(renderer.Blocks[0].StartMs != atFirstPixel,
+            "Moving within one native cell failed to update the actual pointer depth.");
+        float originBefore = renderer.OriginDepth;
+        double[] timesBefore = renderer.Blocks.ToArray().Select(block => block.StartMs).ToArray();
+        renderer.SetOrigin(2, height - 1);
+        Require(renderer.OriginDepth == originBefore
+            && timesBefore.AsSpan().SequenceEqual(renderer.Blocks.ToArray().Select(block => block.StartMs).ToArray()),
+            "Moving the pointer spatially at the same depth changed scan order.");
+
+        foreach ((int w, int h) in new[] { (1, 1), (1, 17), (19, 1), (7, 5) })
+        {
+            var flat = new UniformBlockRefreshRenderer(w, h, Solid(w, h, new Vector3(100)),
+                new RefreshDepthMap(1, 1, [.3f]), w - 1, h - 1);
+            Require(flat.Blocks.ToArray().All(block => block.StartMs == RefreshDepthSweep.StartDelayMs),
+                "Flat depth or a degenerate image incorrectly retained spatial propagation delays.");
+        }
+        var lowResolutionDepth = new RefreshDepthMap(2, 1, [0, 1]);
+        Require(Math.Abs(RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, 4, 0) - .5f) < .000001
+            && RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, int.MinValue, 0) == 0
+            && RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, int.MaxValue, 0) == 1,
+            "Pointer depth did not use bilinear model sampling and edge clamping.");
+        Console.WriteLine("Pointer-depth retiming checks: actual pixel/bilinear sampling, both depth directions, equal-depth remote simultaneity, spatially independent timing, immutable geometry/pigment/depth, clipped/degenerate edges and synchronized background.");
     }
 
     private static void CheckBackgroundEnvelope(UniformBlockRefreshRenderer.Block block)
@@ -281,14 +365,15 @@ internal static class UniformBlockRefreshTests
             && UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs) == 256,
             "Background recovery preceded its block's arrival.");
         int previous = 256;
-        for (int age = 50; age <= 400; age += 50)
+        for (int step = 1; step <= 8; step++)
         {
+            double age = step * RefreshDepthSweep.BackgroundRestoreMs / 8;
             int current = UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs + age);
             Require(current >= 0 && current < previous,
                 "Background recovery did not move smoothly with the arriving block.");
             previous = current;
         }
-        Require(previous == 0 && UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs + 600) == 0,
+        Require(previous == 0 && UniformBlockRefreshRenderer.BackgroundAmountAt(block, block.StartMs + RefreshDepthSweep.LifetimeMs) == 0,
             "Background did not fully restore before the block faded out.");
     }
 
@@ -324,10 +409,10 @@ internal static class UniformBlockRefreshTests
         renderer.Render(target.StartMs, frame, bloom);
         Require(frame.AsSpan(pixel, 4).SequenceEqual(beforeArrival),
             "Rendered gap recovery began before the block arrived.");
-        renderer.Render(target.StartMs + 200, frame, bloom);
+        renderer.Render(target.StartMs + RefreshDepthSweep.BackgroundRestoreMs * .5, frame, bloom);
         Require(frame[pixel + 3] > 0 && frame[pixel + 3] < beforeArrival[3],
             "Rendered gap did not partially recover with its arriving block.");
-        renderer.Render(target.StartMs + 400, frame, bloom);
+        renderer.Render(target.StartMs + RefreshDepthSweep.BackgroundRestoreMs, frame, bloom);
         Require(frame.AsSpan(pixel, 4).ToArray().All(value => value == 0),
             "Rendered gap retained background correction after its block's recovery finished.");
     }
@@ -340,7 +425,7 @@ internal static class UniformBlockRefreshTests
             var depth = Depth(17, 11);
             float[] depthBefore = (float[])depth.Values.Clone();
             var renderer = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
-            Require(renderer.DurationMs == 3000 && ((IRefreshRenderer)renderer).FrameIntervalMs > 0,
+            Require(renderer.DurationMs == RefreshDepthSweep.DurationMs && ((IRefreshRenderer)renderer).FrameIntervalMs > 0,
                 "The intended cycle or playback interval changed.");
             byte[] a = new byte[capture.Length], b = new byte[capture.Length], clean = new byte[capture.Length], bloom = new byte[4];
             renderer.Render(913.25, a, bloom);
@@ -350,7 +435,7 @@ internal static class UniformBlockRefreshTests
             Require(a.AsSpan().SequenceEqual(b), "Jumping/backward elapsed time changed a stateless frame.");
             renderer.Render(913.25, b, bloom);
             Require(a.AsSpan().SequenceEqual(b), "Repeated elapsed time changed a frame.");
-            foreach (double elapsed in new[] { 0, 110, 700, 1500, 2350, 2999.99 })
+            foreach (double elapsed in new[] { 0, 110, 700, 1500, 2350, RefreshDepthSweep.DurationMs - .01 })
             {
                 Array.Fill(b, (byte)239);
                 Array.Fill(bloom, (byte)239);
@@ -372,7 +457,7 @@ internal static class UniformBlockRefreshTests
                 "Pre-cancelled playback modified buffers or continued.");
             renderer.Render(913.25, b, bloom);
             Require(a.AsSpan().SequenceEqual(b), "Cancelled playback could not resume deterministically.");
-            foreach (double elapsed in new[] { -1, 3000, 4000, double.NaN, double.PositiveInfinity })
+            foreach (double elapsed in new[] { -1, RefreshDepthSweep.DurationMs, 4000, double.NaN, double.PositiveInfinity })
             {
                 Array.Fill(b, (byte)239);
                 Array.Fill(bloom, (byte)239);
@@ -394,7 +479,7 @@ internal static class UniformBlockRefreshTests
         var original = new UniformBlockRefreshRenderer(width, height, capture, depth, width / 2, height / 2);
         var alphaChanged = new UniformBlockRefreshRenderer(width, height, changedAlpha, depth, width / 2, height / 2);
         byte[] a = new byte[capture.Length], b = new byte[capture.Length], bloom = new byte[4];
-        foreach (double elapsed in new[] { 0, 450, 1100, 2100, 2999 })
+        foreach (double elapsed in new[] { 0, 450, 1100, 2100, RefreshDepthSweep.DurationMs - 1 })
         {
             original.Render(elapsed, a, bloom);
             alphaChanged.Render(elapsed, b, bloom);
@@ -473,7 +558,7 @@ internal static class UniformBlockRefreshTests
                 retimes.Add(watch.Elapsed.TotalMilliseconds);
             }
             retimes.Sort();
-            Console.WriteLine($"Prepared release retime native {width}x{height}: {renderer.Blocks.Length} blocks, warmed p50={retimes[retimes.Count / 2]:F2}ms, p95/max={retimes[^1]:F2}ms (synchronous solve only, before UI upload/depth/capture).");
+            Console.WriteLine($"Prepared pointer-depth retime native {width}x{height}: {renderer.Blocks.Length} blocks, warmed p50={retimes[retimes.Count / 2]:F2}ms, p95/max={retimes[^1]:F2}ms (timing only, before UI upload/depth/capture).");
             renderer.SetOrigin(width / 2, height / 2);
             byte[] frame = new byte[capture.Length], bloom = new byte[4];
             renderer.Render(0, frame, bloom);
@@ -482,7 +567,7 @@ internal static class UniformBlockRefreshTests
             for (int sample = 0; sample < 60; sample++)
             {
                 watch.Restart();
-                renderer.Render(400 + sample * (2000.0 / 60), frame, bloom);
+                renderer.Render(RefreshDepthSweep.DurationMs * (.15 + sample * (.7 / 60)), frame, bloom);
                 times.Add(watch.Elapsed.TotalMilliseconds);
             }
             long before = GC.GetTotalAllocatedBytes(true);
