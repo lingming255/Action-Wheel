@@ -234,3 +234,5 @@ A CPU port of the readable shader mathematics alone would still need matching de
 - `Tools/ReferenceRefreshCheck/`: reconstruction checks. `Build.ps1 -Task VerifyRefresh` also
   retains the legacy Analyzer/Bloom/Outline/Renderer suites as regressions for archived code.
 - `Tools/UniformBlockRefreshCheck/`: checks for the active uniform-block renderer.
+- `Tools/RefreshDepthAnnotate/`: a local script that annotates an input image with the actual
+  renderer's per-block depth, exporting readable images and precise depth/start-time CSV.
