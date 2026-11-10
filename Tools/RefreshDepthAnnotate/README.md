@@ -17,5 +17,15 @@ model `depth.json` and dimensions/meaning in `metadata.json`. Image numbers are 
 two decimals: 0 is far, 1 is near. The last clipped row/column use full display slots so
 their labels fit; the actual sample centres and clipped geometry are retained in the CSV.
 
+For a heatmap with a fixed 0..1 colour bar and no per-block numbers, reuse that output:
+
+```powershell
+python .\Tools\RefreshDepthAnnotate\Plot-Heatmap.py 'F:\path\results'
+```
+
+This writes `depth-heatmap.png`, using blue for far and red for near. It preserves native
+clipped cell boundaries and uses the existing depth CSV, without running the model again.
+The plotting script requires Pillow and NumPy.
+
 Requires the .NET 10 Windows Desktop SDK and the application's pinned model installed at
 `%LOCALAPPDATA%\ActionWheel\Models\depth-anything-v2-small-quantized.onnx`.
