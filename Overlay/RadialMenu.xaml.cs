@@ -1681,8 +1681,8 @@ namespace Action_Wheel.Overlay
         /// Every actual pixel block or fine glyph has an independent radial start and end.
         /// </summary>
         /// <remarks>
-        /// One bounded worker renders particles and their current coloured bloom. Two images
-        /// receive only its latest completed buffers. Pigments are shown at exactly
+        /// One bounded worker composites particles and additive coloured bloom into one image
+        /// receiving only its latest completed buffer. Pigments are shown at exactly
         /// one image pixel per physical pixel, so the tile edges stay hard instead of being resampled.
         ///
         /// <paramref name="restoreColour"/> is only called once the cover has been rendered, so the
@@ -1727,16 +1727,14 @@ namespace Action_Wheel.Overlay
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
-            // Two images replace hundreds of macro-cluster opacity animations. The worker
-            // evaluates each actual particle's own radial phase, including its fading tail.
+            // One completed image includes the background, bright particle cores and added
+            // bloom. A second source-over glow image would darken unrelated colour channels.
             var bitmap = new WriteableBitmap(bounds.Width, bounds.Height);
             using (var stream = bitmap.PixelBuffer.AsStream())
                 stream.Write(frame.Grey, 0, frame.Grey.Length);
             bitmap.Invalidate();
-            var bloom = new WriteableBitmap(frame.Renderer.BloomWidth, frame.Renderer.BloomHeight);
             AddRefreshImage(bitmap, layerW, layerH);
-            AddRefreshImage(bloom, layerW, layerH);
-            _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, bloom, CloseMenu);
+            _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, CloseMenu);
 
             // Playback lifetime is independent of decorative visuals.
             var timer = DispatcherQueue.CreateTimer();

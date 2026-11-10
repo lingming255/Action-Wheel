@@ -20,27 +20,23 @@ namespace Action_Wheel.Overlay
         private readonly RefreshRenderer _renderer;
         private readonly DispatcherQueue _dispatcher;
         private readonly WriteableBitmap _bitmap;
-        private readonly WriteableBitmap _bloom;
         private readonly Action _failed;
         private readonly byte[] _pixels;
         private readonly byte[] _light;
         private readonly Stream _pixelStream;
-        private readonly Stream _lightStream;
         private bool _disposed;
         private bool _started;
 
         public RefreshPlayback(RefreshFrame frame, DispatcherQueue dispatcher,
-            WriteableBitmap bitmap, WriteableBitmap bloom, Action failed)
+            WriteableBitmap bitmap, Action failed)
         {
             _renderer = frame.Renderer;
             _dispatcher = dispatcher;
             _bitmap = bitmap;
-            _bloom = bloom;
             _failed = failed;
             _pixels = new byte[frame.Grey.Length];
             _light = new byte[_renderer.BloomWidth * _renderer.BloomHeight * 4];
             _pixelStream = bitmap.PixelBuffer.AsStream();
-            _lightStream = bloom.PixelBuffer.AsStream();
         }
 
         public void Start()
@@ -71,10 +67,7 @@ namespace Action_Wheel.Overlay
                                 {
                                     _pixelStream.Position = 0;
                                     _pixelStream.Write(_pixels, 0, _pixels.Length);
-                                    _lightStream.Position = 0;
-                                    _lightStream.Write(_light, 0, _light.Length);
                                     _bitmap.Invalidate();
-                                    _bloom.Invalidate();
                                 }
                                 uploaded.TrySetResult();
                             }
@@ -101,7 +94,6 @@ namespace Action_Wheel.Overlay
             _disposed = true;
             _cancellation.Cancel();
             _pixelStream.Dispose();
-            _lightStream.Dispose();
         }
     }
 }

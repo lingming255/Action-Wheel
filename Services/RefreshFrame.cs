@@ -53,8 +53,8 @@ namespace Action_Wheel.Services
                     return null;
 
                 // The grey cover, particle layers and illumination correction never alias the
-                // raw capture. Only the derived correction/emission survive preparation; live
-                // desktop content remains visible through them during playback.
+                // raw capture. The renderer retains its colour reference for additive light
+                // correction; the desktop remains visible through its premultiplied overlay.
                 byte[] grey = BuildGrey(pixels);
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);

@@ -179,11 +179,16 @@ internal static class RefreshIlluminationTests
             current.Render(time, frame, bloom);
             ValidatePremultiplied(frame); ValidatePremultiplied(bloom);
             for (int pixel = 0; pixel < frame.Length; pixel += 4)
-                Require(Visible(frame, scene, pixel, 0) >= Visible(oldFrame, scene, pixel, 0) - 2.1,
-                    "the exposure correction does not darken a neutral desktop during cover reveal");
+                Require(Visible(frame, scene, pixel, 0) >= Visible(oldFrame, scene, pixel, 0) * 0.8 - 2.1,
+                    "the contrast treatment preserves a readable desktop within its background dimming budget");
+            int corner = Pixel(width, 0, 0);
+            double expectedEdge = 96 * (1 - 0.2 * RefreshIllumination.StrengthAt(time));
+            Require(Math.Abs(Visible(frame, scene, corner, 0) - expectedEdge) <= 2.1,
+                "the unlit screen edge darkens with the light envelope to provide contrast");
             if (time == 260)
-                Require(Visible(frame, scene, centre, 0) > 102 && frame[centre + 3] < 128,
-                    "revealed desktop pixels brighten through translucent correction rather than an opaque frozen image");
+                Require(Visible(frame, scene, centre, 0) > Visible(frame, scene, corner, 0) + 8
+                    && frame[centre + 3] < 128,
+                    "the centre stays illuminated relative to the dim perimeter through a translucent correction");
         }
         current.Render(760, frame, bloom);
         Require(frame.All(value => value == 0) && bloom.All(value => value == 0),
@@ -209,14 +214,28 @@ internal static class RefreshIlluminationTests
 
         byte[] opaque = Solid(width, height, 0, 0, 0);
         int particlePixel = Pixel(width, 60, 44);
-        opaque[particlePixel] = 60; opaque[particlePixel + 1] = 110;
-        opaque[particlePixel + 2] = 180; opaque[particlePixel + 3] = 255;
+        for (int y = 44; y < 48; y++)
+        for (int x = 60; x < 64; x++)
+        {
+            int pixel = Pixel(width, x, y);
+            opaque[pixel] = 3; opaque[pixel + 1] = 8;
+            opaque[pixel + 2] = 30; opaque[pixel + 3] = 255;
+        }
         byte[][] layers = [opaque, new byte[scene.Length], new byte[scene.Length]];
         var particleRenderer = new RefreshRenderer(width, height, 8, 1, originX, originY,
-            grey, layers, layers, [new(60, 44, 1, 1, RefreshPixelLayer.Subject, 0)], scene: scene);
-        particleRenderer.Render(RefreshTiming.Envelope(RefreshPixelLayer.Subject, 0).PeakMs, frame, bloom);
-        Require(frame.AsSpan(particlePixel, 4).SequenceEqual(opaque.AsSpan(particlePixel, 4)),
-            "an opaque original-colour particle stays above the scene correction and grey cover");
+            grey, layers, layers, [new(60, 44, 4, 4, RefreshPixelLayer.Subject, 0)], scene: scene);
+        double particlePeak = RefreshTiming.Envelope(RefreshPixelLayer.Subject, 0).PeakMs;
+        current.Render(particlePeak, oldFrame, oldBloom);
+        particleRenderer.Render(particlePeak, frame, bloom);
+        for (int channel = 0; channel < 3; channel++)
+            Require(Visible(frame, scene, particlePixel, channel)
+                >= Visible(oldFrame, scene, particlePixel, channel) - 2.1,
+                "an emissive particle adds to the dimmed scene without replacing it with a dark pigment");
+        Require(Visible(frame, scene, particlePixel, 2) > Visible(oldFrame, scene, particlePixel, 2) + 80
+            && Visible(frame, scene, particlePixel, 2) > Visible(frame, scene, particlePixel, 1) + 50,
+            "a low-intensity red pigment becomes a strong red light source over the darkened background");
+        Require(bloom.Any(value => value != 0),
+            "dim source pigments still emit light instead of disappearing below a bright-pass threshold");
     }
 
     private static RefreshRenderer Renderer(int width, int height, int originX, int originY,

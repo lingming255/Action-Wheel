@@ -17,6 +17,8 @@ namespace Action_Wheel.Services
         private readonly ParticleState[][] _particles;
         private readonly CoverTile[] _cover;
         private readonly RefreshIllumination? _illumination;
+        private readonly RefreshLightComposite? _lightComposite;
+        private readonly uint[]? _coreLight;
         private readonly double[]? _sceneStarts;
         private readonly float[] _emission, _horizontal, _near, _far, _verticalSums;
         private static readonly int[] LayerOrder = { 0, 2, 1 };
@@ -54,6 +56,8 @@ namespace Action_Wheel.Services
             _verticalSums = new float[BloomWidth * 3];
             if (scene != null)
             {
+                _lightComposite = new RefreshLightComposite(width, height, scene);
+                _coreLight = new uint[checked(width * height)];
                 _illumination = new RefreshIllumination(width, height, _bloomStep, originX, originY, scene);
                 _sceneStarts = new double[BloomWidth * BloomHeight];
                 for (int cy = 0; cy < BloomHeight; cy++)
@@ -149,7 +153,13 @@ namespace Action_Wheel.Services
                     else for (int pixel = first; pixel < last; pixel++) output[pixel] = Scale(grey[pixel], opacity);
                 }
             }
+            // Dim the complete background (including unrevealed grey), then put light on top.
+            // A black source-over layer changes any live desktop without freezing its pixels.
+            int dimOpacity = (int)MathF.Round(sceneStrength * 0.20f * 256);
+            if (dimOpacity > 0 && _lightComposite != null)
+                RefreshLightComposite.DimFrame(fullBuffer, dimOpacity);
             _emission.AsSpan().Clear();
+            if (_coreLight != null) _coreLight.AsSpan().Clear();
             bool anyLight = false;
             if (sceneStrength > 0 && _illumination != null && _sceneStarts != null)
             {
@@ -179,6 +189,7 @@ namespace Action_Wheel.Services
                     if (layerIndex == 1) alpha *= 0.9f;
                     int opacity = (int)MathF.Round(alpha * 256);
                     if (opacity == 0) continue;
+                    if (_lightComposite != null) anyLight = true;
                     RefreshParticle p = state.Particle;
                     ReadOnlySpan<uint> source = MemoryMarshal.Cast<byte, uint>(_outlined[state.LayerIndex]);
                     for (int y = p.Top; y < p.Top + p.Height; y++)
@@ -189,8 +200,23 @@ namespace Action_Wheel.Services
                             uint colour = source[pixel];
                             if ((colour >> 24) == 0) continue;
                             uint front = Scale(colour, opacity);
-                            int a = (int)(front >> 24);
-                            output[pixel] = front + Scale(output[pixel], 256 - a - (a >> 7));
+                            if (_lightComposite != null)
+                            {
+                                // The reference effect adds a bright core to the background;
+                                // translucent pigment alone looks painted on rather than lit.
+                                // Accumulate core energy first. One final pass combines it
+                                // with the glow, avoiding repeated scene/alpha reconstruction.
+                                uint previous = _coreLight![pixel];
+                                int b = Math.Min(255, (int)(previous & 255) + (int)(front & 255) * 4);
+                                int g = Math.Min(255, (int)((previous >> 8) & 255) + (int)((front >> 8) & 255) * 4);
+                                int r = Math.Min(255, (int)((previous >> 16) & 255) + (int)((front >> 16) & 255) * 4);
+                                _coreLight[pixel] = (uint)(b | (g << 8) | (r << 16));
+                            }
+                            else
+                            {
+                                int a = (int)(front >> 24);
+                                output[pixel] = front + Scale(output[pixel], 256 - a - (a >> 7));
+                            }
                         }
                     }
                     foreach (LightSample sample in state.Light)
@@ -204,15 +230,21 @@ namespace Action_Wheel.Services
             }
             if (!anyLight) return;
             Blur(_emission, _near, 1, 2);
-            Blur(_emission, _far, 2, 3);
+            Blur(_emission, _far, _lightComposite == null ? 2 : 4, 3);
             for (int cell = 0, pixel = 0; cell < _near.Length; cell += 3, pixel += 4)
             {
-                byte b = Channel(_near[cell] * 0.8f + _far[cell] * 0.55f);
-                byte g = Channel(_near[cell + 1] * 0.8f + _far[cell + 1] * 0.55f);
-                byte r = Channel(_near[cell + 2] * 0.8f + _far[cell + 2] * 0.55f);
+                _near[cell] = _near[cell] * 0.8f + _far[cell] * 0.55f;
+                _near[cell + 1] = _near[cell + 1] * 0.8f + _far[cell + 1] * 0.55f;
+                _near[cell + 2] = _near[cell + 2] * 0.8f + _far[cell + 2] * 0.55f;
+                byte b = Channel(_near[cell]);
+                byte g = Channel(_near[cell + 1]);
+                byte r = Channel(_near[cell + 2]);
                 bloomBuffer[pixel] = b; bloomBuffer[pixel + 1] = g; bloomBuffer[pixel + 2] = r;
                 bloomBuffer[pixel + 3] = Math.Max(r, Math.Max(g, b));
             }
+            // The small buffer remains useful for checks; the UI displays only the completed
+            // full frame, with its light added here instead of alpha-blending a coloured fog.
+            _lightComposite?.AddBloom(fullBuffer, _near, BloomWidth, BloomHeight, _bloomStep, _coreLight);
         }
 
         private LightSample[] BuildLight(byte[] source, RefreshParticle p)
@@ -236,6 +268,15 @@ namespace Action_Wheel.Services
                     sb += source[i]; sg += source[i + 1]; sr += source[i + 2]; sa += source[i + 3];
                 }
                 if (sa == 0) continue;
+                if (_lightComposite != null)
+                {
+                    // Every active coloured particle emits, including darker source colours.
+                    // The reference has independent core x4 and blur x2 controls, no bright-pass.
+                    float lightGain = 2f * normalization;
+                    result.Add(new LightSample((cy * BloomWidth + cx) * 3,
+                        sb * lightGain, sg * lightGain, sr * lightGain));
+                    continue;
+                }
                 float b = sb / (float)sa, g = sg / (float)sa, r = sr / (float)sa;
                 float brightness = 0.65f * Math.Max(r, Math.Max(g, b))
                     + 0.35f * (r * 0.2126f + g * 0.7152f + b * 0.0722f);

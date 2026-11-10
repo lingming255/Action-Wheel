@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../Services/RefreshRenderer.cs" Link="RefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshIllumination.cs" Link="RefreshIllumination.cs" />
+    <Compile Include="../../Services/RefreshLightComposite.cs" Link="RefreshLightComposite.cs" />
     <Compile Include="../../Services/RefreshAnalyzer.cs" Link="RefreshAnalyzer.cs" />
     <Compile Include="../../Services/RefreshTiming.cs" Link="RefreshTiming.cs" />
     <Compile Include="../../Services/RefreshWavefront.cs" Link="RefreshWavefront.cs" />

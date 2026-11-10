@@ -4,6 +4,7 @@ using System.Diagnostics;
 CheckBehaviour();
 RefreshWavefrontTests.Run();
 RefreshIlluminationTests.Run();
+RefreshLightCompositeTests.Run();
 if (args.Length == 2 && args[0] == "--export") Export(args[1]);
 foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
 {
@@ -47,14 +48,16 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
     var output = new byte[grey.Length];
     var bloom = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
     foreach (double t in new[] { 0d, 100d, 250d, 400d, 600d, 800d }) renderer.Render(t, output, bloom);
-    long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+    long allocationBefore = GC.GetTotalAllocatedBytes(precise: true);
     var timer = Stopwatch.StartNew();
     for (int repeat = 0; repeat < 5; repeat++) renderer.Render(250, output, bloom);
     timer.Stop();
-    long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+    long allocated = GC.GetTotalAllocatedBytes(precise: true) - allocationBefore;
     Console.WriteLine($"Renderer with scene light {size.W}x{size.H}: {particles.Count:N0} particles, prepare={prepare.ElapsedMilliseconds}ms, "
         + $"render250={timer.Elapsed.TotalMilliseconds / 5:F2}ms, measured allocations={allocated} bytes / 5 frames.");
-    Require(allocated < 1024, "render does not allocate frame-size buffers");
+    // Bounded band scheduling may allocate small tasks; count all managed threads so
+    // frame-sized allocations cannot hide on a compositor worker.
+    Require(allocated < 65536, "render uses bounded scheduling without frame-sized allocations");
     foreach (double t in new[] { 0d, 100d, 250d, 400d, 600d, 800d })
     {
         timer.Restart(); renderer.Render(t, output, bloom); timer.Stop();
