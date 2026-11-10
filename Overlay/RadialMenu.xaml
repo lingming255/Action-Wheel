@@ -225,9 +225,8 @@
             </Canvas>
         </Grid>
 
-        <!-- Refresh: a grey still clears radially from the opening click over the live desktop.
-             Background glyphs, salient-region blocks and boundary accents are rasterized off-thread;
-             each cluster's coloured bloom follows its own pixel layer's Opacity animation. -->
+        <!-- Refresh: one worker gives every block/glyph its own radial timing, and evaluates
+             current coloured bloom. Two images present reusable buffers; no macro-tile fades. -->
         <Canvas x:Name="RefreshLayer" Visibility="Collapsed" IsHitTestVisible="False"
                 HorizontalAlignment="Left" VerticalAlignment="Top"/>
     </Grid>

@@ -24,13 +24,27 @@ namespace Action_Wheel.Services
         /// <summary>Slow an original 350 ms animation time without changing its relative rhythm.</summary>
         internal static double Scale(double milliseconds) => milliseconds * TimeScale;
 
+        /// <summary>Radial arrival at a physical monitor position, independent of render batches.</summary>
+        internal static double FrontAt(double x, double y, int width, int height, int originX, int originY)
+        {
+            if (width <= 0 || height <= 0)
+                throw new ArgumentOutOfRangeException(nameof(width), "The monitor must have positive dimensions.");
+
+            double farX = Math.Max(originX, width - (double)originX);
+            double farY = Math.Max(originY, height - (double)originY);
+            double farthest = Math.Sqrt(farX * farX + farY * farY);
+            double dx = x - originX, dy = y - originY;
+            double distance = Math.Sqrt(dx * dx + dy * dy);
+            return Math.Clamp(distance / farthest, 0, 1) * SweepMs;
+        }
+
         /// <summary>
         /// Earlier pixels finish sooner and also have a shorter local lifetime. A distant pixel
         /// gets a little more time to read without keeping the already-passed centre illuminated.
         /// </summary>
         internal static RefreshEnvelope Envelope(RefreshPixelLayer layer, double frontMs)
         {
-            // Cluster starts are already scaled. Work in the original time domain and scale
+            // Arrival times are already scaled. Work in the original time domain and scale
             // the complete envelope once, including offsets, rises and local lifetimes.
             double front = Math.Clamp(frontMs / TimeScale, 0, ReferenceSweepMs);
             double progress = front / ReferenceSweepMs;

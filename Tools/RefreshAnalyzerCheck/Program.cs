@@ -29,6 +29,7 @@ Require(first.Boundary.Length == source.Length, "boundary layer dimensions");
 Require(first.Subject.AsSpan().SequenceEqual(second.Subject), "stable subject output for a fixed seed");
 Require(first.Background.AsSpan().SequenceEqual(second.Background), "stable background output for a fixed seed");
 Require(first.Boundary.AsSpan().SequenceEqual(second.Boundary), "stable boundary output for a fixed seed");
+Require(first.Particles.AsSpan().SequenceEqual(second.Particles), "stable particle geometry and timing for a fixed seed");
 
 long subjectPixels = CountAlpha(first.Subject, width, 116, 42, 210, 160);
 long backgroundPixels = CountAlpha(first.Background, width, 116, 42, 210, 160);
@@ -49,6 +50,7 @@ for (int i = 0; i < source.Length; i += 4)
 CheckColourSampling();
 CheckRefreshTiming();
 CheckQuietSceneDensity();
+CheckParticleTiming(first, width, height, tile, originX, originY);
 
 int expectedColumns = (width + first.ClusterPx - 1) / first.ClusterPx;
 int expectedRows = (height + first.ClusterPx - 1) / first.ClusterPx;
@@ -95,7 +97,8 @@ if (args.Length == 2 && args[0] == "--export")
     File.WriteAllBytes(Path.Combine(args[1], "boundary.bgra"), fullHdResult.Boundary);
 }
 
-Console.WriteLine($"Refresh analysis check passed: {first.Clusters.Length} small-scene clusters; " +
+Console.WriteLine($"Refresh analysis check passed: {first.Clusters.Length} legacy small-scene clusters, " +
+    $"{first.Particles.Length:N0} individual particles; " +
     $"subject={subjectPixels:N0}px, background={backgroundPixels:N0}px, boundary={boundaryPixels:N0}px; " +
     $"1080p clusters={fullHdResult.Clusters.Length}, analysis={stopwatch.ElapsedMilliseconds}ms (synthetic).");
 
@@ -142,6 +145,72 @@ static void CheckRefreshTiming()
     }
     Require(RefreshTiming.SweepMs + RefreshTiming.CoverFadeMs <= RefreshTiming.TotalMs,
         "the last grey cover clears before the interaction ends");
+    Require(RefreshTiming.FrontAt(80, 144, 320, 192, 80, 144) == 0,
+        "the front starts at the click");
+    Require(Math.Abs(RefreshTiming.FrontAt(110, 184, 320, 192, 80, 144)
+        - RefreshTiming.FrontAt(120, 174, 320, 192, 80, 144)) < 0.000001,
+        "equal radial distances receive equal timing in every direction");
+    Require(Math.Abs(RefreshTiming.FrontAt(320, 0, 320, 192, 80, 144) - RefreshTiming.SweepMs) < 0.000001,
+        "the farthest monitor corner receives the end of the sweep");
+}
+
+static void CheckParticleTiming(RefreshAnalysis result, int width, int height, int tile, int originX, int originY)
+{
+    Require(result.Particles.Length > 0, "actual particle footprints are available to the renderer");
+    foreach (RefreshPixelLayer layer in Enum.GetValues<RefreshPixelLayer>())
+    {
+        byte[] raster = layer switch
+        {
+            RefreshPixelLayer.Background => result.Background,
+            RefreshPixelLayer.Subject => result.Subject,
+            _ => result.Boundary,
+        };
+        var owner = new bool[width * height];
+        foreach (RefreshParticle particle in result.Particles.Where(particle => particle.Layer == layer))
+        {
+            Require(particle.Left >= 0 && particle.Top >= 0 && particle.Width > 0 && particle.Height > 0
+                && particle.Left + particle.Width <= width && particle.Top + particle.Height <= height,
+                "every particle footprint stays inside the capture");
+            Require(particle.StartMs is >= 0 and <= RefreshTiming.SweepMs,
+                "every particle arrives inside the sweep window");
+            RefreshEnvelope pulse = RefreshTiming.Envelope(layer, particle.StartMs);
+            Require(pulse.StartMs <= pulse.PeakMs && pulse.PeakMs < pulse.EndMs && pulse.EndMs <= RefreshTiming.TotalMs,
+                "individual particle pulses finish within the animation budget");
+            bool hasPigment = false;
+            for (int y = particle.Top; y < particle.Top + particle.Height; y++)
+            for (int x = particle.Left; x < particle.Left + particle.Width; x++)
+            {
+                int pixel = y * width + x;
+                if (raster[pixel * 4 + 3] == 0) continue;
+                Require(!owner[pixel], "one layer never draws the same pigment through two particle records");
+                owner[pixel] = true;
+                hasPigment = true;
+            }
+            Require(hasPigment, "every particle record includes an actual rendered block or symbol");
+        }
+        for (int pixel = 0; pixel < owner.Length; pixel++)
+            Require(owner[pixel] == (raster[pixel * 4 + 3] != 0),
+                "particle records cover every rendered pigment while retaining transparent shape holes");
+    }
+
+    Require(result.Particles.Where(particle => particle.Layer == RefreshPixelLayer.Subject)
+        .GroupBy(particle => (particle.Left / result.ClusterPx, particle.Top / result.ClusterPx))
+        .Any(group => group.Max(particle => particle.StartMs) - group.Min(particle => particle.StartMs) > 1),
+        "large blocks inside one legacy macro cluster have independent radial arrival times");
+    RefreshParticle[] fine = result.Particles.Where(particle => particle.Layer == RefreshPixelLayer.Background).ToArray();
+    Require(fine.GroupBy(particle => (particle.Left / tile, particle.Top / tile))
+        .Any(group => group.Max(particle => particle.StartMs) - group.Min(particle => particle.StartMs) > 0.1),
+        "fine symbols inside one analysis cell use their own positions for timing");
+    var equalDistance = fine.GroupBy(particle =>
+    {
+        double dx = particle.Left + particle.Width * 0.5 - originX;
+        double dy = particle.Top + particle.Height * 0.5 - originY;
+        return dx * dx + dy * dy;
+    }).First(group => group.Count() > 1);
+    Require(equalDistance.Max(particle => particle.StartMs) - equalDistance.Min(particle => particle.StartMs) < 0.000001,
+        "actual symbols at equal radial distances rise together without macro noise");
+    Require(result.Particles.Any(particle => particle.Layer != RefreshPixelLayer.Background
+        && (particle.Width > tile || particle.Height > tile)), "the fixture exercises merged large blocks");
 }
 
 static void CheckQuietSceneDensity()
@@ -213,7 +282,7 @@ static void CheckColourSampling()
         }
     }
     Require(sampled > 0 && overlappingFinePixels > 0, "fixture exercises local fine marks and controlled overlap");
-    CheckLargeRectangles(result.Subject, capture, w, h, t);
+    CheckLargeRectangles(result.Subject, capture, w, h, t, result.Particles);
     RefreshAnalyzer.MakeContrastColour(48, 126, 178, out byte r, out byte g, out byte b);
     Require(r > g && g > b, "blue water generates a warm complementary accent");
     RefreshAnalyzer.MakeContrastColour(197, 163, 74, out r, out g, out b);
@@ -222,7 +291,8 @@ static void CheckColourSampling()
     Require(r == g && g == b && r < 128, "neutral sources get neutral light-dark contrast");
 }
 
-static void CheckLargeRectangles(byte[] layer, byte[] capture, int width, int height, int tile)
+static void CheckLargeRectangles(byte[] layer, byte[] capture, int width, int height, int tile,
+    RefreshParticle[] particles)
 {
     var visited = new bool[width * height];
     var queue = new Queue<int>();
@@ -254,6 +324,10 @@ static void CheckLargeRectangles(byte[] layer, byte[] capture, int width, int he
             "large pixel footprints align to cells and keep the outer one-pixel gap");
         Require(right - left <= tile * 2 && bottom - top <= tile * 2,
             "large blocks reserve at most two cells per axis");
+        Require(particles.Count(particle => particle.Layer == RefreshPixelLayer.Subject
+            && particle.Left == left && particle.Top == top
+            && particle.Width == right - left && particle.Height == bottom - top) == 1,
+            "each whole merged rectangle has exactly one particle timing record");
         long blue = 0, green = 0, samples = 0;
         for (int y = top; y < bottom; y += 2)
         for (int x = left; x < right; x += 2)

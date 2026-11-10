@@ -7,6 +7,10 @@ namespace Action_Wheel.Services
     internal readonly record struct RefreshCluster(
         int Left, int Top, int Width, int Height, double StartMs);
 
+    /// <summary>One complete rasterized block or fine symbol with its own radial arrival.</summary>
+    internal readonly record struct RefreshParticle(
+        int Left, int Top, int Width, int Height, RefreshPixelLayer Layer, double StartMs);
+
     internal sealed class RefreshAnalysis
     {
         public required byte[] Subject { get; init; }
@@ -14,6 +18,7 @@ namespace Action_Wheel.Services
         public required byte[] Boundary { get; init; }
         public required int ClusterPx { get; init; }
         public required RefreshCluster[] Clusters { get; init; }
+        public required RefreshParticle[] Particles { get; init; }
     }
 
     /// <summary>
@@ -62,9 +67,9 @@ namespace Action_Wheel.Services
             var subject = new byte[byteCount];
             var background = new byte[byteCount];
             var boundary = new byte[byteCount];
-            Rasterize(source, width, height, tile, columns, rows, red, green, blue,
+            RefreshParticle[] particles = Rasterize(source, width, height, tile, columns, rows, red, green, blue,
                 labels, depth, boundaryStrength, boundaryNeighbour,
-                subject, background, boundary, seed);
+                subject, background, boundary, seed, originX, originY);
 
             int clusterPx = tile * ClusterTiles;
             var clusters = BuildClusters(width, height, tile, columns, rows, clusterPx,
@@ -76,6 +81,7 @@ namespace Action_Wheel.Services
                 Boundary = boundary,
                 ClusterPx = clusterPx,
                 Clusters = clusters,
+                Particles = particles,
             };
         }
 
@@ -278,13 +284,14 @@ namespace Action_Wheel.Services
         /// Large blocks reserve analysis cells, keeping subject and seam blocks mutually exclusive.
         /// A separate fine grid may overlay them with much smaller, quieter background marks.
         /// </summary>
-        private static void Rasterize(byte[] source, int width, int height, int tile,
+        private static RefreshParticle[] Rasterize(byte[] source, int width, int height, int tile,
             int columns, int rows, byte[] red, byte[] green, byte[] blue, int[] labels,
             float[] depth, float[] boundaryStrength, int[] boundaryNeighbour,
-            byte[] subject, byte[] background, byte[] boundary, int seed)
+            byte[] subject, byte[] background, byte[] boundary, int seed, int originX, int originY)
         {
             var random = new Random(seed);
             var occupied = new bool[labels.Length];
+            var particles = new List<RefreshParticle>();
             const int gap = 1; // The legacy mosaic's one-physical-pixel gap never scales with block size.
 
             // Reserve seam blocks first, so a later subject stamp cannot draw over them.
@@ -317,6 +324,7 @@ namespace Action_Wheel.Services
                     LegacyPigment(r, g, b, out r, out g, out b, out _);
                 FillRect(boundary, width, height, x, y, blockWidth, blockHeight,
                     r, g, b, Math.Clamp(0.42 + alpha * 0.28, 0.42, 0.72));
+                AddParticle(x, y, blockWidth, blockHeight, RefreshPixelLayer.Boundary);
             }
 
             for (int cy = 0; cy < rows; cy++)
@@ -344,6 +352,7 @@ namespace Action_Wheel.Services
                     out byte r, out byte g, out byte b);
                 LegacyPigment(r, g, b, out r, out g, out b, out double alpha);
                 FillRect(subject, width, height, x, y, blockWidth, blockHeight, r, g, b, alpha);
+                AddParticle(x, y, blockWidth, blockHeight, RefreshPixelLayer.Subject);
             }
 
             // About 0.2 of the old 14 DIP tile. Unlike the former random stamps, every mark
@@ -365,8 +374,19 @@ namespace Action_Wheel.Services
                 if (random.NextDouble() >= chance) continue;
                 LegacyPigment(r, g, b, out r, out g, out b, out double alpha);
                 alpha *= 0.52; // Fine marks may overlap large blocks, but never compete in opacity.
+                int shape = random.Next(8);
                 DrawFineMark(background, width, height, x, y, markWidth, markHeight,
-                    r, g, b, alpha, random.Next(8));
+                    r, g, b, alpha, shape);
+                AddParticle(x, y, shape == 0 ? 1 : markWidth, shape == 0 ? 1 : markHeight,
+                    RefreshPixelLayer.Background);
+            }
+            return particles.ToArray();
+
+            void AddParticle(int x, int y, int particleWidth, int particleHeight, RefreshPixelLayer layer)
+            {
+                double start = RefreshTiming.FrontAt(x + particleWidth * 0.5, y + particleHeight * 0.5,
+                    width, height, originX, originY);
+                particles.Add(new RefreshParticle(x, y, particleWidth, particleHeight, layer, start));
             }
 
             bool CanReserve(int cx, int cy, int cellsWide, int cellsHigh, bool seam)

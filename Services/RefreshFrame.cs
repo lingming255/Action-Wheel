@@ -8,28 +8,18 @@ namespace Action_Wheel.Services
     /// <summary>
     /// A monitor capture and pre-rasterized pixel layers for the refresh effect. Capture happens
     /// before <see cref="ScreenGrade"/> lowers saturation; analysis runs on a worker while the wheel
-    /// is held so release only has to assemble and animate already prepared images.
+    /// is held so release can start bounded playback of the already prepared particle data.
     /// </summary>
     internal sealed class RefreshFrame
     {
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
-        /// <summary>Large, dense blocks assigned to visually salient regions.</summary>
-        public required byte[] Subject { get; init; }
-        /// <summary>Fine points, plus signs and wave glyphs assigned to quieter regions.</summary>
-        public required byte[] Background { get; init; }
-        /// <summary>High-saturation accents rasterized from colour-region boundaries.</summary>
-        public required byte[] Boundary { get; init; }
+        /// <summary>Renders individual particle timing into bounded, reusable playback buffers.</summary>
+        public required RefreshRenderer Renderer { get; init; }
         public required RectInt32 Bounds { get; init; }
         /// <summary>Original click position relative to the captured monitor, in physical pixels.</summary>
         public required int OriginX { get; init; }
         public required int OriginY { get; init; }
-        /// <summary>Physical source tile size used by the 11.2 DIP analysis grid.</summary>
-        public required int TilePx { get; init; }
-        public required int ClusterPx { get; init; }
-        public required RefreshCluster[] Clusters { get; init; }
-        /// <summary>Low-resolution emissive bloom, prepared per cluster and per animated layer.</summary>
-        public required RefreshClusterBloom[] Blooms { get; init; }
 
         /// <summary>
         /// Captures and builds on a worker thread. <paramref name="grabbed"/> runs as soon as the
@@ -70,21 +60,6 @@ namespace Action_Wheel.Services
                 RefreshAnalysis analysis = RefreshAnalyzer.Build(
                     pixels, w, h, tile, position.X ^ position.Y ^ Environment.TickCount,
                     originX, originY);
-                var blooms = new RefreshClusterBloom[analysis.Clusters.Length];
-                Parallel.For(0, analysis.Clusters.Length, new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount),
-                }, i =>
-                {
-                    RefreshCluster cluster = analysis.Clusters[i];
-                    blooms[i] = new RefreshClusterBloom(
-                        RefreshBloom.Build(analysis.Subject, w, h, cluster.Left, cluster.Top,
-                            cluster.Width, cluster.Height, scale),
-                        RefreshBloom.Build(analysis.Background, w, h, cluster.Left, cluster.Top,
-                            cluster.Width, cluster.Height, scale),
-                        RefreshBloom.Build(analysis.Boundary, w, h, cluster.Left, cluster.Top,
-                            cluster.Width, cluster.Height, scale));
-                });
                 // The layers are independent. Bound their one-time outline work as well so a
                 // high-resolution capture does not serialize three full-monitor passes.
                 byte[][] originalLayers = [analysis.Subject, analysis.Background, analysis.Boundary];
@@ -96,18 +71,11 @@ namespace Action_Wheel.Services
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    // Bloom comes from the original pigments; the inset outlines then boost
-                    // their local brightness while retaining the same particle hue.
-                    Subject = outlinedLayers[0],
-                    Background = outlinedLayers[1],
-                    Boundary = outlinedLayers[2],
+                    Renderer = new RefreshRenderer(w, h, tile, scale, originX, originY,
+                        grey, originalLayers, outlinedLayers, analysis.Particles),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,
-                    TilePx = tile,
-                    ClusterPx = analysis.ClusterPx,
-                    Clusters = analysis.Clusters,
-                    Blooms = blooms,
                 };
             }
             catch (Exception)
@@ -204,6 +172,4 @@ namespace Action_Wheel.Services
         private static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int rop);
     }
 
-    internal readonly record struct RefreshClusterBloom(
-        RefreshBloomImage? Subject, RefreshBloomImage? Background, RefreshBloomImage? Boundary);
 }
