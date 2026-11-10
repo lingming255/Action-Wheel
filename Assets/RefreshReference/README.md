@@ -23,9 +23,17 @@ live-video DIS flow/depth accumulation. Both postprocessing chains advance toget
 that update rate and A-then-B stack order are explicit host choices, since the cached resources
 do not determine the user's project frame rate or stack evaluation order. The source defaults
 and approximately three-second scan cycle are retained. The work canvas is capped at a longest
-side of 640 pixels, preserving aspect ratio; the original packages use nominal 720x1280 RTs,
+side of 1280 pixels, preserving aspect ratio (raised from 640 for character/edge clarity);
+the original packages use nominal 720x1280 RTs,
 and their engine's automatic adaptation rules are not documented. The final correction is
 upsampled over the original full-resolution capture, leaving unchanged pixels transparent.
+
+Per-gesture preparation caches immutable character geometry/pigment/rain/source HSL. B caches
+colour work only for exactly unchanged RGB; Gaussian plans reuse sampling coordinates while
+retaining the audited weights. Native correction encoding uses reusable maps/buffers and SIMD.
+These CPU optimizations retain the depth bands, defaults and 30 Hz history; display output is
+still limited by render and upload time. Memory tradeoffs and measured timings are in
+`Doc/refresh-effect.md`.
 
 Legacy Wheel particles, radial easing, irregular wavefront, outlines and exposure correction
 are retained in source/history for comparison but are not called by this playback path.

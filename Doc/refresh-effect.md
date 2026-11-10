@@ -51,12 +51,12 @@ a C# synthetic 640x360 estimate returned finite 392x224 depth in about 543 ms at
 The source is the still captured at gesture start. There is no live-video DIS flow/depth
 accumulation. A-then-B stacking and 30 Hz are explicit host choices; the cached packages do not
 establish the user's timeline frame rate or evaluation order. The work canvas preserves the
-monitor aspect ratio with a longest side capped at 640; nominal reference RTs are 720x1280,
+monitor aspect ratio with a longest side capped at 1280 (previously 640); nominal reference RTs are 720x1280,
 and their engine's auto-adaptation rules remain unknown. Every shader pass uses the audited
 math and sampling weights, with SDR clamping, but the floating-point working buffers do not
 reproduce every intermediate UNorm quantization step of the original GPU engine.
 
-The low-resolution effect-minus-source correction is bilinearly reconstructed over the full
+The work-resolution effect-minus-source correction is bilinearly reconstructed over the full
 capture. For source S and target T, coverage A must be at least `(T-S)/(1-S)` for a brightening
 channel or `(S-T)/S` for a darkening channel. Quantize A upward and encode premultiplied
 `P=T-(1-A)*S`. A normal source-over image then displays the expected target without blurring
@@ -69,8 +69,11 @@ Only the cursor's monitor receives the effect; other monitors regain colour when
 
 All five `Build.ps1 -Task VerifyRefresh` suites passed, including the new reference check.
 The latter verifies independent shader HSL arithmetic including out-of-range inputs, source
-LUT samples, visible correction error (maximum sampled 0.500 byte), fixed-step skip equivalence,
-immutable inputs, cancellation and transparent ending. Actual learned depth inference passed.
+LUT samples, scalar correction error (maximum sampled 0.500 byte), fixed-step skip equivalence,
+immutable inputs, cancellation and transparent ending. Added regression checks cover prepared
+versus mutable spectrum inputs, replaced inputs, Gaussian-plan invalidation and native output
+SIMD tails/band boundaries/black-white endpoints. The optimized encoder differs from the old
+visible composite by at most 1.000 byte in these cases. Actual learned depth inference passed.
 Debug built with zero warnings and errors. Release publishing completed; the deployed
 executable at `quick-info-win-x64` matched the release SHA-256 and survived the five-second
 startup check. The enabled startup entry points to that same executable. A separately published self-contained single-file
@@ -81,12 +84,38 @@ The main WinUI bundle resolves Windows App SDK's ONNX native DLL version
 check with the 1.23.2 .NET bindings and successfully ran the real model. Different native
 file hashes therefore do not by themselves indicate a failed inference dependency.
 
-Single synthetic samples with a 640-side work canvas took about 96–115 ms per completed frame
-including full-resolution correction at native 1080p/4K; these noisy samples do not establish
-that either resolution is faster. Earlier samples reached about 160 ms during catch-up.
-This CPU trial is well below 30 display fps: 30 Hz describes simulation history, not achieved
-output frame rate. Capture, inference, UI upload, preparation overlap and gesture latency are
-additional. Closing cancels between simulation steps so a catch-up cannot continue indefinitely.
+## Clarity and CPU optimization (2026-11-10)
+
+The user reported stuttering and blurry character/edge detail. Raising the work cap to 1280
+doubles each working dimension and quadruples working pixels on larger monitors. The source
+size/density parameters stay unchanged; their exact raster rounding still depends on resolution.
+A trial at 1920 gave active-stage medians of 62 ms (native 1080p) and 85 ms (native 4K), too slow
+for this CPU stack's 30 Hz catch-up. 1280 is the selected balance for user review.
+
+Static glyph geometry, cell-centre pigment, rain parameters and source HSL are prepared once
+per gesture. B reuses HSL/LUT only for exactly unchanged input RGB. Gaussian passes reuse
+bilinear coordinate plans and retain the original kernels and accumulation order. Parallel
+passes use at most four bands; zero-light paths bypass unnecessary work. Native correction
+encoding reuses maps/row buffers and SIMD, preserving each full-resolution capture pixel rather
+than stretching an already-encoded alpha layer. Playback schedules at the renderer's 30 Hz
+interval rather than rendering duplicate simulation states at 60 Hz. Every missed history step
+is still computed. Closing checks cancellation between steps and during output encoding.
+
+At a 1280x720 work canvas, the added A/B preparation caches use about 56.3 MiB and the encoder's
+delta buffer about 10.5 MiB, plus small maps/row buffers and the existing textures. These caches
+belong to one gesture; Gaussian plans are weakly associated with their target textures.
+
+Release synthetic measurements across two runs, excluding UI upload, capture and depth:
+
+| Native output | Preparation | One early step + encode | Three-step catch-up + encode | Active 0.4–2.4 s p50 | Active p95 |
+| --- | --- | --- | --- | --- | --- |
+| 1920x1080 | 152–166 ms | 25–27 ms | 45–47 ms | 30–34 ms | 42–59 ms |
+| 3840x2160 | 263–296 ms | 35–39 ms | 49–54 ms | 49–52 ms | 54–56 ms |
+
+The old 640-side implementation recorded roughly 96–115 ms per early frame/catch-up, sometimes
+160 ms. Those old samples did not measure the same active interval and are not a precise
+speedup ratio. 30 Hz describes history simulation, not guaranteed display fps; 4K remains CPU
+limited. Capture, inference, upload, preparation overlap and actual gesture latency are additional.
 Complex desktop appearance, motion and multi-monitor acceptance remain with the user.
 
 ## Local Jianying reference examined on 2026-11-10
@@ -120,6 +149,7 @@ A CPU port of the readable shader mathematics alone would still need matching de
 - `Services/RefreshFrame.cs`: original capture, initial grey handoff and depth preparation.
 - `Services/RefreshDepthEstimator.cs`: pinned local ONNX model, normalization and CPU inference.
 - `Services/JianyingRefreshRenderer.cs`: fixed-step A-then-B stack and full-resolution correction.
+- `Services/RefreshOutputEncoder.cs`: cached/SIMD native-resolution colour correction.
 - `Services/RefreshSpectrumEffect.cs`: ASCII/depth scan, rain, Gaussian and HSL chain A.
 - `Services/RefreshPixelScanEffect.cs`: Sobel/history, square raster, Gaussian and HSL chain B.
 - `Services/ReferenceEffectMath.cs`: bilinear textures, HSL, LUT and Gaussian kernels.

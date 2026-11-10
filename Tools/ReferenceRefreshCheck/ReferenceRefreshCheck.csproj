@@ -9,6 +9,7 @@
     <Compile Include="../../Services/ReferenceEffectMath.cs" Link="ReferenceEffectMath.cs" />
     <Compile Include="../../Services/IRefreshRenderer.cs" Link="IRefreshRenderer.cs" />
     <Compile Include="../../Services/JianyingRefreshRenderer.cs" Link="JianyingRefreshRenderer.cs" />
+    <Compile Include="../../Services/RefreshOutputEncoder.cs" Link="RefreshOutputEncoder.cs" />
     <Compile Include="../../Services/RefreshSpectrumEffect.cs" Link="RefreshSpectrumEffect.cs" />
     <Compile Include="../../Services/RefreshPixelScanEffect.cs" Link="RefreshPixelScanEffect.cs" />
     <Compile Include="../../Services/RefreshDepthEstimator.cs" Link="RefreshDepthEstimator.cs" />

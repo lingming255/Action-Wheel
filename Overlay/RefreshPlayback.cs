@@ -54,7 +54,7 @@ namespace Action_Wheel.Overlay
                         double elapsed = clock.Elapsed.TotalMilliseconds;
                         if (elapsed >= _renderer.DurationMs)
                             return;
-                        long begin = clock.ElapsedMilliseconds;
+                        double begin = clock.Elapsed.TotalMilliseconds;
                         _renderer.Render(elapsed, _pixels, _light, token);
                         token.ThrowIfCancellationRequested();
                         var uploaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -75,7 +75,10 @@ namespace Action_Wheel.Overlay
                         }))
                             return;
                         await uploaded.Task.WaitAsync(token).ConfigureAwait(false);
-                        int delay = (int)Math.Max(1, 1000.0 / 60 - (clock.ElapsedMilliseconds - begin));
+                        // A fixed-step renderer has no new state between reference ticks.
+                        // Avoid computing and uploading identical images at twice that rate.
+                        int delay = (int)Math.Max(1, Math.Ceiling(_renderer.FrameIntervalMs
+                            - (clock.Elapsed.TotalMilliseconds - begin)));
                         await Task.Delay(delay, token).ConfigureAwait(false);
                     }
                 }

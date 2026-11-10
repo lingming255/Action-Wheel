@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace Action_Wheel.Services
 {
@@ -35,7 +36,24 @@ namespace Action_Wheel.Services
         private readonly Vector3[] _squareSamples;
         private readonly float[] _squareGain;
         private readonly int _squareColumns, _squareRows;
+        private readonly int[] _squareCellX, _squareGainX, _squareCellY, _squareGainY;
+        private readonly int[] _blurX0, _blurX1, _blurY0, _blurY1;
+        private readonly float[] _blurXWeight, _blurYWeight;
+        private readonly SourceCache[] _sourceCache;
+        private readonly int _bandCount;
+        private readonly ParallelOptions _parallelOptions;
+        private readonly Action<int> _magnitudeBand, _historyBand, _compositeBand;
+        private ReferenceTexture? _activeInput, _activeOutput;
+        private float[]? _activeDepth;
+        private float _activeProgress, _activeFilter;
         private double _historyTime = double.NegativeInfinity;
+
+        private struct SourceCache
+        {
+            public Vector3 Source, Lut;
+            public float Hue;
+            public byte Valid;
+        }
 
         public RefreshPixelScanEffect(int width, int height, ReferenceTexture lut)
         {
@@ -53,10 +71,31 @@ namespace Action_Wheel.Services
             _blurAux = Texture(Math.Max(1, (int)MathF.Round(width * 0.2f)),
                 Math.Max(1, (int)MathF.Round(height * 0.2f)));
             _magnitude = new float[checked(width * height)];
+            _sourceCache = new SourceCache[checked(width * height)];
             _squareColumns = (width + _mosaicSize - 1) / _mosaicSize;
             _squareRows = (height + _mosaicSize - 1) / _mosaicSize;
             _squareSamples = new Vector3[checked(_squareColumns * _squareRows)];
             _squareGain = new float[checked(_mosaicSize * _mosaicSize)];
+            _squareCellX = new int[width]; _squareGainX = new int[width];
+            _squareCellY = new int[height]; _squareGainY = new int[height];
+            for (int x = 0; x < width; x++)
+            {
+                _squareCellX[x] = x / _mosaicSize;
+                _squareGainX[x] = x % _mosaicSize;
+            }
+            for (int y = 0; y < height; y++)
+            {
+                int glY = height - y - 1;
+                _squareCellY[y] = glY / _mosaicSize * _squareColumns;
+                _squareGainY[y] = glY % _mosaicSize * _mosaicSize;
+            }
+            (_blurX0, _blurX1, _blurXWeight) = SampleMap(width, _blur.Width);
+            (_blurY0, _blurY1, _blurYWeight) = SampleMap(height, _blur.Height);
+            _bandCount = (long)width * height >= 128 * 1024 ? Math.Min(4, Environment.ProcessorCount) : 1;
+            _parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = _bandCount };
+            _magnitudeBand = PrepareMagnitudeBand;
+            _historyBand = AdvanceHistoryBand;
+            _compositeBand = RenderCompositeBand;
             float half = _mosaicSize * 0.5f;
             for (int y = 0; y < _mosaicSize; y++)
             for (int x = 0; x < _mosaicSize; x++)
@@ -80,12 +119,32 @@ namespace Action_Wheel.Services
             if (seconds < _historyTime) Reset();
             if (seconds == _historyTime) return;
             _historyTime = seconds;
-            float t = Progress(seconds);
+            _activeInput = input;
+            _activeDepth = depth;
+            _activeProgress = Progress(seconds);
+            try
+            {
+                // Finish all magnitude rows before any band reads its Sobel neighbours.
+                RunBands(_magnitudeBand);
+                RunBands(_historyBand);
+            }
+            finally { _activeInput = null; _activeDepth = null; }
+        }
 
-            for (int i = 0; i < _magnitude.Length; i++)
-                _magnitude[i] = input.Pixels[i].Length();
+        private void PrepareMagnitudeBand(int band)
+        {
+            Vector3[] input = _activeInput!.Pixels;
+            int begin = _height * band / _bandCount * _width;
+            int end = _height * (band + 1) / _bandCount * _width;
+            for (int i = begin; i < end; i++) _magnitude[i] = input[i].Length();
+        }
 
-            for (int y = 0; y < _height; y++)
+        private void AdvanceHistoryBand(int band)
+        {
+            float[] depth = _activeDepth!;
+            float t = _activeProgress;
+            int firstY = _height * band / _bandCount, lastY = _height * (band + 1) / _bandCount;
+            for (int y = firstY; y < lastY; y++)
             {
                 int up = Math.Max(0, y - 1) * _width;
                 int row = y * _width;
@@ -108,8 +167,8 @@ namespace Action_Wheel.Services
                     float m1 = Step(t + ScanWidth / 3f, h);
                     float m2 = Step(t, h);
                     float m3 = Step(t - ScanWidth * 0.5f, h);
-                    Vector3 band = Green * (m3 - m2) + Cyan * (m2 - m1) + Vector3.One * (m1 - m0);
-                    Vector3 accumulated = (_history.Pixels[i] * 0.8f + band * (edge * 0.2f)) * 1.01f
+                    Vector3 colourBand = Green * (m3 - m2) + Cyan * (m2 - m1) + Vector3.One * (m1 - m0);
+                    Vector3 accumulated = (_history.Pixels[i] * 0.8f + colourBand * (edge * 0.2f)) * 1.01f
                         - new Vector3(0.01f);
                     _history.Pixels[i] = Vector3.Clamp(accumulated, Vector3.Zero, Vector3.One);
                 }
@@ -138,31 +197,76 @@ namespace Action_Wheel.Services
             ReferenceEffectMath.Gaussian(_blur, _blurAux, BlurSpacing, true, 5, FarWeights);
             ReferenceEffectMath.Gaussian(_blurAux, _blur, BlurSpacing * verticalScale, false, 5, FarWeights);
 
-            float t = Progress(seconds);
-            float filter = FilterStrength * Math.Clamp(backgroundFade, 0f, 1f);
-            for (int y = 0; y < _height; y++)
+            _activeInput = input;
+            _activeOutput = output;
+            _activeDepth = depth;
+            _activeProgress = Progress(seconds);
+            _activeFilter = FilterStrength * Math.Clamp(backgroundFade, 0f, 1f);
+            try { RunBands(_compositeBand); }
+            finally { _activeInput = null; _activeOutput = null; _activeDepth = null; }
+        }
+
+        private void RenderCompositeBand(int band)
+        {
+            Vector3[] input = _activeInput!.Pixels, output = _activeOutput!.Pixels;
+            float[] depth = _activeDepth!;
+            float t = _activeProgress, filter = _activeFilter;
+            int firstY = _height * band / _bandCount, lastY = _height * (band + 1) / _bandCount;
+            for (int y = firstY; y < lastY; y++)
             {
-                float v = (y + 0.5f) / _height;
+                int top = _blurY0[y] * _blur.Width, bottom = _blurY1[y] * _blur.Width;
+                float vertical = _blurYWeight[y];
                 for (int x = 0; x < _width; x++)
                 {
                     int i = y * _width + x;
-                    Vector3 original = input.Pixels[i];
+                    Vector3 original = input[i];
+                    ref SourceCache cached = ref _sourceCache[i];
+                    if (original != cached.Source) { cached.Source = original; cached.Valid = 0; }
+                    int left = _blurX0[x], right = _blurX1[x];
+                    float horizontal = _blurXWeight[x];
+                    Vector3 blurred = Vector3.Lerp(
+                        Vector3.Lerp(_blur.Pixels[top + left], _blur.Pixels[top + right], horizontal),
+                        Vector3.Lerp(_blur.Pixels[bottom + left], _blur.Pixels[bottom + right], horizontal), vertical);
                     Vector3 light = _sharp.Pixels[i] * CoreGain
-                        + _blur.Sample((x + 0.5f) / _width, v) * GlowGain;
+                        + blurred * GlowGain;
                     // Preserve the original shader's HSL operations, including values above one
                     // before the final UNorm clamp. Mode 26 transfers original hue to the light.
-                    Vector3 lightHsl = ReferenceEffectMath.RgbToHsl(light);
-                    lightHsl.Y *= ColourSaturation;
-                    light = ReferenceEffectMath.HslToRgb(lightHsl);
-                    lightHsl = ReferenceEffectMath.RgbToHsl(light);
-                    lightHsl.X = ReferenceEffectMath.RgbToHsl(original).X;
-                    light = ReferenceEffectMath.HslToRgb(lightHsl);
+                    if (light != Vector3.Zero)
+                    {
+                        Vector3 lightHsl = ReferenceEffectMath.RgbToHsl(light);
+                        lightHsl.Y *= ColourSaturation;
+                        // The intervening HSL->RGB->HSL is an inverse pair. Remove that pair
+                        // for finite saturation, including the shader's negative HDR saturation.
+                        // Near lightness one, float cancellation in that inverse pair is
+                        // material. Retain the original arithmetic there and at its singularity.
+                        if (!float.IsFinite(lightHsl.Y) || MathF.Abs(lightHsl.Z - 1f) < 0.01f)
+                            lightHsl = ReferenceEffectMath.RgbToHsl(ReferenceEffectMath.HslToRgb(lightHsl));
+                        if ((cached.Valid & 1) == 0)
+                        {
+                            cached.Hue = ReferenceEffectMath.RgbToHsl(original).X;
+                            cached.Valid |= 1;
+                        }
+                        lightHsl.X = cached.Hue;
+                        light = ReferenceEffectMath.HslToRgb(lightHsl);
+                    }
 
-                    Vector3 graded = Vector3.Lerp(original, ReferenceEffectMath.Lut(_lut, original), filter);
-                    float mask = ReferenceEffectMath.SmoothStep(t - ScanWidth, t + ScanWidth,
-                        depth[i] * 0.5f + ScanWidth);
-                    Vector3 background = Vector3.Lerp(graded, original, 1f - mask);
-                    output.Pixels[i] = Vector3.Clamp(background + light, Vector3.Zero, Vector3.One);
+                    Vector3 background = original;
+                    if (filter > 0f)
+                    {
+                        float mask = ReferenceEffectMath.SmoothStep(t - ScanWidth, t + ScanWidth,
+                            depth[i] * 0.5f + ScanWidth);
+                        if (mask > 0f)
+                        {
+                            if ((cached.Valid & 2) == 0)
+                            {
+                                cached.Lut = ReferenceEffectMath.Lut(_lut, original);
+                                cached.Valid |= 2;
+                            }
+                            Vector3 graded = Vector3.Lerp(original, cached.Lut, filter);
+                            background = Vector3.Lerp(graded, original, 1f - mask);
+                        }
+                    }
+                    output[i] = Vector3.Clamp(background + light, Vector3.Zero, Vector3.One);
                 }
             }
         }
@@ -171,6 +275,13 @@ namespace Action_Wheel.Services
         {
             Array.Clear(_history.Pixels);
             _historyTime = double.NegativeInfinity;
+        }
+
+        private void RunBands(Action<int> action)
+        {
+            // Gaussian's own bounded bands execute before this phase, never inside these bands.
+            if (_bandCount == 1) action(0);
+            else Parallel.For(0, _bandCount, _parallelOptions, action);
         }
 
         private void RasterizeSquares()
@@ -185,13 +296,12 @@ namespace Action_Wheel.Services
             {
                 // Shader UV is bottom-up. Its floor-anchored cells begin at the physical bottom,
                 // including when the capture height is not an exact multiple of the cell size.
-                int glY = _height - y - 1;
-                int cellRow = glY / _mosaicSize * _squareColumns;
-                int gainRow = glY % _mosaicSize * _mosaicSize;
+                int cellRow = _squareCellY[y];
+                int gainRow = _squareGainY[y];
                 for (int x = 0; x < _width; x++)
                 {
-                    Vector3 sample = _squareSamples[cellRow + x / _mosaicSize];
-                    float gain = _squareGain[gainRow + x % _mosaicSize];
+                    Vector3 sample = _squareSamples[cellRow + _squareCellX[x]];
+                    float gain = _squareGain[gainRow + _squareGainX[x]];
                     _sharp.Pixels[y * _width + x] = Vector3.Clamp(sample * gain,
                         Vector3.Zero, Vector3.One);
                 }
@@ -229,6 +339,20 @@ namespace Action_Wheel.Services
         }
 
         private static float Step(float edge, float value) => value >= edge ? 1f : 0f;
+
+        private static (int[] First, int[] Second, float[] Weight) SampleMap(int pixels, int samples)
+        {
+            var first = new int[pixels]; var second = new int[pixels]; var weight = new float[pixels];
+            for (int pixel = 0; pixel < pixels; pixel++)
+            {
+                // Preserve Sample's operation order, so the cached coordinates are identical.
+                float coordinate = Math.Clamp((pixel + 0.5f) / pixels * samples - 0.5f, 0, samples - 1);
+                int lower = (int)coordinate;
+                first[pixel] = lower; second[pixel] = Math.Min(lower + 1, samples - 1);
+                weight[pixel] = coordinate - lower;
+            }
+            return (first, second, weight);
+        }
 
         private static ReferenceTexture Texture(int width, int height)
             => new(width, height, new Vector3[checked(width * height)]);

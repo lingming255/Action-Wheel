@@ -48,6 +48,15 @@ if (!args.Contains("--correctness-only"))
         clock.Restart();
         renderer.Render(134, frame, bloom);
         Console.WriteLine($"Reference native {width}x{height}: prepare={prepare:F2}ms, one step+encode={stepMs:F2}ms, three-step catch-up+encode={clock.Elapsed.TotalMilliseconds:F2}ms (before UI upload).");
+        var activeTimes = new List<double>();
+        for (int step = 5; step < 72; step++)
+        {
+            clock.Restart();
+            renderer.Render(step * 1000.0 / 30 + .001, frame, bloom);
+            if (step >= 12) activeTimes.Add(clock.Elapsed.TotalMilliseconds);
+        }
+        activeTimes.Sort();
+        Console.WriteLine($"Reference native {width}x{height}, active 0.4–2.4s: one step+encode p50={activeTimes[activeTimes.Count / 2]:F2}ms, p95={activeTimes[(int)(activeTimes.Count * .95)]:F2}ms, max={activeTimes[^1]:F2}ms (before UI upload).");
     }
 }
 if (args.Contains("--performance-only")) return;
@@ -55,6 +64,8 @@ if (args.Contains("--performance-only")) return;
 CheckTexturesAndLuts();
 CheckHsl();
 CheckCorrection();
+RefreshOutputEncoderTests.Run();
+PreparedEffectTests.Run();
 CheckPlayback();
 CheckLearnedDepth();
 Console.WriteLine("Reference refresh checks passed: texture coordinates, shader HSL/LUT, learned depth, fixed-step history, correction and transparent ending.");

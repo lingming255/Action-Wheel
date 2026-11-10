@@ -13,6 +13,7 @@ namespace Action_Wheel.Services
     {
         private const double ReferenceHz = 30;
         public double DurationMs => 3000;
+        public double FrameIntervalMs => 1000.0 / ReferenceHz;
         public int BloomWidth => 1;
         public int BloomHeight => 1;
         private readonly int _width, _height;
@@ -21,6 +22,7 @@ namespace Action_Wheel.Services
         private readonly float[] _depth;
         private readonly RefreshSpectrumEffect _spectrum;
         private readonly RefreshPixelScanEffect _pixels;
+        private readonly RefreshOutputEncoder _encoder;
         private int _lastStep = -1;
 
         public JianyingRefreshRenderer(int width, int height, byte[] capture, RefreshDepthMap depth)
@@ -30,26 +32,31 @@ namespace Action_Wheel.Services
             // Bound the CPU shader work; keep the reference equations and reconstruct their
             // correction above the original full capture. This resolution adaptation is explicit
             // and differs from the source engine's nominal 720p render targets.
-            double scale = Math.Min(1, 640.0 / Math.Max(width, height));
+            double scale = Math.Min(1, 1280.0 / Math.Max(width, height));
             int workWidth = Math.Max(2, (int)Math.Round(width * scale));
             int workHeight = Math.Max(2, (int)Math.Round(height * scale));
             _source = new ReferenceTexture(workWidth, workHeight);
             _spectrumFrame = new ReferenceTexture(workWidth, workHeight);
             _final = new ReferenceTexture(workWidth, workHeight);
             _depth = new float[checked(workWidth * workHeight)];
-            for (int y = 0; y < workHeight; y++)
-            for (int x = 0; x < workWidth; x++)
+            Parallel.For(0, workHeight, new ParallelOptions { MaxDegreeOfParallelism = 4 }, y =>
             {
-                float u = (x + .5f) / workWidth, v = (y + .5f) / workHeight;
-                _source.Pixels[y * workWidth + x] = SampleCapture(u, v);
-                _depth[y * workWidth + x] = SampleDepth(depth, u, v);
-            }
+                float v = (y + .5f) / workHeight;
+                for (int x = 0; x < workWidth; x++)
+                {
+                    float u = (x + .5f) / workWidth;
+                    _source.Pixels[y * workWidth + x] = SampleCapture(u, v);
+                    _depth[y * workWidth + x] = SampleDepth(depth, u, v);
+                }
+            });
             _spectrum = new RefreshSpectrumEffect(workWidth, workHeight,
                 ReferenceEffectMath.LoadTexture("atlas.rgb.gz"),
                 ReferenceEffectMath.LoadTexture("colorbar.rgb.gz"),
                 ReferenceEffectMath.LoadTexture("spectrum-lut.rgb.gz"));
+            _spectrum.Prepare(_source, _depth);
             _pixels = new RefreshPixelScanEffect(workWidth, workHeight,
                 ReferenceEffectMath.LoadTexture("pixel-lut.rgb.gz"));
+            _encoder = new RefreshOutputEncoder(width, height, capture, _source);
         }
 
         public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,
@@ -74,26 +81,15 @@ namespace Action_Wheel.Services
                 _spectrum.Render(_source, _depth, seconds, backgroundFade, _spectrumFrame);
                 cancellation.ThrowIfCancellationRequested();
                 _pixels.AdvanceHistory(_spectrumFrame, _depth, seconds);
+                _lastStep = next;
             }
-            _lastStep = step;
             cancellation.ThrowIfCancellationRequested();
             double time = step / ReferenceHz;
             // B's Lua keeps filter_alpha constant; its depth mask restores the background.
             _pixels.Render(_spectrumFrame, _depth, time, 1, _final);
-            // Encode a content-relative correction instead of upscaling a low-resolution photo
-            // over the desktop. Both addition and the reference's LUT darkening are represented.
-            Parallel.For(0, _height, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellation }, y =>
-            {
-                float v = (y + .5f) / _height;
-                for (int x = 0; x < _width; x++)
-                {
-                    float u = (x + .5f) / _width;
-                    int offset = (y * _width + x) * 4;
-                    Vector3 source = new(_capture[offset + 2] / 255f, _capture[offset + 1] / 255f, _capture[offset] / 255f);
-                    Vector3 target = ReferenceEffectMath.Clamp(source + (_final.Sample(u, v) - _source.Sample(u, v)));
-                    EncodeCorrection(source, target, fullBuffer, offset);
-                }
-            });
+            // Static maps and SIMD encode the native-resolution correction without repeating
+            // two full-screen floating-point texture samples and three divisions per pixel.
+            _encoder.Encode(_final, fullBuffer, cancellation);
         }
 
         internal static void EncodeCorrection(Vector3 source, Vector3 target, byte[] output, int offset)
