@@ -60,24 +60,28 @@ namespace Action_Wheel.Services
             int second = secondAngle * (DistanceSamples + 1) + firstDistance;
             double a = Lerp(_arrival[first], _arrival[first + 1], distanceFraction);
             double b = Lerp(_arrival[second], _arrival[second + 1], distanceFraction);
-            return Lerp(a, b, angleFraction);
+            double shapeProgress = Lerp(a, b, angleFraction) / RefreshTiming.SweepMs;
+            return RefreshTiming.SweepTimeProgress(shapeProgress) * RefreshTiming.SweepMs;
         }
 
-        /// <summary>Normalized radius at an angle and sweep progress; useful for visual checks.</summary>
+        /// <summary>Normalized radius at an angle and elapsed sweep progress; useful for checks.</summary>
         internal double RadiusAt(double angle, double progress)
         {
             if (!double.IsFinite(angle) || !double.IsFinite(progress))
                 throw new ArgumentOutOfRangeException(nameof(progress));
             if (progress <= 0) return 0;
             if (progress >= 1) return 1;
-            double noise = 0.50 * Math.Sin(3 * angle + _phase0 + TwoPi * 0.55 * progress)
-                + 0.32 * Math.Sin(7 * angle + _phase1 - TwoPi * 0.90 * progress)
-                + 0.18 * Math.Sin(13 * angle + _phase2 + TwoPi * 1.30 * progress);
-            return progress + Amplitude * Math.Sin(Math.PI * progress) * noise;
+            double q = RefreshTiming.EaseSweepProgress(progress);
+            double noise = 0.50 * Math.Sin(3 * angle + _phase0 + TwoPi * 0.55 * q)
+                + 0.32 * Math.Sin(7 * angle + _phase1 - TwoPi * 0.90 * q)
+                + 0.18 * Math.Sin(13 * angle + _phase2 + TwoPi * 1.30 * q);
+            return q + Amplitude * Math.Sin(Math.PI * q) * noise;
         }
 
         private void PrepareArrival()
         {
+            // Keep the lookup in uneased geometric progress. FrontAt applies inverse easing
+            // only after interpolation, avoiding a poorly sampled slow tail in the inverse table.
             // Separate angle/time sinusoids so a new gesture needs only a few thousand trig
             // calls. The 512*1024 inner loop is just multiply/add plus a monotone scan.
             var sin0 = new double[TimeSamples + 1]; var cos0 = new double[TimeSamples + 1];
@@ -108,7 +112,7 @@ namespace Action_Wheel.Services
                         + 0.18 * (s2 * cos2[time] + c2 * sin2[time]);
                     double radius = time == TimeSamples ? 1 : progress + envelope[time] * noise;
                     // |N|<=1 and |dN/dp|<=2*pi*(.50*.55+.32*.90+.18*1.30).
-                    // Therefore dRadius/dp >= 1-.04*(pi+5.008) > .674 for every seed/angle.
+                    // Therefore dRadius/dShapeProgress >= 1-.04*(pi+5.008) > .674 for every seed/angle.
                     // Every distance is crossed exactly once, making this inverse well-defined.
                     while (distanceIndex <= DistanceSamples
                         && distanceIndex / (double)DistanceSamples <= radius)

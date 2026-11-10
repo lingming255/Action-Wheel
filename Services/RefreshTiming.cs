@@ -24,6 +24,21 @@ namespace Action_Wheel.Services
         /// <summary>Slow an original 350 ms animation time without changing its relative rhythm.</summary>
         internal static double Scale(double milliseconds) => milliseconds * TimeScale;
 
+        /// <summary>Fast launch and a gradual slowdown within the unchanged radial sweep budget.</summary>
+        internal static double EaseSweepProgress(double timeProgress)
+        {
+            double t = Math.Clamp(timeProgress, 0, 1);
+            return t * (2 - t);
+        }
+
+        /// <summary>Inverse of the sweep easing, applied after the geometric arrival lookup.</summary>
+        internal static double SweepTimeProgress(double shapeProgress)
+        {
+            double q = Math.Clamp(shapeProgress, 0, 1);
+            // Equivalent to 1-sqrt(1-q), without cancellation close to the click.
+            return q / (1 + Math.Sqrt(1 - q));
+        }
+
         /// <summary>Circular reference timing; live gestures use a shared <see cref="RefreshWavefront"/>.</summary>
         internal static double FrontAt(double x, double y, int width, int height, int originX, int originY)
         {
