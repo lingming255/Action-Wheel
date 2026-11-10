@@ -13,8 +13,8 @@ namespace Action_Wheel.Services
     {
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
-        /// <summary>Renders solid blocks and their same-colour bloom into reusable playback buffers.</summary>
-        public required UniformBlockRefreshRenderer Renderer { get; init; }
+        /// <summary>Renders native solid blocks, their bloom and the experimental ASCII light layer.</summary>
+        public required SpectrumOverlayRefreshRenderer Renderer { get; init; }
         public required RectInt32 Bounds { get; init; }
         /// <summary>Wave origin relative to the captured monitor, in physical pixels.</summary>
         public int OriginX { get; private set; }
@@ -74,7 +74,7 @@ namespace Action_Wheel.Services
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    Renderer = new UniformBlockRefreshRenderer(w, h, pixels, depth, originX, originY),
+                    Renderer = new SpectrumOverlayRefreshRenderer(w, h, pixels, depth, originX, originY),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

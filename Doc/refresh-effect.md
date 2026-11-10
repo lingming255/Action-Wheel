@@ -4,16 +4,41 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current implementation: bidirectional depth sweep (2026-11-11)
+## Current experiment: bidirectional blocks with ASCII rain (2026-11-11)
+
+The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
+its own publish at `bin/Publish/refresh-bidirectional-depth-20261111-win-x64`. The experiment
+is on the separate branch `codex/refresh-bidirectional-ascii`. Before adding the second effect,
+the plain source (169 files), runtime and local models were archived at
+`archive/refresh-bidirectional-before-ascii-20261111` and matching `bin/Backups/` directory;
+source contents and runtime/model hashes were verified.
+
+This branch wraps the same native block renderer in `SpectrumOverlayRefreshRenderer` and
+adds the reference A effect's atlas characters, column rain, three Gaussian pairs and source
+HSL colouring. Raw learned depth continues to control glyph geometry; a separate envelope
+uses the two-front arrival times below. It is an experimental overlay, with a host gain of
+0.35 on its positive colour delta. The native block layer is never downsampled. The archived
+complete A-then-B reference renderer remains available and is not the playback path.
+
+The A work canvas has a maximum side of 1280. Its original depth controls glyph density,
+atlas selection, sampling and rain geometry; the host's independent two-front envelope only
+replaces the scan band. The same 0.85 time scale accelerates rain motion. Only the positive
+RGB difference from A's source image is upsampled and added to the native base, so this
+branch is an overlay experiment rather than the original sequential A-then-B pipeline.
+Both layers retime from the same release-pixel depth and finish within 2550 ms. Playback
+targets 30 Hz, skips missed display frames and evaluates elapsed time without history.
+
+## Plain bidirectional block foundation (2026-11-11)
 
 The user chose a simpler visual after trying the reference reconstruction: each pixel block
 is one solid colour with a fixed square shape. The whole block fades in/out and changes
-brightness/opacity together. There are no characters, digital-rain patterns, interior SDF
-gain or other per-pixel animation within a block. The preceding implementation is archived at
+brightness/opacity together. The plain foundation has no characters, digital-rain patterns,
+interior SDF gain or other per-pixel animation within a block; the experimental overlay adds
+its light above that layer. The preceding implementation is archived at
 `archive/refresh-before-uniform-blocks-20261111` (`d613596`), with source, executable and model
 backup under `bin/Backups/refresh-before-uniform-blocks-20261111`.
 
-The capture path now selects `UniformBlockRefreshRenderer`. It keeps the independent learned
+The foundation is `UniformBlockRefreshRenderer`. It keeps the independent learned
 depth map with a 2.55-second duration, 15% shorter than the preceding three-second version.
 Two fronts start at the pointer's depth and sweep towards far and near. Each cell samples one
 original-image colour and one depth value during preparation. Fixed integer rectangles are
@@ -183,6 +208,33 @@ Release publish `refresh-bidirectional-depth-20261111-win-x64` was deployed to t
 and enabled startup entry match. Published/deployed SHA-256 is
 `C88676AD8DBE990F6D661B8199F5B18F94ADCD90FA5668DC1B8C78ADD9AAD547`.
 
+### ASCII overlay validation (2026-11-11)
+
+All seven `VerifyRefresh` suites passed, and Debug built with zero warnings/errors.
+The new suite verifies zero-band identity, bit-identical output when supplying the original
+reference band externally, unchanged prepared/mutable raw-depth geometry, cancellation and
+state cleanup. Wrapper checks cover gain-zero native-base identity, positive RGB addition
+against an independent visible-composition oracle (maximum error 0.989 byte), deterministic
+time jumps/repeats, PBGRA, complete dirty-buffer overwrite, origin retiming, unchanged inputs,
+invalid/end clearing and reuse after cancellation. Read-only review found no actionable issue.
+
+The final isolated Release run measured 1080p active-frame p50/p95/max 16.84/19.40/20.58 ms
+and 4K 35.47/41.03/41.52 ms. Warmed release retiming p50/p95 was 1.87/2.40 ms and
+1.97/2.71 ms respectively. Preparation was 124/127 ms in that run; an earlier full-suite
+run measured 364/142 ms, so these are subject to warmup and scheduling. Process-wide
+managed allocation was about 164 KB per five frames, including parallel workers. Capture,
+depth inference and UI upload are excluded. 4K already exceeds the 33.33 ms scheduling
+budget before UI upload; 30 Hz is a ceiling, not a measured desktop frame rate. The plain
+version remains available for comparison. Appearance and actual smoothness await user review.
+
+Release publish `refresh-bidirectional-ascii-20261111-win-x64` was copied to the usual
+`quick-info-win-x64` directory and restarted. PID 70920 survived the five-second launch check;
+the unique running process and enabled startup entry both point to that executable.
+Published/deployed SHA-256 matches
+`47452D1506C19FA36A3BB22BA23C8646D5F4AA81372B7B28B15E335C3B9EFD55`.
+No desktop animation was automatically triggered. The plain branch and its dedicated publish
+remain intact; restore its executable to the usual directory after exiting to compare versions.
+
 ## Archived implementation: the two reference pipelines (2026-11-10)
 
 Before the uniform-block change, the capture path called `RefreshDepthEstimator` and `JianyingRefreshRenderer`.
@@ -327,6 +379,7 @@ A CPU port of the readable shader mathematics alone would still need matching de
 
 - `Services/RefreshFrame.cs`: original capture, initial grey handoff and depth preparation.
 - `Services/UniformBlockRefreshRenderer.cs`: active native solid-block scan, whole-block envelopes and same-colour exterior bloom.
+- `Services/SpectrumOverlayRefreshRenderer.cs`: experimental A character/rain layer above native bidirectional blocks.
 - `Services/RefreshDepthSweep.cs`: pointer-depth sampling, two equal-speed depth fronts and 15% shorter timing.
 - `Services/RefreshPropagation.cs`: archived prepared depth-speed travel times through immediate neighbours.
 - `Services/RefreshDepthEstimator.cs`: pinned local ONNX model, normalization and CPU inference.

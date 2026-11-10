@@ -419,7 +419,7 @@ namespace Action_Wheel.Services
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static uint AddLight(uint overlay, uint source, int blue, int green, int red)
+        internal static uint AddLight(uint overlay, uint source, int blue, int green, int red)
         {
             int alpha = (int)(overlay >> 24);
             uint visible = (overlay & 0x00FFFFFFu) + ProductRgb255(source, 255 - alpha);

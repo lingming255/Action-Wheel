@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Action_Wheel.Services
@@ -48,6 +49,8 @@ namespace Action_Wheel.Services
         private ReferenceTexture? _activeInput;
         private ReferenceTexture? _activeOutput;
         private float[]? _activeDepth;
+        private float[]? _activeEnvelope;
+        private CancellationToken _cancellation;
         private float _seconds;
         private float _filterAmount;
 
@@ -158,6 +161,24 @@ namespace Action_Wheel.Services
         /// </summary>
         public void Render(ReferenceTexture input, float[] depth, double seconds,
             float backgroundFade, ReferenceTexture output)
+            => RenderCore(input, depth, seconds, backgroundFade, output, null, default);
+
+        /// <summary>
+        /// Reuses the reference atlas, rain, Gaussian and HSL stages with a host-supplied
+        /// light envelope. Raw depth still controls glyph geometry, not the scan timing.
+        /// The caller owns a finite, normalized envelope matching the work texture.
+        /// </summary>
+        internal void RenderWithEnvelope(ReferenceTexture input, float[] depth, double seconds,
+            float[] envelope, ReferenceTexture output, CancellationToken cancellation = default)
+        {
+            ArgumentNullException.ThrowIfNull(envelope);
+            if (envelope.Length != checked(_width * _height))
+                throw new ArgumentException("Spectrum envelope dimensions must match.", nameof(envelope));
+            RenderCore(input, depth, seconds, 1, output, envelope, cancellation);
+        }
+
+        private void RenderCore(ReferenceTexture input, float[] depth, double seconds,
+            float backgroundFade, ReferenceTexture output, float[]? envelope, CancellationToken cancellation)
         {
             ArgumentNullException.ThrowIfNull(input);
             ArgumentNullException.ThrowIfNull(depth);
@@ -166,10 +187,14 @@ namespace Action_Wheel.Services
                 || output.Width != _width || output.Height != _height
                 || depth.Length != checked(_width * _height))
                 throw new ArgumentException("Spectrum input, depth and output dimensions must match.");
+            cancellation.ThrowIfCancellationRequested();
 
             _activeInput = input;
             _activeOutput = output;
             _activeDepth = depth;
+            _activeEnvelope = envelope;
+            _cancellation = cancellation;
+            _parallelOptions.CancellationToken = cancellation;
             _seconds = (float)seconds;
             // Package A's extra.json defaults background animation to zero. Keep the host's
             // end fade in the formula without introducing an extra background dimming effect.
@@ -186,16 +211,23 @@ namespace Action_Wheel.Services
                 // one QUARTER-SIZE blur texel. Remaining passes read quarter-size buffers.
                 if (anyLight)
                 {
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_sharp, _aux,
                         (float)_sharp.Width / _blur.Width, true, 2, GaussianWeights);
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_aux, _blur, 1.0f, false, 2, GaussianWeights);
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_blur, _aux, 5.25f, true, 2, GaussianWeights);
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_aux, _blur, 5.25f, false, 2, GaussianWeights);
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_blur, _aux, 5.25f, true, 2, GaussianWeights);
+                    cancellation.ThrowIfCancellationRequested();
                     ReferenceEffectMath.Gaussian(_aux, _blur, 5.25f, false, 2, GaussianWeights);
                 }
                 else _blur.Pixels.AsSpan().Clear();
 
+                cancellation.ThrowIfCancellationRequested();
                 RunBands(_compositeBand);
             }
             finally
@@ -203,6 +235,9 @@ namespace Action_Wheel.Services
                 _activeInput = null;
                 _activeOutput = null;
                 _activeDepth = null;
+                _activeEnvelope = null;
+                _cancellation = default;
+                _parallelOptions.CancellationToken = default;
             }
         }
 
@@ -226,6 +261,7 @@ namespace Action_Wheel.Services
             bool anyLight = false;
             for (int y = firstY; y < lastY; y++)
             {
+                _cancellation.ThrowIfCancellationRequested();
                 float v = 1.0f - (y + 0.5f) / _height;
                 float imageY = v * _height;
                 int row = y * _width;
@@ -233,11 +269,7 @@ namespace Action_Wheel.Services
                 {
                     int pixel = row + x;
                     float height = depth[pixel];
-                    float mask = ReferenceEffectMath.SmoothStep(scan, scan + ScanWidth,
-                        height * 0.5f + ScanWidth);
-                    float depthBand = Math.Clamp(
-                        ReferenceEffectMath.SmoothStep(0.0f, 0.5f, mask)
-                        - ReferenceEffectMath.SmoothStep(0.5f, 1.0f, mask), 0.0f, 1.0f);
+                    float depthBand = DepthBandAt(height, scan, pixel);
                     if (depthBand <= 0.0f)
                     {
                         sharp[pixel] = Vector3.Zero;
@@ -268,16 +300,13 @@ namespace Action_Wheel.Services
             bool anyLight = false;
             for (int y = firstY; y < lastY; y++)
             {
+                _cancellation.ThrowIfCancellationRequested();
                 float v = 1.0f - (y + 0.5f) / _height;
                 int row = y * _width;
                 for (int x = 0; x < _width; x++)
                 {
                     int pixel = row + x;
-                    float mask = ReferenceEffectMath.SmoothStep(scan, scan + ScanWidth,
-                        depth[pixel] * 0.5f + ScanWidth);
-                    float depthBand = Math.Clamp(
-                        ReferenceEffectMath.SmoothStep(0.0f, 0.5f, mask)
-                        - ReferenceEffectMath.SmoothStep(0.5f, 1.0f, mask), 0.0f, 1.0f);
+                    float depthBand = DepthBandAt(depth[pixel], scan, pixel);
                     if (depthBand <= 0.0f)
                     {
                         sharp[pixel] = Vector3.Zero;
@@ -292,6 +321,16 @@ namespace Action_Wheel.Services
                 }
             }
             _bandHasLight[band] = anyLight;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float DepthBandAt(float depth, float scan, int pixel)
+        {
+            if (_activeEnvelope != null) return _activeEnvelope[pixel];
+            float mask = ReferenceEffectMath.SmoothStep(scan, scan + ScanWidth,
+                depth * 0.5f + ScanWidth);
+            return Math.Clamp(ReferenceEffectMath.SmoothStep(0.0f, 0.5f, mask)
+                - ReferenceEffectMath.SmoothStep(0.5f, 1.0f, mask), 0.0f, 1.0f);
         }
 
         private void SampleGeometry(ReferenceTexture input, int x, float imageY, float depth,
@@ -341,6 +380,7 @@ namespace Action_Wheel.Services
             bool prepared = ReferenceEquals(input, _preparedInput) && ReferenceEquals(_activeDepth, _preparedDepth);
             for (int y = firstY; y < lastY; y++)
             {
+                _cancellation.ThrowIfCancellationRequested();
                 int row = y * _width;
                 for (int x = 0; x < _width; x++)
                 {

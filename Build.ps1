@@ -157,6 +157,8 @@ function Invoke-VerifyRefresh {
     Invoke-Dotnet @('run', '--project', $referenceTool, '-c', 'Release', '--nologo')
     $blocksTool = Join-Path $root 'Tools\UniformBlockRefreshCheck\UniformBlockRefreshCheck.csproj'
     Invoke-Dotnet @('run', '--project', $blocksTool, '-c', 'Release', '--nologo')
+    $spectrumOverlayTool = Join-Path $root 'Tools\SpectrumOverlayRefreshCheck\SpectrumOverlayRefreshCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $spectrumOverlayTool, '-c', 'Release', '--nologo')
 }
 
 function Invoke-Publish {
