@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Action_Wheel.Overlay;
 using Microsoft.UI.Dispatching;
@@ -603,6 +604,7 @@ namespace Action_Wheel.Services
         /// <summary>The menu whose gesture currently holds the screen grey, if any.</summary>
         private RadialMenu? _gradedMenu;
         private Task<RefreshFrame?>? _refreshFrame;
+        private CancellationTokenSource? _refreshCaptureCancellation;
 
         /// <summary>
         /// Starts the hold half of the refresh: capture the monitor for the mosaic, then grey the
@@ -610,13 +612,16 @@ namespace Action_Wheel.Services
         /// </summary>
         private void BeginGrade(RadialMenu menu, PointInt32 position)
         {
+            CancelRefreshCapture();
+            var cancellation = new CancellationTokenSource();
+            _refreshCaptureCancellation = cancellation;
             _gradedMenu = menu;
             _refreshFrame = RefreshFrame.CaptureAsync(position, () => _dispatcherQueue.TryEnqueue(() =>
             {
                 // The gesture may already have ended while the capture ran.
                 if (ReferenceEquals(_gradedMenu, menu))
                     ScreenGrade.Lower();
-            }));
+            }), cancellation.Token);
         }
 
         /// <summary>Restores colour and hands back the gesture's mosaic. UI thread.</summary>
@@ -625,8 +630,17 @@ namespace Action_Wheel.Services
             var frame = _refreshFrame;
             _gradedMenu = null;
             _refreshFrame = null;
+            CancelRefreshCapture();
             ScreenGrade.Restore();
             return frame;
+        }
+
+        private void CancelRefreshCapture()
+        {
+            var cancellation = _refreshCaptureCancellation;
+            _refreshCaptureCancellation = null;
+            cancellation?.Cancel();
+            cancellation?.Dispose();
         }
 
         /// <summary>

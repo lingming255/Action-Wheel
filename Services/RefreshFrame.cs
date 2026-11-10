@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Graphics;
 
@@ -37,21 +38,31 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// Captures and builds on a worker thread. <paramref name="grabbed"/> runs as soon as the
+        /// Waits for the shared startup renderer warmup, then captures and builds on a worker.
+        /// This keeps startup training frames from competing with a real gesture's playback.
+        /// <paramref name="grabbed"/> runs as soon as the
         /// raw screen has been read, which is the earliest safe moment to lower saturation. It may
         /// run twice on failure paths, so callers must keep it idempotent.
         /// </summary>
-        public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action grabbed)
-            => Task.Run(() =>
+        public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action grabbed,
+            CancellationToken cancellation = default)
+            => Task.Run(async () =>
             {
-                try { return Capture(position, grabbed); }
+                try
+                {
+                    // Cancel only this gesture's wait, never the process-wide training task.
+                    await RefreshRenderWarmup.EnsureAsync().WaitAsync(cancellation).ConfigureAwait(false);
+                    return Capture(position, grabbed, cancellation);
+                }
+                catch (OperationCanceledException) { return null; }
                 finally { grabbed(); }
             });
 
-        private static RefreshFrame? Capture(PointInt32 position, Action grabbed)
+        private static RefreshFrame? Capture(PointInt32 position, Action grabbed, CancellationToken cancellation)
         {
             try
             {
+                cancellation.ThrowIfCancellationRequested();
                 var monitor = MonitorFromPoint(new POINT { x = position.X, y = position.Y }, MONITOR_DEFAULTTONEAREST);
                 var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
                 if (!GetMonitorInfo(monitor, ref mi))
@@ -64,13 +75,16 @@ namespace Action_Wheel.Services
                 grabbed();
                 if (pixels == null)
                     return null;
+                cancellation.ThrowIfCancellationRequested();
 
                 // Preserve the raw capture for depth and capture-relative light/LUT correction.
                 // The hold's grey cover is only the initial handoff, not a radial reveal layer.
                 byte[] grey = BuildGrey(pixels);
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);
+                cancellation.ThrowIfCancellationRequested();
                 RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h);
+                cancellation.ThrowIfCancellationRequested();
                 return new RefreshFrame
                 {
                     Grey = grey,

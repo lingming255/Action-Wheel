@@ -128,6 +128,13 @@ namespace Action_Wheel.Services
             try
             {
                 RunBands(_prepareBand);
+                // The last two blur passes repeat the 5.25-texel plans. Prepare each unique
+                // mapping here so the first visible light frame only performs the actual blur.
+                ReferenceEffectMath.PrepareGaussian(_sharp, _aux,
+                    (float)_sharp.Width / _blur.Width, true, 2);
+                ReferenceEffectMath.PrepareGaussian(_aux, _blur, 1.0f, false, 2);
+                ReferenceEffectMath.PrepareGaussian(_blur, _aux, 5.25f, true, 2);
+                ReferenceEffectMath.PrepareGaussian(_aux, _blur, 5.25f, false, 2);
                 _preparedInput = input; _preparedDepth = depth;
             }
             finally { _activeInput = null; _activeDepth = null; }

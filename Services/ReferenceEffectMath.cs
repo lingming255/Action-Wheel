@@ -86,6 +86,18 @@ namespace Action_Wheel.Services
         {
             float sum = weights[0];
             for (int i = 1; i <= radius; i++) sum += 2 * weights[i];
+            GetGaussianPlan(source, target, spacing, horizontal, radius)
+                .Apply(source.Pixels, target.Pixels, weights, 1 / sum);
+        }
+
+        /// <summary>Build immutable sample maps during preparation, before the playback clock starts.</summary>
+        public static void PrepareGaussian(ReferenceTexture source, ReferenceTexture target,
+            float spacing, bool horizontal, int radius)
+            => _ = GetGaussianPlan(source, target, spacing, horizontal, radius);
+
+        private static GaussianPlan GetGaussianPlan(ReferenceTexture source, ReferenceTexture target,
+            float spacing, bool horizontal, int radius)
+        {
             GaussianCache cache = GaussianPlans.GetOrCreateValue(target);
             var key = new GaussianKey(source.Width, source.Height, spacing, horizontal, radius);
             GaussianPlan plan;
@@ -97,7 +109,7 @@ namespace Action_Wheel.Services
                     cache.Plans.Add(key, plan);
                 }
             }
-            plan.Apply(source.Pixels, target.Pixels, weights, 1 / sum);
+            return plan;
         }
 
         private readonly record struct GaussianKey(int SourceWidth, int SourceHeight,

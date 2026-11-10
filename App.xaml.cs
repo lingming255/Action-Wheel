@@ -84,6 +84,10 @@ namespace Action_Wheel
 
             SetUpTrayIcon();
 
+            // Exercise the complete CPU renderer offscreen while the app is idle. A gesture
+            // started immediately after launch awaits this same one-shot task before capturing.
+            _ = RefreshRenderWarmup.EnsureAsync();
+
             _ = CheckForUpdatesAsync(viewModel);
         }
 
@@ -217,6 +221,7 @@ namespace Action_Wheel
                 return;
 
             _exiting = true;
+            RefreshRenderWarmup.Cancel();
 
             // ForceClose, not Close: the settings window would otherwise put an unsaved-changes
             // dialog on screen, and this method cannot wait for an answer - it runs synchronously

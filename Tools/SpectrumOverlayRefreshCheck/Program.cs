@@ -2,13 +2,35 @@ using System.Diagnostics;
 using System.Numerics;
 using Action_Wheel.Services;
 
+if (args.Contains("--warmup-only") || args.Contains("--warmup-cancel-only"))
+{
+    await SpectrumOverlayTests.CheckSharedWarmup(args.Contains("--warmup-cancel-only"));
+    return;
+}
 if (!args.Contains("--performance-only")) SpectrumOverlayTests.Run();
 if (!args.Contains("--correctness-only")) SpectrumOverlayTests.Measure();
 
 internal static class SpectrumOverlayTests
 {
+    public static async Task CheckSharedWarmup(bool cancel)
+    {
+        var watch = Stopwatch.StartNew();
+        var callers = new Task[16];
+        Parallel.For(0, callers.Length, index => callers[index] = RefreshRenderWarmup.EnsureAsync());
+        Task completion = callers[0];
+        Require(callers.All(task => ReferenceEquals(task, completion)),
+            "Concurrent startup/gesture callers did not share one warmup task.");
+        if (cancel) RefreshRenderWarmup.Cancel();
+        await Task.WhenAll(callers);
+        Require(completion.IsCompletedSuccessfully
+            && ReferenceEquals(completion, RefreshRenderWarmup.EnsureAsync()),
+            "A completed/canceled warmup faulted or started again for a later gesture.");
+        Console.WriteLine($"Shared render warmup: 16 concurrent callers shared one completion; cancel={cancel}, elapsed={watch.Elapsed.TotalMilliseconds:F2}ms; later callers do not restart it.");
+    }
+
     public static void Run()
     {
+        CheckGaussianPreparation();
         CheckExternalEnvelope();
         CheckOverlay();
         CheckDistanceArrival();
@@ -20,6 +42,45 @@ internal static class SpectrumOverlayTests
     private static RefreshSpectrumEffect Spectrum(int width, int height)
         => new(width, height, ReferenceEffectMath.LoadTexture("atlas.rgb.gz"),
             ReferenceEffectMath.LoadTexture("colorbar.rgb.gz"), ReferenceEffectMath.LoadTexture("spectrum-lut.rgb.gz"));
+
+    private static void CheckGaussianPreparation()
+    {
+        float[] weights = [.208046f, .203926f, .192051f];
+        foreach ((int width, int height) in new[] { (1, 1), (7, 5), (173, 97) })
+        foreach (bool horizontal in new[] { false, true })
+        foreach (float spacing in new[] { 1f, 5.25f, 4f })
+        {
+            var source = ReferenceTexture.FromBgra(Scene(width, height), width, height);
+            Vector3[] beforeSource = (Vector3[])source.Pixels.Clone();
+            int targetWidth = Math.Max(1, (width + 3) / 4), targetHeight = Math.Max(1, (height + 3) / 4);
+            var prepared = new ReferenceTexture(targetWidth, targetHeight);
+            var lazy = new ReferenceTexture(targetWidth, targetHeight);
+            Array.Fill(prepared.Pixels, new Vector3(.17f, .31f, .43f));
+            Vector3[] beforeTarget = (Vector3[])prepared.Pixels.Clone();
+
+            ReferenceEffectMath.PrepareGaussian(source, prepared, spacing, horizontal, 2);
+            ReferenceEffectMath.PrepareGaussian(source, prepared, spacing, horizontal, 2);
+            Require(source.Pixels.AsSpan().SequenceEqual(beforeSource)
+                && prepared.Pixels.AsSpan().SequenceEqual(beforeTarget),
+                "Preparing Gaussian coordinates rendered or changed source/target pixels.");
+            ReferenceEffectMath.Gaussian(source, prepared, spacing, horizontal, 2, weights);
+            ReferenceEffectMath.Gaussian(source, lazy, spacing, horizontal, 2, weights);
+            Require(prepared.Pixels.AsSpan().SequenceEqual(lazy.Pixels),
+                "Prebuilt and lazily constructed Gaussian coordinates produced different pixels.");
+
+            // A coordinate-only plan may be reused for a new image of the same dimensions;
+            // it must not retain the original source or a previous invocation's contents.
+            var replacement = new ReferenceTexture(width, height,
+                beforeSource.Select(pixel => Vector3.One - pixel).ToArray());
+            var fresh = new ReferenceTexture(targetWidth, targetHeight);
+            ReferenceEffectMath.Gaussian(replacement, prepared, spacing, horizontal, 2, weights);
+            ReferenceEffectMath.Gaussian(replacement, fresh, spacing, horizontal, 2, weights);
+            Require(prepared.Pixels.AsSpan().SequenceEqual(fresh.Pixels)
+                && source.Pixels.AsSpan().SequenceEqual(beforeSource),
+                "A prebuilt Gaussian plan retained its old source or changed the original image.");
+        }
+        Console.WriteLine("Gaussian preparation: no source/target mutation, repeat preparation, bit-identical lazy output and replacement-source reuse passed.");
+    }
 
     private static void CheckExternalEnvelope()
     {
@@ -75,6 +136,18 @@ internal static class SpectrumOverlayTests
         prepared.Render(source, depth, seconds, 1, a);
         mutable.Render(source, depth, seconds, 1, b);
         Require(a.Pixels.AsSpan().SequenceEqual(b.Pixels), "Host timing/cancellation leaked into subsequent archived rendering.");
+        prepared.Prepare(source, depth);
+        foreach (double time in new[] { 1.7, 0, .317, 2.4, .913 })
+        {
+            for (int index = 0; index < envelope.Length; index++)
+                envelope[index] = index % 5 == 0 ? 0 : index % 3 == 0 ? .35f : 1;
+            prepared.RenderWithEnvelope(source, depth, time, envelope, a);
+            mutable.RenderWithEnvelope(source, depth, time, envelope, b);
+            Require(a.Pixels.AsSpan().SequenceEqual(b.Pixels),
+                "Prebuilt spectrum blur changed a repeated-prepare or out-of-order frame.");
+        }
+        Require(depth.AsSpan().SequenceEqual(beforeDepth) && source.Pixels.AsSpan().SequenceEqual(beforeSource),
+            "Spectrum preparation or prebuilt blur modified input colour or raw depth.");
         Console.WriteLine("External spectrum envelope: zero-band identity, bit-identical reference-band oracle, prepared/mutable raw geometry, scan override, cleanup and cancellation passed.");
     }
 
@@ -135,6 +208,13 @@ internal static class SpectrumOverlayTests
             Require(geometry.Zip(overlay.BlocksRenderer.Blocks.ToArray()).All(pair =>
                 (pair.First with { StartMs = 0 }) == (pair.Second with { StartMs = 0 })),
                 "Retiming the ASCII experiment changed native geometry or pigment.");
+            var freshOrigin = new SpectrumOverlayRefreshRenderer(width, height, capture, depth, 0, 0);
+            foreach (double time in new[] { 1300, 0, 700, 180, 2919, 3000 })
+            {
+                overlay.Render(time, a, light); freshOrigin.Render(time, b, light);
+                Require(a.AsSpan().SequenceEqual(b),
+                    "Offscreen rendering/prebuilt blur altered a frame after changing the release origin.");
+            }
             foreach (double time in new[] { -1, double.NaN, double.PositiveInfinity, 3000, 3250 })
             {
                 Array.Fill(b, (byte)239); Array.Fill(light, (byte)239);

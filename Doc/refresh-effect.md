@@ -349,6 +349,61 @@ unique running path and enabled startup entry match. Published/deployed SHA-256 
 `A1D98C8F7952EBD47DA7A3525DF542544A384A7C7C42ED9A2080D95DDE4AAFE1`.
 No desktop animation was automatically triggered.
 
+## First-playback render warmup (2026-11-11)
+
+The user reported dropped frames after the first animation had already started. Learned depth
+finishes before playback and could not explain that phase by itself. In fresh ReadyToRun
+processes, the first 500 ms of pure rendering had median/max times of 64.80/78.50 ms at 1080p
+and 101.13/124.93 ms at 4K; a 4K frame later reached 162.63 ms. Later gestures were much faster.
+The sampled Render calls had no GC. A separate diagnostic process with tiered compilation
+disabled stayed slow across all three rounds, supporting runtime render-path optimization as
+the main cold-versus-warm difference. Product runtime settings were not changed.
+
+`RefreshRenderWarmup.EnsureAsync()` starts once after the app's window/tray setup. It uses a
+discarded 1280x720 colour pattern and a 128x72 depth ramp to exercise the actual native blocks,
+ASCII rain, Gaussian bloom and composition. These synthetic inputs are used only offscreen;
+real gestures still require learned depth. The warmup does not capture the desktop, load the
+model, change screen colour or upload a bitmap. It renders at least 60 active frames and allows
+at least two seconds of render-loop wall time for runtime optimization, yielding between frames.
+The measured complete startup task took about 3.3 seconds, including preparation.
+
+Real capture asynchronously awaits the same completion task before doing its own work. A
+gesture immediately after launch can therefore wait once; the UI remains responsive. Each
+gesture owns a cancellation token, so closing or replacing a menu cancels its pending wait
+without stopping global warmup or leaving obsolete captures queued behind it. Cancellation is
+checked again before capture, before inference and after inference. An already-running model
+call is not forcibly interrupted. App exit cancels warmup; warmup exceptions/cancellation are
+contained so actual refresh can still attempt its normal path. No large synthetic scene is
+stored in static fields.
+
+Each prepared spectrum instance now constructs its four distinct Gaussian sample maps during
+preparation. The six visible passes reuse those maps with unchanged weights and arithmetic.
+The original playback clock and matching three-second close timer retain their shared basis.
+
+Fresh-process ReadyToRun measurements used the product warmup, then newly constructed real-size
+renderers, the same synthetic scene as the baseline, and real-time 30 Hz scheduling from 0 to
+3000 ms. They exclude screenshot, model, UI upload and DWM presentation:
+
+| Native output | Warmup | First 500 ms median/max | First playback maximum | Second playback maximum |
+| --- | --- | --- | --- | --- |
+| 1920x1080 | 3362.86 ms | 11.01/15.71 ms | 36.80 ms | 21.07 ms |
+| 3840x2160 | 3298.58 ms | 20.92/28.09 ms | 39.51 ms | 42.23 ms |
+
+All 260 measured Render calls had no GC, and none exceeded 50 ms. 4K active medians remain
+34.51/35.97 ms before upload, so this fixes the extra cold-start cost rather than establishing
+stable 30 fps at 4K. Raw profiles are under ignored `bin/Review/render-warmup-20261111/`.
+
+The affected spectrum and uniform-block correctness checks pass. Added checks cover unchanged
+source/target pixels during map preparation, bit-identical eager/lazy output, replacement-source
+reuse, repeated preparation, out-of-order times and origin changes. Separate processes verify
+16 callers share one warmup task, later calls do not restart it, and app-lifetime cancellation
+completes safely. Visual desktop acceptance remains with the user.
+
+The accepted pre-change version is recoverable from tag
+`archive/refresh-before-render-warmup-20261111` at `997c78c` and
+`bin/Backups/refresh-before-render-warmup-20261111/`. Its source archive was checked against all
+172 Git blobs, and all six runtime/model backup files matched source SHA-256 hashes.
+
 ## Archived implementation: the two reference pipelines (2026-11-10)
 
 Before the uniform-block change, the capture path called `RefreshDepthEstimator` and `JianyingRefreshRenderer`.
