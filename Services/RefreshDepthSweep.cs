@@ -2,27 +2,48 @@ using System;
 
 namespace Action_Wheel.Services
 {
-    /// <summary>Two equal-speed depth fronts moving away from the pointer's sampled depth.</summary>
+    /// <summary>Two depth fronts with a smaller screen-distance delay away from the pointer.</summary>
     internal static class RefreshDepthSweep
     {
         internal const double TimeScale = .85;
         internal const double DurationMs = 3000 * TimeScale;
         internal const double StartDelayMs = 140 * TimeScale;
         internal const double TravelMs = 2200 * TimeScale;
+        internal const double DistanceDelayMs = 280;
+        internal const double DepthTravelMs = TravelMs - DistanceDelayMs;
         internal const double LifetimeMs = 600 * TimeScale;
         internal const double RiseMs = 100 * TimeScale;
         internal const double FadeStartMs = 220 * TimeScale;
         internal const double BackgroundRestoreMs = 400 * TimeScale;
 
-        internal static double StartAt(float depth, float originDepth)
+        internal static double StartAt(float depth, float originDepth, double normalizedDistance = 0)
         {
             if (!float.IsFinite(depth) || depth < 0 || depth > 1
-                || !float.IsFinite(originDepth) || originDepth < 0 || originDepth > 1)
-                throw new ArgumentException("Depth sweep values must be finite and normalized.");
+                || !float.IsFinite(originDepth) || originDepth < 0 || originDepth > 1
+                || !double.IsFinite(normalizedDistance) || normalizedDistance < 0 || normalizedDistance > 1)
+                throw new ArgumentException("Depth sweep values and screen distance must be finite and normalized.");
             // Both sides use one depth speed. The shorter side finishes naturally sooner;
             // independently stretching each half would slow down a nearly empty depth range.
             double range = Math.Max(originDepth, 1 - (double)originDepth);
-            return StartDelayMs + TravelMs * Math.Abs((double)depth - originDepth) / range;
+            return StartDelayMs + DepthTravelMs * Math.Abs((double)depth - originDepth) / range
+                + DistanceDelayMs * normalizedDistance;
+        }
+
+        // Origins are native pixel indices. Samples use native edge coordinates: a pixel's
+        // centre is index + .5; a clipped cell/work sample uses its actual physical centre.
+        internal static double FarthestDistance(int width, int height, int originX, int originY)
+        {
+            double dx = Math.Max(originX, width - 1 - originX);
+            double dy = Math.Max(originY, height - 1 - originY);
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        internal static double DistanceAt(double centerX, double centerY, int originX, int originY,
+            double farthestDistance)
+        {
+            if (farthestDistance == 0) return 0;
+            double dx = centerX - (originX + .5), dy = centerY - (originY + .5);
+            return Math.Clamp(Math.Sqrt(dx * dx + dy * dy) / farthestDistance, 0, 1);
         }
 
         internal static float SampleOrigin(RefreshDepthMap map, int width, int height, int x, int y)

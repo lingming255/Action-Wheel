@@ -126,11 +126,17 @@ namespace Action_Wheel.Services
             originY = Math.Clamp(originY, 0, _height - 1);
             if (originX == _originX && originY == _originY) return;
             OriginDepth = RefreshDepthSweep.SampleOrigin(_depthMap, _width, _height, originX, originY);
+            double farthest = RefreshDepthSweep.FarthestDistance(_width, _height, originX, originY);
             for (int index = 0; index < _blocks.Length; index++)
-                _blocks[index] = _blocks[index] with
+            {
+                Block block = _blocks[index];
+                double distance = RefreshDepthSweep.DistanceAt(block.CellLeft + block.CellWidth * .5,
+                    block.CellTop + block.CellHeight * .5, originX, originY, farthest);
+                _blocks[index] = block with
                 {
-                    StartMs = RefreshDepthSweep.StartAt(_blocks[index].Depth, OriginDepth),
+                    StartMs = RefreshDepthSweep.StartAt(block.Depth, OriginDepth, distance),
                 };
+            }
             _originX = originX; _originY = originY;
         }
 

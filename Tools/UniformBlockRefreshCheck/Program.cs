@@ -19,7 +19,7 @@ internal static class UniformBlockRefreshTests
         CheckBloomColour();
         CheckArgumentsAndCaptureAlpha();
         CheckVisibleCompositing();
-        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, bidirectional depth order, actual pointer-depth sampling, equal-depth simultaneous arrival, faster envelopes, synchronized background, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending. Archived neighbour propagation checks also remain passing.");
+        Console.WriteLine("Uniform-block refresh checks passed: native solid cores, bidirectional depth order with bounded screen-distance delay, actual pointer-depth sampling, faster envelopes, synchronized background, coloured exterior bloom, direct-time determinism, cancellation, immutable inputs and transparent ending. Archived neighbour propagation checks also remain passing.");
     }
 
     private static void CheckVisibleCompositing()
@@ -282,7 +282,24 @@ internal static class UniformBlockRefreshTests
             ThrowsArgument(() => RefreshDepthSweep.StartAt(invalid, .5f), "Invalid scan depth was accepted.");
             ThrowsArgument(() => RefreshDepthSweep.StartAt(.5f, invalid), "Invalid pointer depth was accepted.");
         }
-        Console.WriteLine("Bidirectional depth timing checks: both branches progress away from pointer depth, equal-depth offsets share speed, shorter side finishes earlier, endpoints are finite and all fades finish within the faster cycle.");
+        foreach (double invalid in new[] { -1, 2, double.NaN, double.PositiveInfinity })
+            ThrowsArgument(() => RefreshDepthSweep.StartAt(.5f, .5f, invalid), "Invalid screen distance was accepted.");
+        foreach (float d0 in new[] { 0f, .25f, .5f, 1f })
+        foreach (float d in new[] { 0f, .25f, .5f, .75f, 1f })
+        {
+            double close = RefreshDepthSweep.StartAt(d, d0, 0);
+            double far = RefreshDepthSweep.StartAt(d, d0, 1);
+            Require(Math.Abs(far - close - 280) < .000001
+                && far + RefreshDepthSweep.LifetimeMs <= RefreshDepthSweep.DurationMs,
+                "Screen-distance delay was not bounded to 280ms or truncated a fade.");
+        }
+        Require(Math.Abs(RefreshDepthSweep.StartAt(.25f, .5f, .3)
+            - RefreshDepthSweep.StartAt(.75f, .5f, .3)) < .000001,
+            "Depth symmetry was lost at equal spatial distance.");
+        Require(RefreshDepthSweep.FarthestDistance(1, 1, 0, 0) == 0
+            && RefreshDepthSweep.DistanceAt(.5, .5, 0, 0, 0) == 0,
+            "Single-pixel distance was undefined.");
+        Console.WriteLine("Bidirectional depth timing checks: both branches progress away from pointer depth at fixed screen distance, equal offsets share speed, shorter side finishes earlier, spatial delay is bounded to 280ms and all fades finish within 2550ms.");
     }
 
     private static void CheckClickWave()
@@ -301,12 +318,18 @@ internal static class UniformBlockRefreshTests
             var blocks = renderer.Blocks.ToArray();
             Require(Math.Abs(renderer.OriginDepth - x / (float)(width - 1)) < .000001,
                 "Pointer depth was taken from a cell centre instead of the actual pointer pixel.");
-            var byDepthDistance = blocks.OrderBy(block => Math.Abs(block.Depth - renderer.OriginDepth)).ToArray();
-            for (int index = 1; index < byDepthDistance.Length; index++)
-                Require(byDepthDistance[index].StartMs >= byDepthDistance[index - 1].StartMs - .001,
-                    "The scan was ordered by screen position instead of distance from pointer depth.");
+            double farthest = Math.Sqrt(Math.Pow(Math.Max(x, width - 1 - x), 2)
+                + Math.Pow(Math.Max(y, height - 1 - y), 2));
             for (int index = 0; index < blocks.Length; index++)
             {
+                var block = blocks[index];
+                double dx = block.CellLeft + (block.CellWidth - 1) * .5 - x;
+                double dy = block.CellTop + (block.CellHeight - 1) * .5 - y;
+                double expected = 119 + 1590 * Math.Abs(block.Depth - (double)renderer.OriginDepth)
+                    / Math.Max(renderer.OriginDepth, 1 - (double)renderer.OriginDepth)
+                    + 280 * Math.Sqrt(dx * dx + dy * dy) / farthest;
+                Require(Math.Abs(block.StartMs - expected) < .000001,
+                    "Arrival differs from the independent native-coordinate depth/distance oracle.");
                 Require((blocks[index] with { StartMs = 0 }) == (original[index] with { StartMs = 0 }),
                     "Retiming at release changed prepared geometry, pigment or raw depth.");
                 Require(double.IsFinite(blocks[index].StartMs)
@@ -316,8 +339,16 @@ internal static class UniformBlockRefreshTests
                 CheckBackgroundEnvelope(blocks[index]);
             }
             foreach (var sameDepth in blocks.GroupBy(block => block.Depth))
-                Require(sameDepth.Select(block => block.StartMs).Distinct().Count() == 1,
-                    "Equal-depth remote blocks did not appear together.");
+            {
+                var ordered = sameDepth.OrderBy(block =>
+                    Math.Pow(block.CellLeft + (block.CellWidth - 1) * .5 - x, 2)
+                    + Math.Pow(block.CellTop + (block.CellHeight - 1) * .5 - y, 2)).ToArray();
+                for (int i = 1; i < ordered.Length; i++)
+                    Require(ordered[i].StartMs >= ordered[i - 1].StartMs - .000001,
+                        "A same-depth remote block appeared before a closer block.");
+                Require(ordered[^1].StartMs - ordered[0].StartMs <= 280.000001,
+                    "Spatial staggering overpowered the depth scan budget.");
+            }
         }
         renderer.SetOrigin(0, 0);
         Require(original.SequenceEqual(renderer.Blocks.ToArray()), "Returning to the initial release cell changed the prepared scene.");
@@ -341,22 +372,29 @@ internal static class UniformBlockRefreshTests
         double[] timesBefore = renderer.Blocks.ToArray().Select(block => block.StartMs).ToArray();
         renderer.SetOrigin(2, height - 1);
         Require(renderer.OriginDepth == originBefore
-            && timesBefore.AsSpan().SequenceEqual(renderer.Blocks.ToArray().Select(block => block.StartMs).ToArray()),
-            "Moving the pointer spatially at the same depth changed scan order.");
+            && !timesBefore.AsSpan().SequenceEqual(renderer.Blocks.ToArray().Select(block => block.StartMs).ToArray()),
+            "Moving the pointer at the same depth did not retime spatial distance.");
 
         foreach ((int w, int h) in new[] { (1, 1), (1, 17), (19, 1), (7, 5) })
         {
             var flat = new UniformBlockRefreshRenderer(w, h, Solid(w, h, new Vector3(100)),
                 new RefreshDepthMap(1, 1, [.3f]), w - 1, h - 1);
-            Require(flat.Blocks.ToArray().All(block => block.StartMs == RefreshDepthSweep.StartDelayMs),
-                "Flat depth or a degenerate image incorrectly retained spatial propagation delays.");
+            var flatBlocks = flat.Blocks.ToArray();
+            Require(flatBlocks.All(block => double.IsFinite(block.StartMs)
+                && block.StartMs >= 119 && block.StartMs <= 399),
+                "Flat-depth or degenerate-image spatial delays were invalid.");
+            if (w == 1 && h == 1)
+                Require(flatBlocks[0].StartMs == 119, "The single pointer pixel was delayed.");
+            else if (flatBlocks.Length > 1)
+                Require(flatBlocks.Min(block => block.StartMs) < flatBlocks.Max(block => block.StartMs),
+                    "Flat-depth remote blocks did not retain spatial staggering.");
         }
         var lowResolutionDepth = new RefreshDepthMap(2, 1, [0, 1]);
         Require(Math.Abs(RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, 4, 0) - .5f) < .000001
             && RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, int.MinValue, 0) == 0
             && RefreshDepthSweep.SampleOrigin(lowResolutionDepth, 9, 1, int.MaxValue, 0) == 1,
             "Pointer depth did not use bilinear model sampling and edge clamping.");
-        Console.WriteLine("Pointer-depth retiming checks: actual pixel/bilinear sampling, both depth directions, equal-depth remote simultaneity, spatially independent timing, immutable geometry/pigment/depth, clipped/degenerate edges and synchronized background.");
+        Console.WriteLine("Pointer-depth retiming checks: actual pixel/bilinear sampling, independent combined-timing oracle, same-depth near-before-far ordering, clamped/pixel-centre origins, immutable geometry/pigment/depth, clipped/degenerate edges and synchronized background.");
     }
 
     private static void CheckBackgroundEnvelope(UniformBlockRefreshRenderer.Block block)

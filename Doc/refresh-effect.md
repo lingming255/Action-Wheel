@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current experiment: bidirectional blocks with ASCII rain (2026-11-11)
+## Current experiment: bidirectional blocks, ASCII rain and distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
 its own publish at `bin/Publish/refresh-bidirectional-depth-20261111-win-x64`. The experiment
@@ -27,6 +27,18 @@ RGB difference from A's source image is upsampled and added to the native base, 
 branch is an overlay experiment rather than the original sequential A-then-B pipeline.
 Both layers retime from the same release-pixel depth and finish within 2550 ms. Playback
 targets 30 Hz, skips missed display frames and evaluates elapsed time without history.
+
+The user then requested farther screen pixels to start later as well. This branch now uses
+`119 + 1590*abs(d-d0)/max(d0,1-d0) + 280*r` ms. `r` is the Euclidean distance from a cell/work
+sample centre to the actual release-pixel centre, divided by the release's distance to the
+farthest monitor pixel centre. Native edge coordinates are shared by both layers; 1x1 uses
+zero distance. The original 1870 ms travel budget is split between 1590 ms of depth sweep and
+at most 280 ms of spatial stagger, keeping the same 2550 ms total and complete 510 ms fades.
+At equal depth, nearer regions appear earlier. This weighted timing does not guarantee
+spatial connectivity or rigid depth ordering when screen distance also changes. No per-frame
+distance work is added. The preceding ASCII version `0578f0e` is preserved at
+`archive/refresh-ascii-before-distance-delay-20261111`; its matching backup contains a source
+ZIP verified against all 172 Git blobs, complete runtime and models with verified hashes.
 
 ## Plain bidirectional block foundation (2026-11-11)
 
@@ -68,13 +80,14 @@ Capture, model inference, geometry, colour and background prepare during the hol
 only retimes the prepared grid, once and before playback; a replaced menu is ignored after
 awaiting preparation. A release over a monitor seam clamps to the original capture bounds.
 
-`RefreshDepthSweep` samples `d0` bilinearly at the actual pointer pixel, using the raw model
-map rather than the centre of its larger display block. A block of depth `d` starts at
+On the saved plain branch `160a753`, `RefreshDepthSweep` samples `d0` bilinearly at the
+actual pointer pixel, using the raw model map rather than its larger display block. A block starts at
 `119 + 1870*abs(d-d0)/max(d0,1-d0)` ms. Both fronts have the same depth speed; the shorter
 half finishes naturally sooner. Nearby depth values appear first, regardless of their spatial
 distance from the pointer. Remote regions at the same depth intentionally appear together.
 This emphasizes model depth contours, not a guarantee of object silhouettes; flat-depth
-areas may light as one patch. There is no spatial-neighbour propagation or radial delay.
+areas may light as one patch. The current experiment adds the distance term described above;
+the saved plain branch has no radial delay. Neither version uses spatial-neighbour propagation.
 
 All playback timing is scaled by .85: each block lasts 510 ms, fades in over 85 ms and fades
 out from 187 to 510 ms. Maximum opacity is 0.88, and whole-block brightness ranges from 0.75 to 1.
@@ -234,6 +247,31 @@ Published/deployed SHA-256 matches
 `47452D1506C19FA36A3BB22BA23C8646D5F4AA81372B7B28B15E335C3B9EFD55`.
 No desktop animation was automatically triggered. The plain branch and its dedicated publish
 remain intact; restore its executable to the usual directory after exiting to compare versions.
+
+### Additional screen-distance stagger validation (2026-11-11)
+
+Both affected suites passed after this change. Independent native-coordinate timing oracles
+check near-before-far arrival at equal depth, equal-distance depth symmetry, the 280 ms bound,
+complete fades, origin movement at fixed depth, actual release-pixel clamping and unchanged
+geometry/colour/depth. The overlay oracle also covers 1281-to-1280 work/native mapping,
+1x1, narrow and clipped images, cancellation, stateless time and PBGRA composition.
+Debug built with zero warnings/errors, and read-only production review found no actionable
+issue. The actual-model annotation helper exported 700 timings matching an independent
+depth/distance formula within 0.0005 ms CSV rounding, with the new timing version recorded.
+
+Final isolated Release active-frame p50/p95/max was 20.50/24.06/26.66 ms at 1080p and
+35.61/43.00/43.83 ms at 4K. Warmed release retiming p50/p95 was 4.58/5.55 ms and
+4.52/4.63 ms; preparation was 285/344 ms in this run. About 166 KB was allocated across
+managed threads per five frames. These are synthetic samples, excluding capture, inference
+and UI, and do not establish a frame-rate change from the preceding run. 4K still exceeds
+the 30 Hz display budget. Complex appearance and smoothness remain user acceptance.
+
+Release publish `refresh-bidirectional-ascii-distance-20261111-win-x64` was deployed to
+the usual `quick-info-win-x64` directory and restarted. PID 60456 survived five seconds;
+the unique running path and enabled startup entry match. Published/deployed SHA-256 is
+`E02F3707BD3C2BCB88760AA3430BD8769A5434143FEA1C0F6E7A2BD8C1709DB3`.
+The plain `160a753` branch and no-distance ASCII `0578f0e` publish/archive remain available.
+No desktop animation was automatically triggered.
 
 ## Archived implementation: the two reference pipelines (2026-11-10)
 

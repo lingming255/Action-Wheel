@@ -82,10 +82,22 @@ namespace Action_Wheel.Services
         /// <summary>Retimes both layers before playback; raw glyph geometry stays prepared.</summary>
         internal void SetOrigin(int originX, int originY)
         {
+            originX = Math.Clamp(originX, 0, _width - 1);
+            originY = Math.Clamp(originY, 0, _height - 1);
             BlocksRenderer.SetOrigin(originX, originY);
             float originDepth = OriginDepth;
-            for (int index = 0; index < _starts.Length; index++)
-                _starts[index] = RefreshDepthSweep.StartAt(_depth[index], originDepth);
+            double farthest = RefreshDepthSweep.FarthestDistance(_width, _height, originX, originY);
+            for (int y = 0; y < _workHeight; y++)
+            {
+                double centerY = (y + .5) * _height / _workHeight;
+                for (int x = 0; x < _workWidth; x++)
+                {
+                    int pixel = y * _workWidth + x;
+                    double centerX = (x + .5) * _width / _workWidth;
+                    double distance = RefreshDepthSweep.DistanceAt(centerX, centerY, originX, originY, farthest);
+                    _starts[pixel] = RefreshDepthSweep.StartAt(_depth[pixel], originDepth, distance);
+                }
+            }
         }
 
         public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,

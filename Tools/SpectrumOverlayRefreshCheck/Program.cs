@@ -11,8 +11,9 @@ internal static class SpectrumOverlayTests
     {
         CheckExternalEnvelope();
         CheckOverlay();
+        CheckDistanceArrival();
         CheckCompositing();
-        Console.WriteLine("Spectrum overlay checks passed: actual reference atlas/rain/Gaussian/HSL with independent host timing, native base preservation at zero gain, positive light addition, origin retiming, PBGRA, stateless elapsed time, cancellation/reuse and transparent ending.");
+        Console.WriteLine("Spectrum overlay checks passed: actual reference atlas/rain/Gaussian/HSL with independent host timing, native base preservation at zero gain, positive light addition, shared depth/distance arrival, origin retiming, PBGRA, stateless elapsed time, cancellation/reuse and transparent ending.");
     }
 
     private static RefreshSpectrumEffect Spectrum(int width, int height)
@@ -171,6 +172,60 @@ internal static class SpectrumOverlayTests
         Require(maximumError <= 1.01f, "Capture-relative spectrum composition differs from RGB addition.");
         Console.WriteLine($"Spectrum visible RGB-addition oracle maximum error={maximumError:F6} byte.");
     }
+
+    private static void CheckDistanceArrival()
+    {
+        // Inspect the prepared arrival map against the product formula, independently of
+        // the production distance helpers. This also exercises work-to-native coordinates.
+        foreach ((int width, int height) in new[] { (1, 1), (1, 73), (7, 5), (417, 235), (1281, 9) })
+        {
+            var renderer = new SpectrumOverlayRefreshRenderer(width, height, Scene(width, height), Depth(9, 7), 0, 0);
+            double scale = Math.Min(1, 1280.0 / Math.Max(width, height));
+            int workWidth = Math.Max(1, (int)Math.Round(width * scale));
+            int workHeight = Math.Max(1, (int)Math.Round(height * scale));
+            double[] starts = (double[])typeof(SpectrumOverlayRefreshRenderer)
+                .GetField("_starts", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(renderer)!;
+            Require(starts.Length == workWidth * workHeight, "The ASCII arrival map has unexpected dimensions.");
+            foreach ((int requestedX, int requestedY) in new[] { (-20, -30), (width / 2, height / 2), (width + 3, height + 5), (0, height - 1) })
+            {
+                renderer.SetOrigin(requestedX, requestedY);
+                int originX = Math.Clamp(requestedX, 0, width - 1), originY = Math.Clamp(requestedY, 0, height - 1);
+                double originDepth = PlaneDepth((originX + .5) / width, (originY + .5) / height);
+                double range = Math.Max(originDepth, 1 - originDepth);
+                double dx = Math.Max(originX, width - 1 - originX), dy = Math.Max(originY, height - 1 - originY);
+                double farthest = Math.Sqrt(dx * dx + dy * dy);
+                Require(Math.Abs(renderer.OriginDepth - originDepth) < 1e-6, "The ASCII origin is not the actual clamped release pixel.");
+                for (int y = 0; y < workHeight; y++)
+                for (int x = 0; x < workWidth; x++)
+                {
+                    double centerX = (x + .5) * width / workWidth, centerY = (y + .5) * height / workHeight;
+                    double depth = PlaneDepth((x + .5) / workWidth, (y + .5) / workHeight);
+                    double offsetX = centerX - (originX + .5), offsetY = centerY - (originY + .5);
+                    double distance = farthest == 0 ? 0 : Math.Clamp(Math.Sqrt(offsetX * offsetX + offsetY * offsetY) / farthest, 0, 1);
+                    double expected = 119 + 1590 * Math.Abs(depth - originDepth) / range + 280 * distance;
+                    double actual = starts[y * workWidth + x];
+                    Require(Math.Abs(actual - expected) < .002, "The ASCII layer does not share the independent depth/distance arrival formula.");
+                    Require(actual >= 119 && actual + 510 <= 2550, "Distance delay exceeds the existing animation lifetime.");
+                }
+            }
+        }
+
+        const int flatWidth = 101, flatHeight = 71, flatOriginX = 50, flatOriginY = 35;
+        var flatDepth = new RefreshDepthMap(1, 1, new[] { .4f });
+        var flat = new SpectrumOverlayRefreshRenderer(flatWidth, flatHeight, Scene(flatWidth, flatHeight), flatDepth, flatOriginX, flatOriginY);
+        double[] arrivals = (double[])typeof(SpectrumOverlayRefreshRenderer)
+            .GetField("_starts", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(flat)!;
+        double At(int x, int y) => arrivals[y * flatWidth + x];
+        Require(At(50, 35) == 119 && At(60, 35) < At(80, 35) && At(80, 35) < At(100, 35),
+            "Flat-depth ASCII pixels do not activate progressively away from the release pixel.");
+        Require(At(40, 35) == At(60, 35) && At(50, 25) == At(50, 45),
+            "Equal spatial distances at equal depth have different ASCII arrival times.");
+        Console.WriteLine("Spectrum distance arrival: independent 119+1590*depth+280*distance oracle, actual clamped release pixel, flat-depth radial order, equal-distance symmetry, 1280 work scaling, 1x1/narrow/corner cases and unchanged duration passed.");
+    }
+
+    private static double PlaneDepth(double u, double v)
+        => (Math.Clamp(u * 9 - .5, 0, 8) + Math.Clamp(v * 7 - .5, 0, 6)) / 14;
 
     public static void Measure()
     {
