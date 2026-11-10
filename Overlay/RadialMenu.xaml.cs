@@ -239,7 +239,7 @@ namespace Action_Wheel.Overlay
         /// </summary>
         private bool _closed;
         private EventHandler<object>? _refreshOnRendering;
-        private Storyboard? _refreshStoryboard;
+        private DispatcherQueueTimer? _refreshTimer;
         private RefreshPlayback? _refreshPlayback;
 
         /// <summary>
@@ -281,8 +281,8 @@ namespace Action_Wheel.Overlay
             }
             _refreshPlayback?.Dispose();
             _refreshPlayback = null;
-            _refreshStoryboard?.Stop();
-            _refreshStoryboard = null;
+            _refreshTimer?.Stop();
+            _refreshTimer = null;
 
             if (_windowHandle != IntPtr.Zero)
             {
@@ -1709,9 +1709,6 @@ namespace Action_Wheel.Overlay
 
             var bounds = frame.Bounds;
             double scale = _rasterizationScale;
-            // The wave starts where the wheel was opened, even if the pointer moved before release.
-            double cursorX = frame.OriginX / scale;
-            double cursorY = frame.OriginY / scale;
             double layerW = bounds.Width / scale, layerH = bounds.Height / scale;
 
             MenuContainer.Visibility = Visibility.Collapsed;
@@ -1741,15 +1738,17 @@ namespace Action_Wheel.Overlay
             AddRefreshImage(bloom, layerW, layerH);
             _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, bloom, CloseMenu);
 
-            var storyboard = new Storyboard { Duration = TimeSpan.FromMilliseconds(RefreshBudgetMs) };
-            AddCursorFlare(storyboard, cursorX, cursorY);
-
-            _refreshStoryboard = storyboard;
-            storyboard.Completed += (_, _) =>
+            // Playback lifetime is independent of decorative visuals.
+            var timer = DispatcherQueue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = TimeSpan.FromMilliseconds(RefreshBudgetMs);
+            timer.Tick += (_, _) =>
             {
+                timer.Stop();
                 if (!_closed)
                     CloseMenu();
             };
+            _refreshTimer = timer;
 
             // A few rendered frames so DWM has presented the cover before the matrix is lifted.
             int frames = 0;
@@ -1762,7 +1761,7 @@ namespace Action_Wheel.Overlay
                 if (_closed)
                     return;
                 restoreColour();
-                storyboard.Begin();
+                timer.Start();
                 _refreshPlayback?.Start();
             };
             CompositionTarget.Rendering += _refreshOnRendering;
@@ -1778,94 +1777,6 @@ namespace Action_Wheel.Overlay
                 Height = height,
                 IsHitTestVisible = false,
             });
-        }
-
-        /// <summary>The brief click flare and lens streak, separate from scene-coloured pixel bloom.</summary>
-        private void AddCursorFlare(Storyboard storyboard, double x, double y)
-        {
-            const double bloomDip = 420, streakW = 1100, streakH = 5;
-
-            var radial = new RadialGradientBrush();
-            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0xD0, 0xFF, 0xFF, 0xFF), Offset = 0 });
-            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x70, 0xFF, 0xF2, 0xDC), Offset = 0.12 });
-            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x26, 0xB8, 0xD8, 0xFF), Offset = 0.4 });
-            radial.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xB8, 0xD8, 0xFF), Offset = 1 });
-            var bloom = AddCentred(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = bloomDip, Height = bloomDip, Fill = radial },
-                x, y, out var bloomScale);
-            AddScale(storyboard, bloomScale, 0.25, 1.3, 0, RefreshTiming.Scale(250));
-            AddRefreshAnimation(storyboard, bloom, "Opacity", 0, 0.7, 0,
-                0, RefreshTiming.Scale(28), RefreshTiming.Scale(250));
-
-            var linear = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
-            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 0 });
-            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x50, 0xA8, 0xD0, 0xFF), Offset = 0.3 });
-            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0xE0, 0xFF, 0xFF, 0xFF), Offset = 0.5 });
-            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x50, 0xA8, 0xD0, 0xFF), Offset = 0.7 });
-            linear.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0x00, 0xA8, 0xD0, 0xFF), Offset = 1 });
-            var streak = AddCentred(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = streakW, Height = streakH, Fill = linear },
-                x, y, out var streakScale);
-            AddScale(storyboard, streakScale, 0.1, 1.15, 0, RefreshTiming.Scale(220), scaleY: false);
-            AddRefreshAnimation(storyboard, streak, "Opacity", 0, 0.8, 0,
-                0, RefreshTiming.Scale(25), RefreshTiming.Scale(220));
-        }
-
-        private UIElement AddCentred(FrameworkElement element, double x, double y, out ScaleTransform scale)
-        {
-            scale = new ScaleTransform();
-            element.Opacity = 0;
-            element.IsHitTestVisible = false;
-            element.RenderTransformOrigin = new Point(0.5, 0.5);
-            element.RenderTransform = scale;
-            Canvas.SetLeft(element, x - element.Width / 2);
-            Canvas.SetTop(element, y - element.Height / 2);
-            RefreshLayer.Children.Add(element);
-            return element;
-        }
-
-        private static void AddScale(Storyboard storyboard, ScaleTransform target, double from, double to,
-            double startMs, double endMs, bool scaleY = true)
-        {
-            foreach (var property in scaleY ? new[] { "ScaleX", "ScaleY" } : new[] { "ScaleX" })
-            {
-                var animation = new DoubleAnimation
-                {
-                    From = from,
-                    To = to,
-                    BeginTime = TimeSpan.FromMilliseconds(startMs),
-                    Duration = TimeSpan.FromMilliseconds(endMs - startMs),
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-                };
-                Storyboard.SetTarget(animation, target);
-                Storyboard.SetTargetProperty(animation, property);
-                storyboard.Children.Add(animation);
-            }
-        }
-
-        /// <summary>start at <paramref name="startMs"/>, peak at <paramref name="middleMs"/>, end at <paramref name="endMs"/>.</summary>
-        private static void AddRefreshAnimation(Storyboard storyboard, DependencyObject target,
-            string property, double start, double middle, double end, double startMs, double middleMs, double endMs)
-        {
-            var animation = new DoubleAnimationUsingKeyFrames();
-            animation.KeyFrames.Add(new DiscreteDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(startMs)),
-                Value = start,
-            });
-            animation.KeyFrames.Add(new EasingDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(middleMs)),
-                Value = middle,
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
-            });
-            animation.KeyFrames.Add(new EasingDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(endMs)),
-                Value = end,
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
-            });
-            Storyboard.SetTarget(animation, target);
-            Storyboard.SetTargetProperty(animation, property);
-            storyboard.Children.Add(animation);
         }
 
         /// <summary>
