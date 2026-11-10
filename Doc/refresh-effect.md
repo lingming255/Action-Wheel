@@ -1,86 +1,131 @@
 # Refresh effect
 
-## Purpose
+A centre release of the wheel plays a desktop visual effect. Hold left and press right to open,
+then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
+that action instead; releasing left first or pressing Esc cancels.
 
-The refresh gesture is a tactile reset rather than a data reload. It replaces the familiar habit of returning to the desktop and choosing Refresh, giving the left-plus-right mouse chord a satisfying neutral outcome when no wheel sector is selected.
+## Current implementation: the two reference pipelines
 
-## Interaction
+The active capture path calls only `RefreshDepthEstimator` and `JianyingRefreshRenderer`.
+The preceding radial particles, irregular wavefront, outlines, scene exposure, 20% background
+dim and extra core enhancement are not called. They remain in source and Git for comparison;
+the overbright revision is archived at `archive/refresh-additive-bright-before-jianying-20261110`.
 
-1. Hold the left mouse button and press the right mouse button to open the wheel.
-2. Release the right button inside the centre dead zone to play the refresh effect.
-3. Move into a sector and release the right button to execute that sector instead.
-4. Release the left button first, or press Esc, to cancel without an effect.
+1. Capture the cursor monitor before the hold-time colour matrix lowers saturation to 10%.
+2. Compute normalized relative inverse depth with a local Depth Anything V2 Small int8 ONNX
+   model. A single ONNX Runtime CPU session is reused, with at most four inference threads and
+   a lock against simultaneous inference. The pinned weight hash is checked at first load.
+3. Run A: depth-gated ASCII atlas rasterization and column rain, three exact Gaussian pairs,
+   original-image HSL hue/saturation transfer, and RGB addition. Use the resource's UI defaults,
+   including zero background LUT strength.
+4. Feed that result to B: Sobel-gated depth bands, 0.8 history / 0.2 current accumulation and
+   decay, fixed square SDF rasterization, four-point downsampling, the nine- and eleven-tap
+   Gaussian pairs, HSL source-hue transfer and addition over the depth-masked 0.3 LUT background.
+5. Advance both chains together at fixed 30 Hz and display the latest finished correction.
+   The reference default scan speed gives approximately three seconds. The legacy 800 ms and
+   radial easing are inactive in this trial. A retains its source background fade (zero at its default); B keeps LUT strength constant
+   and restores the background through its depth mask. No extra light envelope is added.
 
-The centre dead zone is `RingGeometry.GestureDeadZone`, currently 58 DIP.
+The hold's grey cover is presented for three frames before the matrix is restored and the
+new playback starts. Playback and its one-shot close timer share `IRefreshRenderer.DurationMs`
+(3000 ms here). One worker owns the reusable textures; only one acknowledged UI upload is
+outstanding. Cancellation is checked between reference steps and during full-resolution output.
+Model/capture failure produces no effect and safely restores desktop colour.
 
-## Visual design
+## Model and display boundaries
 
-The release side has three image-driven pixel layers, with the whole animation finishing within 800 ms:
+The original `nh_depth_for_light_scanning` file exists locally but requires Jianying's internal
+ByteNN/cv runtime; no independently usable SDK/API was found. At the user's explicit choice,
+the replacement is Depth Anything V2 Small from the pinned ONNX community export, Apache-2.0.
+`Assets/RefreshReference/depth-model.json` records URL, revision, SHA-256 and preprocessing;
+its licence is beside it. The 27.26 MB weights remain outside Git at
+`%LOCALAPPDATA%/ActionWheel/Models/depth-anything-v2-small-quantized.onnx`.
+No downloads or heuristic depth fallback occur inside the application.
 
-- Hold: as the wheel opens, `RefreshFrame` captures the cursor's monitor on a worker thread, then `ScreenGrade` drops saturation on every monitor to 10% via the Magnification API's full-screen colour matrix. The capture runs first because GDI captures see that matrix. From the original colour capture it builds the grey cover and the three pixel layers before release.
-- Scene analysis: `RefreshAnalyzer` samples an 11.2 DIP grid (20% finer than the legacy 14 DIP grid), joins neighbouring cells with similar colours into coherent regions, and estimates visual depth/saliency from region contrast, local detail, saturation, centre bias and region scale. It remains a lightweight visual heuristic, not semantic object recognition or a learned depth model.
-- Subject pixels: higher-saliency cells reserve exclusive one- or two-cell blocks, with a one-physical-pixel gap. Increased minimum cell coverage reduces missing patches while retaining scene depth. Large blocks merge only locally similar samples in the same colour region; the previous macro-cluster boundary is retained solely as a generation/merge constraint. Each resulting complete block has its own timing. Pigment is sampled from the exact screenshot footprint and keeps the existing hue-preserving lift and local opacity envelope. In capture-backed playback, its outlined pigment supplies a 4x additive light core rather than acting only as a translucent colour chip.
-- Background glyphs: a finer 2.8 DIP grid (about one fifth of a legacy tile) produces many small points, plus signs and wave marks. They keep the same one-pixel gap, sample their own screenshot pixels, and may sit over larger blocks at lower opacity to create a distinct fine-grain layer.
-- Boundary accents: sparse seam blocks reserve cells before subject blocks, so the two large-pixel layers never overwrite each other. Accent chips derive their contrasting hue from the corresponding local screenshot colour by rotating it 180 degrees; neutral areas use a restrained light/dark contrast instead of an arbitrary hue. The boundary layer starts later and fades last.
-- Release in the centre: the grey still covers the monitor first, and only once it has been presented is the colour matrix lifted, so nothing changes visibly. Every actual mosaic block and fine glyph receives an independent arrival from a shared near-circular wavefront with evolving dents and bulges. Its phases are randomized once per gesture using the Analyzer seed and an independent `Random`, leaving the generated particle geometry unchanged. Individual analysis tiles of the cover use that same wavefront, so the live desktop reveal follows the particles; neither rises and falls in 12 x 12 macro rectangles.
-- Wavefront shape: let `theta` be the direction from the opening click, `t` the normalized elapsed sweep time, `q` the geometric sweep progress, and `r` the distance normalized by the farthest monitor corner. Time first maps to geometry through `RefreshTiming.EaseSweepProgress(t) = t*(2-t)`, clamped to 0–1. The front radius remains `F(theta,q) = q + 0.04*sin(pi*q)*N(theta,q)`, with `N = 0.50*sin(3*theta + phi1 + 2*pi*0.55*q) + 0.32*sin(7*theta + phi2 - 2*pi*0.9*q) + 0.18*sin(13*theta + phi3 + 2*pi*1.3*q)`. The seeded phases are fixed within a gesture; phase travel follows geometric progress, so the changing dents and bulges slow down with the expanding front. Integer angular frequencies make the seam periodic, while the bounded amplitude and monotone time mapping preserve outward travel without flashbacks. The perturbation vanishes at both ends, preserving radius 0 at `t=0` and radius 1 at `t=1`.
-- Arrival preparation: `RefreshWavefront` builds its small angle-by-radius inverse-arrival lookup table in the linear geometric `q` domain. For a particle footprint centre or one analysis tile of the cover, interpolation finds `q` satisfying `F(theta,q) = r`; only then does `RefreshTiming.SweepTimeProgress(q) = q/(1+sqrt(1-q))`, with `q` clamped to 0–1, convert it to elapsed-time progress. Arrival is `480*t` milliseconds. Keeping the lookup in the geometric domain avoids scanning the nearly stationary end of the eased sweep. Particle and cover preparation share the same seeded wavefront. Playback evaluates the stored arrival/envelope at the current elapsed time; it does not evaluate sine functions per particle per frame or cache a full-screen frame sequence.
-- Timing: `RefreshTiming.TimeScale` retains the 800 ms budget and 480 ms sweep, which now starts fast and slows toward its end: one quarter of sweep time reaches 43.75% of base geometric progress, and half reaches 75%, before the small contour perturbation. Each analysis tile of the grey cover still fades in about 217 ms after its own arrival. Early particles retain shorter local lifetimes and disappear first; the last possible boundary pulse finishes around 795 ms. A merged one- or two-cell block always has one envelope for its whole footprint. Particle envelopes and bloom weighting retain their existing rules and follow the same eased arrivals as the cover. Fine points, plus signs and wave marks use their own footprint centres. Legacy macro clusters remain only for the unchanged merge constraint and older checks, not playback. The previous pure distance-ratio arrival describes the archived circular version; current arrival follows the evolving, eased wavefront.
-- Highlight outlines: each actual particle silhouette receives a narrow highlight in that particle's own colour, with a softer coloured rim beside it. RGB channels brighten by the same factor to preserve their ratios and hue; no white is mixed into the pigment. Fine points, plus signs and wave marks also retain their original colour. The source-coloured interior, original alpha coverage and transparent one-pixel gaps remain. Bloom emission samples are prepared from the original pigments independently of the outlined layer.
-- Scene illumination: `RefreshIllumination` derives a full-resolution exposure correction from the original capture. It converts sRGB to linear light, applies a 1.6x exposure with a rational white-point shoulder, then converts back; black remains black, white remains white, and bright gradients are not hard-clipped. This is an exposure parameter, not a promise of 1.6x display luminance at every pixel. Strength peaks at the opening click and smoothly falls to zero at the monitor edges using a directional ellipse. The correction rises in 50 ms, holds until 220 ms while the nearby cover clears, then smoothly fades to zero at 700 ms. It sits below the grey cover and the existing particles, so it appears with the desktop reveal. If the captured channel is S and the target change is delta, the correction uses A = max(delta/(1-S)) across the channels and premultiplied P = delta + A*S; scaling P and A together gives S + strength*delta over the unchanged scene. The derived alpha, rather than a faded full-colour screenshot or white radial sprite, keeps the desktop visible underneath.
-- Background contrast: after the grey cover and scene correction have been composed, `RefreshLightComposite.Dim` places black above that background and below all particle light. Its maximum opacity is 20%, weighted by the same 50/220/700 ms illumination envelope. For existing PBGRA `(P,A)` and dim amount `d`, the result is `((1-d)*P, d+(1-d)*A)`, which darkens both the covered scene and any live desktop underneath without darkening the later light cores or bloom.
-- Frame rendering and additive bloom: one bounded worker evaluates the current cover and every particle envelope on demand into reusable full-resolution PBGRA and low-resolution light buffers. Active particles emit their original pigment without the previous brightness threshold, at gain 2; the outlined pigment supplies a separate 4x additive core. Captured-scene highlight emission retains its soft threshold and click-to-edge falloff, weighted by illumination strength and the cover reveal. Near bloom retains radius 1 with two box-blur passes, while the wider bloom uses radius 4 with three passes, at a sampling step of about four physical pixels at 100% scale. The two scales are combined and bilinearly upsampled into the full image. The low-resolution `bloomBuffer` remains diagnostic output and is not displayed as a second source-over image.
-- Additive display encoding: `RefreshLightComposite` retains the read-only original capture as the colour reference. At a pixel with current premultiplied colour `P`, alpha `A` and captured colour `S`, its expected visible colour is `C=P+(1-A)*S`. Nonnegative core/glow channels are added to `C` and clamped to the SDR range to form target `T`. The compositor derives enough coverage for `T` above `S`, retaining at least the existing alpha, and encodes `P'=T-(1-A')*S` using the actual quantized alpha. This gives RGB addition over the unchanged captured scene through a normal source-over `Image`, instead of a coloured transparent fog that reduces the other channels. Strong cores can reach the SDR ceiling; this is not HDR output. The UI uploads only the finished full-resolution image, with at most one outstanding upload; the worker waits for acknowledgement before reusing buffers. Playback follows elapsed time rather than stretching 800 ms for late frames. No per-particle UI nodes or stored full-screen frame sequence are created.
-- Buffer and CPU limits: background dimming uses SIMD with a scalar tail. The compositor adds cores and upsampled glow in one pass, split into at most four disjoint horizontal bands at 512K pixels or more; maps, row storage and delegates are allocated during preparation. The retained capture and full-resolution core buffer add about 63.3 MiB at 4K relative to the preceding scene-illumination version. Existing frame, layer and illumination buffers are additional; 4K playback remains costly.
-- Glare: the expanding white circular highlight, central click flare and horizontal lens streak remain removed. Visible glow now comes from scene highlights as well as active particles' own-colour bloom and highlight outlines.
-- Validation and performance (2026-11-10, additive light): all four VerifyRefresh suites passed, including visible RGB addition, preservation of unlit channels, saturation, bilinear bloom, core-only frames, parallel band boundaries, SIMD dimming and its scalar tail, immutable buffers and transparent ending. Debug completed with zero warnings/errors; the published executable was deployed to `quick-info-win-x64`, matched by SHA-256 and survived five seconds after launch. The enabled HKCU startup entry was found pointing to the legacy `win-x64` executable and was corrected to the deployed path. Dense synthetic active-frame rendering took about 14–22 ms at 1080p and 58–92 ms at 4K; renderer preparation took 81/322 ms. Five measured frames allocated about 10.4 KiB across all managed threads, including bounded parallel scheduling. These numbers exclude capture, analysis, outlines and UI upload. End-to-end frame rate, immediate-release latency and actual close-timer timing remain unmeasured. Capture preparation is not cancellable yet; complex desktop visual acceptance is left to the user.
+The independent estimator uses ImageNet RGB normalization, a longest input side of 392 with
+multiples of 14, bilinear resizing and min-max inverse-depth normalization. This differs from
+both Jianying's model and the export's default 518-pixel/bicubic processor. On the local CPU,
+a C# synthetic 640x360 estimate returned finite 392x224 depth in about 543 ms at first load and
+114 ms on reuse. These are inference measurements, not gesture latency.
 
-Only the cursor's monitor gets the radial restore; other monitors regain colour all at once when the matrix lifts. Particles, exposure correction, scene emission and the additive compositor's colour reference represent the capture at gesture start. The raw capture is retained for the compositor's lifetime. The desktop underneath stays live, but moving or changed content can temporarily misalign with the correction; intense clamped light can locally require opaque coverage. This is not continuous desktop recapture or HDR engine post-processing. The final image still uses source-over display, but its RGB addition is computed before encoding that image rather than approximated with a second transparent glow image.
+The source is the still captured at gesture start. There is no live-video DIS flow/depth
+accumulation. A-then-B stacking and 30 Hz are explicit host choices; the cached packages do not
+establish the user's timeline frame rate or evaluation order. The work canvas preserves the
+monitor aspect ratio with a longest side capped at 640; nominal reference RTs are 720x1280,
+and their engine's auto-adaptation rules remain unknown. Every shader pass uses the audited
+math and sampling weights, with SDR clamping, but the floating-point working buffers do not
+reproduce every intermediate UNorm quantization step of the original GPU engine.
 
-The overlay is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`) and stays topmost and click-through. After the initial cover has been presented for three rendered frames, the colour matrix is restored and playback starts together with a one-shot 800 ms `DispatcherQueueTimer`; its tick closes the overlay. Closing cancels the worker, detaches pending rendering callbacks, and stops and clears the timer; a late upload cannot touch the closed overlay. Colour is also restored whenever the menu closes for any other reason, and Windows drops the matrix if the process exits.
+The low-resolution effect-minus-source correction is bilinearly reconstructed over the full
+capture. For source S and target T, coverage A must be at least `(T-S)/(1-S)` for a brightening
+channel or `(S-T)/S` for a darkening channel. Quantize A upward and encode premultiplied
+`P=T-(1-A)*S`. A normal source-over image then displays the expected target without blurring
+all desktop text or painting a second transparent glow image. Unchanged pixels are transparent.
+Moving desktop content can misalign with this capture-relative correction; strong changes can
+require opaque coverage. This is SDR, with no HDR output or continuous desktop recapture.
+Only the cursor's monitor receives the effect; other monitors regain colour when the matrix lifts.
+
+## Validation
+
+All five `Build.ps1 -Task VerifyRefresh` suites passed, including the new reference check.
+The latter verifies independent shader HSL arithmetic including out-of-range inputs, source
+LUT samples, visible correction error (maximum sampled 0.500 byte), fixed-step skip equivalence,
+immutable inputs, cancellation and transparent ending. Actual learned depth inference passed.
+Debug built with zero warnings and errors. Release publishing completed; the deployed
+executable at `quick-info-win-x64` matched the release SHA-256 and survived the five-second
+startup check. The enabled startup entry points to that same executable. A separately published self-contained single-file
+check EXE successfully loaded ONNX Runtime's native library, embedded textures and the real
+model, covering native extraction rather than just an unbundled console run.
+The main WinUI bundle resolves Windows App SDK's ONNX native DLL version
+`1.24.20260504.1.7444c45`; that exact extracted DLL was explicitly loaded in a separate
+check with the 1.23.2 .NET bindings and successfully ran the real model. Different native
+file hashes therefore do not by themselves indicate a failed inference dependency.
+
+Single synthetic samples with a 640-side work canvas took about 96–115 ms per completed frame
+including full-resolution correction at native 1080p/4K; these noisy samples do not establish
+that either resolution is faster. Earlier samples reached about 160 ms during catch-up.
+This CPU trial is well below 30 display fps: 30 Hz describes simulation history, not achieved
+output frame rate. Capture, inference, UI upload, preparation overlap and gesture latency are
+additional. Closing cancels between simulation steps so a catch-up cannot continue indefinitely.
+Complex desktop appearance, motion and multi-monitor acceptance remain with the user.
 
 ## Local Jianying reference examined on 2026-11-10
 
 The user identified the reference tracks as `彩色像素` and `光谱扫描`. The local Jianying cache is a junction from `%LOCALAPPDATA%\JianyingPro\User Data\Cache` to `D:\Caches\R1my\jianying-media-cache`. Two resource packages updated at 21:10 contain readable Lua/GLSL. Their Chinese titles are absent from the package manifests; associating A with `光谱扫描` and B with `彩色像素` remains an inference from their parameters and rendering code, not a verified title-to-ID mapping.
 
-- A: `effect\7399492904915389696\5373a80f847b81bdfa9eba25aa6aab49`. `AmazingFeature\xshader\blending.frag` lines 473 and 483 combine a sharp scan layer and blurred layer, then add them directly to a LUT-graded background. Its Lua renders the depth layer followed by three horizontal/vertical Gaussian pairs before final composition.
-- B: `effect\7399495216064892200\8073d46c5c3b46cee867e6a3c0f86154`. `AmazingFeature\xshader\blending.frag` lines 491 and 508–510 use `lines=coreGain*sharp+glowGain*blur`, mix the dark LUT and original image with a depth mask, then output `background+lines`. This active path is RGB addition, not Screen or ordinary alpha blending. `AmazingFeature\lua\SeekModeScript.lua` lines 302–305 map luminance parameter `x` to core gain `10*x` and glow gain `5*x`; the package default `x=0.4` therefore gives 4 and 2.
-- B's active Lua pass chain is depth/Sobel/history → square-pixel rasterization → downsample → two horizontal/vertical Gaussian pairs → history copy → final addition. It does not apply an ordinary bloom brightness threshold to particle emission. `depthLayer.frag` lines 169–198 builds green/cyan/white depth bands, gates them with scene edges and accumulates 80% history plus 20% current content. The `colorGlow.frag` file exists but is not used by this Lua pass chain.
-- Both packages request `nh_depth_for_light_scanning`. Their depth-driven scan and temporal history are not being transplanted into the wheel: the wheel keeps its existing radial wavefront and local particle envelopes. The borrowed rendering principles are bright cores, blurred source-colour spill, background contrast and additive composition. Full third-party shader source is not copied into this repository.
-- The background LUTs are strongly darker than identity. Nearest-neighbour grey-ramp samples from A's `AmazingFeature\image\filter_1.png` map input 128 to about 50 and 255 to 99; B maps them to about 72 and 158. Actual effect strength also depends on `filter_alpha`; these samples do not establish the user's current UI parameter values.
+**Implementation status:** the user rejected the overbright additive-only revision (`e280851`) and requested both complete pixel/scanning/light pipelines. The active path now reimplements the two audited postprocessing chains, with an independently runnable Depth Anything V2 Small model chosen by the user. This is a source reconstruction, not the original Jianying engine or a claim of identical output. Model, frame-rate, render-target adaptation and static-input differences are stated below.
+
+A is `effect\7399492904915389696\5373a80f847b81bdfa9eba25aa6aab49`:
+
+- Its `algorithmConfig.json` first resizes input to 360 x 640 and requests `nh_depth_for_light_scanning` with `flow_weight=0.8`. `AmazingFeature\lua\SeekModeScript.lua` lines 161–169 obtains `outputMap["depth"]` from `Amaz.Algorithm.getAEAlgorithmResult().getScriptInfo(...)`. Depth is an external model result, not calculated by its fragment shader. Both effects sample depth with a vertical UV flip and optionally invert it when `dir>0.5`.
+- `AmazingFeature\xshader\depthLayer.frag` lines 73–99 scans in depth order, with `t=fract(time*speed/10)` and a smooth triangular band derived from `smoothstep(t,t+width,0.5*depth+width)`. Lines 102–143 form a depth-dependent ASCII grid: density is `82*(1-0.45*depth)`, the cell centre samples the original image, and its luminance selects one of 24 glyphs in an 8-column x 3-row atlas. The actual `image\text.png` is 396 x 194; a generated square-block mask would not reproduce this texture.
+- Lines 162–197 add column-dependent digital-rain phase and speed. With the quantized column coordinate `x`, phase is `sin(15*x)`, column speed is `0.3*cos(3*x)+0.7`, and `y=fract(v+time*columnSpeed*speed/3+phase)`. Rain is the colour-bar sample at 0.58 multiplied by `1/y-0.4/(y+0.001)`. The inverted glyph texture, cell-centre source colour, brightness, rain and depth band are multiplied for the sharp layer. The colour bar is 180 x 1; a nearest sample around 0.58 is approximately RGB (235,122,0), before final hue processing.
+- Lua lines 111–127 render the sharp layer, then three horizontal/vertical Gaussian pairs. `gaussian5.frag` uses the five weights `0.192051, 0.203926, 0.208046, 0.203926, 0.192051`. Lua lines 229–245 use a one-texel step for the first pair and 5.25 blur texels for each later pair. Serialized render targets have nominal sizes 720 x 1280 for sharp/output and 180 x 320 for blur/aux; engine adaptation to other resolutions/aspects has not been verified. These are not the Wheel's repeated box blurs.
+- `blending.frag` lines 473–483 first computes `light=sharp+glowGain*blur`, replaces its HSL hue with the original image's hue, then blends 70% of a version using the original image's saturation while retaining the light's lightness. Only after this colour processing is light added directly to the LUT-graded background. The hue and saturation stages are part of the active path, not unused helper functions.
+- The `extra.json` event defaults differ from the Lua constructor: intensity 0.614 maps to brightness 4.298, luminance 0.642 to glow gain 2.6964, speed approximately 1/3 to scan speed approximately 3.333, range 0.333 to width 0.18315, and background animation 0 to `filter_alpha=0`. A's default therefore leaves the background ungraded, despite its dark LUT. Its background LUT strength fades during the final 20% for clips shorter than three seconds, or the last 0.6 seconds for longer clips; this does not establish the user's current UI values.
+
+B is `effect\7399495216064892200\8073d46c5c3b46cee867e6a3c0f86154`:
+
+- Its active Lua chain is depth/Sobel/history -> square-pixel rasterization -> downsample -> two horizontal/vertical Gaussian pairs -> history copy -> final composition. `colorGlow.frag` exists but is not in that chain. `depthLayer.frag` derives three depth bands in green, cyan and white, gates them using a Sobel test on the RGB vector length, and computes `L=clamp(1.01*(0.8*previous+0.2*bands*edgeGate)-0.01,0,1)`. With cleared history, the first frame's maximum is 0.192; directly using full-strength bands would bypass this important brightness and persistence behaviour.
+- `depthLayer0.frag` rounds the mosaic spacing down to an even number. At the package's default size parameter 0.27 this is `m=2*floor(0.0181*min(width,height)/2)`. It samples the history-derived light at the grid cell's top-left corner, evaluates a signed box distance at `centre-1.2*pixelOffset`, and outputs `clamp(sample*(1-distance),0,1)`. This is a square signed-distance raster, not Wheel's saliency blocks, outlined chips or ASCII layer.
+- The active first Gaussian kernel has nine taps: centre weight 1 and symmetric outward weights 0.980198, 0.923116, 0.835270 and 0.726149, divided by 7.929466. The second has eleven taps, additionally using 0.606530 at distance five, divided by 9.142526. The first horizontal/vertical pair has a one-texel step and the second uses the blur parameter, default 0.75. Serialized nominal render targets are 720 x 1280 for the main/history layers, 180 x 320 for blur and 144 x 256 for aux; their engine resize rules remain unverified.
+- Lua lines 302–305 map luminance `x` to sharp gain `10*x` and glow gain `5*x`, giving 4 and 2 at default 0.4. `blending.frag` lines 491–510 computes `light=4*sharp+2*blur`, scales HSL saturation by the default colour value 0.7, then replaces hue with the original image hue while preserving light saturation/lightness. It mixes original and LUT-graded background through the depth scan mask, using default `filter_alpha=0.3`, before adding the processed light in RGB. There is no ordinary brightness threshold on particle emission.
+
+Both final passes use RGB addition rather than Screen or a second transparent colour layer, but their depth input, temporal history, rasterization, Gaussian sampling and HSL stages are essential to the full result. The LUT sampler is a 64-cubed colour cube packed into 512 x 512, with bilinear R/G sampling and interpolation between the two adjacent B slices. Nearest-neighbour grey-ramp samples from A's `image\filter_1.png` map input 128 to approximately 50 and 255 to 99; B maps them to approximately 72 and 158. These samples alone do not establish visible dimming: A defaults to LUT strength 0 and B to 0.3, and the user's current UI parameters are unverified.
+
+A CPU port of the readable shader mathematics alone would still need matching depth results, image textures, texture sampling and render-target quantization to reproduce the two effects. Substituting the Wheel's current visual-saliency heuristic for the neural depth model would be an approximation, not complete reproduction. Full third-party shader source has not been copied into this repository.
 
 ## Code locations
 
-- `Services/ScreenGrade.cs`: saturation level and the colour matrix.
-- `Services/RefreshFrame.cs`: monitor capture, grey cover and worker-thread analysis orchestration.
-- `Services/RefreshAnalyzer.cs`: colour regions, visual-depth proxy, local screenshot-colour pigment, size-separated pixel rasterization, complementary seam accents and individual particle footprints/arrival times from the shared gesture wavefront.
-- `Services/RefreshWavefront.cs`: per-gesture seeded multi-frequency wavefront, progress-dependent shape and small geometric inverse-arrival lookup table shared by particles and cover tiles, followed by inverse time easing.
-- `Services/RefreshTiming.cs`: shared 800 ms budget, common timing scale, `EaseSweepProgress` / `SweepTimeProgress`, cover fade and individual pixel-layer envelopes; `FrontAt` retains the circular reference arrival for legacy callers/checks.
-- `Services/RefreshOutline.cs`: hue-preserving highlight outlines on actual particle silhouettes, using proportional RGB brightening without a white mix.
-- `Services/RefreshIllumination.cs`: scene-colour exposure correction, spatial falloff, time envelope and low-resolution highlight emission.
-- `Services/RefreshLightComposite.cs`: retained captured colour reference, background dimming, quantized PBGRA encoding of additive cores and bilinearly upsampled light.
-- `Services/RefreshRenderer.cs`: preparation of per-particle emission and envelopes, cover-tile arrival from the shared wavefront, scene correction beneath the cover, background contrast, additive cores and combined scene/particle bloom.
-- `Services/RefreshBloom.cs`: retained reference bloom builder for synthetic checks; live frame bloom is computed by `RefreshRenderer`.
-- `Overlay/RefreshPlayback.cs`: one worker, reusable buffers, acknowledged dispatcher uploads, elapsed-time scheduling and cancellation.
-- `Overlay/RadialMenu.xaml.cs`, `PlayRefresh(RefreshFrame?, Action)`: one final-composite image surface, three-frame cover handoff, worker start and the one-shot 800 ms close timer. `RadialMenu_Closed` cancels playback and clears the timer. The dedicated flare/streak helpers have been removed.
-- `Overlay/RadialMenu.xaml`: the `RefreshLayer` canvas hosting the current final-composite image.
-- `Services/LauncherService.cs`: `BeginGrade`, `EndGrade`, `PlayRefresh`.
-- `Tools/RefreshAnalyzerCheck/`, `Tools/RefreshBloomCheck/`, `Tools/RefreshOutlineCheck/` and `Tools/RefreshRendererCheck/`: synthetic-scene checks for coverage, independent radial particle timing, local colour, emission, outline geometry, rendered frames and performance; run with `Build.ps1 -Task VerifyRefresh`.
-
-### Trigger
-
-`Services/LauncherService.cs`, in `OnMiddleUp(...)`:
-
-`OnMiddleUp(...)` and `OnEmergencyTriggerReleased(...)` both call `PlayRefresh()` when the release is inside the dead zone.
-
-`RingGeometry.TagForDirection(...)` returns `null` while the pointer remains inside the dead zone, which selects refresh rather than a sector.
-
-## Deliberate first-version limits
-
-- No sound.
-- No settings UI.
-- No learned depth or semantic segmentation model; the first version uses a CPU-only visual heuristic.
-- Bloom filters current particle emission and captured-scene highlights on a CPU worker; it is not HDR post-processing of a continuously recaptured desktop. Frame rendering and UI upload costs limit the achieved frame rate, especially at 4K.
-- No effect across all monitors at once.
-
-These should be added only after repeated use shows that the current visual feedback is worth keeping and identifies what feels missing.
+- `Services/RefreshFrame.cs`: original capture, initial grey handoff and depth preparation.
+- `Services/RefreshDepthEstimator.cs`: pinned local ONNX model, normalization and CPU inference.
+- `Services/JianyingRefreshRenderer.cs`: fixed-step A-then-B stack and full-resolution correction.
+- `Services/RefreshSpectrumEffect.cs`: ASCII/depth scan, rain, Gaussian and HSL chain A.
+- `Services/RefreshPixelScanEffect.cs`: Sobel/history, square raster, Gaussian and HSL chain B.
+- `Services/ReferenceEffectMath.cs`: bilinear textures, HSL, LUT and Gaussian kernels.
+- `Assets/RefreshReference/`: compressed atlas/colour-bar/LUT textures and model provenance.
+- `Services/IRefreshRenderer.cs`, `Overlay/RefreshPlayback.cs`: bounded worker and cancellation.
+- `Overlay/RadialMenu.xaml.cs`: final-composite image, cover handoff and shared close budget.
+- `Services/LauncherService.cs`: trigger, hold-time colour grading and safe recovery.
+- `Tools/ReferenceRefreshCheck/`: reconstruction checks. `Build.ps1 -Task VerifyRefresh` also
+  retains the legacy Analyzer/Bloom/Outline/Renderer suites as regressions for archived code.

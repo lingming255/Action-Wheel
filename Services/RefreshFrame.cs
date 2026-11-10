@@ -6,16 +6,15 @@ using Windows.Graphics;
 namespace Action_Wheel.Services
 {
     /// <summary>
-    /// A monitor capture and pre-rasterized pixel layers for the refresh effect. Capture happens
-    /// before <see cref="ScreenGrade"/> lowers saturation; analysis runs on a worker while the wheel
-    /// is held so release can start bounded playback of the already prepared particle data.
+    /// Original monitor capture and learned depth for the reference-effect stack. Capture happens
+    /// before <see cref="ScreenGrade"/> lowers saturation; inference prepares on the hold worker.
     /// </summary>
     internal sealed class RefreshFrame
     {
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
-        /// <summary>Renders individual particle timing into bounded, reusable playback buffers.</summary>
-        public required RefreshRenderer Renderer { get; init; }
+        /// <summary>Renders the two depth-scan pipelines into reusable playback buffers.</summary>
+        public required IRefreshRenderer Renderer { get; init; }
         public required RectInt32 Bounds { get; init; }
         /// <summary>Original click position relative to the captured monitor, in physical pixels.</summary>
         public required int OriginX { get; init; }
@@ -44,36 +43,22 @@ namespace Action_Wheel.Services
 
                 int x = mi.rcMonitor.left, y = mi.rcMonitor.top;
                 int w = mi.rcMonitor.right - x, h = mi.rcMonitor.bottom - y;
-                double scale = GetDpiForMonitor(monitor, 0, out uint dpi, out _) == 0 && dpi > 0 ? dpi / 96.0 : 1.0;
-                int tile = RefreshAnalyzer.TilePixels(scale);
 
                 byte[]? pixels = Grab(x, y, w, h);
                 grabbed();
                 if (pixels == null)
                     return null;
 
-                // The grey cover, particle layers and illumination correction never alias the
-                // raw capture. The renderer retains its colour reference for additive light
-                // correction; the desktop remains visible through its premultiplied overlay.
+                // Preserve the raw capture for depth and capture-relative light/LUT correction.
+                // The hold's grey cover is only the initial handoff, not a radial reveal layer.
                 byte[] grey = BuildGrey(pixels);
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);
-                RefreshAnalysis analysis = RefreshAnalyzer.Build(
-                    pixels, w, h, tile, position.X ^ position.Y ^ Environment.TickCount,
-                    originX, originY);
-                // The layers are independent. Bound their one-time outline work as well so a
-                // high-resolution capture does not serialize three full-monitor passes.
-                byte[][] originalLayers = [analysis.Subject, analysis.Background, analysis.Boundary];
-                var outlinedLayers = new byte[3][];
-                Parallel.For(0, outlinedLayers.Length, new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = Math.Min(3, Environment.ProcessorCount),
-                }, i => outlinedLayers[i] = RefreshOutline.Apply(originalLayers[i], w, h, scale));
+                RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h);
                 return new RefreshFrame
                 {
                     Grey = grey,
-                    Renderer = new RefreshRenderer(w, h, tile, scale, originX, originY,
-                        grey, originalLayers, outlinedLayers, analysis.Particles, analysis.Wavefront, pixels),
+                    Renderer = new JianyingRefreshRenderer(w, h, pixels, depth),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

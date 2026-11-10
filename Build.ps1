@@ -153,6 +153,8 @@ function Invoke-VerifyRefresh {
     Invoke-Dotnet @('run', '--project', $outlineTool, '-c', 'Release', '--nologo')
     $rendererTool = Join-Path $root 'Tools\RefreshRendererCheck\RefreshRendererCheck.csproj'
     Invoke-Dotnet @('run', '--project', $rendererTool, '-c', 'Release', '--nologo')
+    $referenceTool = Join-Path $root 'Tools\ReferenceRefreshCheck\ReferenceRefreshCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $referenceTool, '-c', 'Release', '--nologo')
 }
 
 function Invoke-Publish {

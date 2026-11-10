@@ -1671,22 +1671,16 @@ namespace Action_Wheel.Overlay
             return new RECT { left = 0, top = 0, right = GetSystemMetrics(0), bottom = GetSystemMetrics(1) };
         }
 
-        /// <summary>Total length of the refresh, from the first pixel to the last fade.</summary>
-        private const double RefreshBudgetMs = RefreshTiming.TotalMs;
         /// <summary>
-        /// Turns a centre release into a short, click-through refresh. A grey still covers the
-        /// monitor while <paramref name="restoreColour"/> brings live colour back underneath. The
-        /// cover then clears in an irregular radial wave from the opening click as background
-        /// glyphs, textured scene-colour pixels and vivid region-boundary chips flash and fade.
-        /// Every actual pixel block or fine glyph has an independent radial start and end.
+        /// Presents the hold's grey cover, restores live colour beneath it, then plays the
+        /// two reference depth-scan pipelines in a topmost, click-through image.
         /// </summary>
         /// <remarks>
-        /// One bounded worker composites particles and additive coloured bloom into one image
-        /// receiving only its latest completed buffer. Pigments are shown at exactly
-        /// one image pixel per physical pixel, so the tile edges stay hard instead of being resampled.
+        /// One bounded worker uploads the latest finished capture-relative correction. The
+        /// close timer shares the renderer's duration; late frames never extend playback.
         ///
         /// <paramref name="restoreColour"/> is only called once the cover has been rendered, so the
-        /// desktop never shows full colour before the sweep reaches it. If the menu closes first,
+        /// matrix restoration is hidden during the handoff. If the menu closes first,
         /// LauncherService restores colour from its Closed handler.
         /// </remarks>
         internal void PlayRefresh(RefreshFrame? frame, Action restoreColour)
@@ -1727,8 +1721,7 @@ namespace Action_Wheel.Overlay
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
-            // One completed image includes the background, bright particle cores and added
-            // bloom. A second source-over glow image would darken unrelated colour channels.
+            // The final correction includes both reference effects and their background LUT.
             var bitmap = new WriteableBitmap(bounds.Width, bounds.Height);
             using (var stream = bitmap.PixelBuffer.AsStream())
                 stream.Write(frame.Grey, 0, frame.Grey.Length);
@@ -1739,7 +1732,7 @@ namespace Action_Wheel.Overlay
             // Playback lifetime is independent of decorative visuals.
             var timer = DispatcherQueue.CreateTimer();
             timer.IsRepeating = false;
-            timer.Interval = TimeSpan.FromMilliseconds(RefreshBudgetMs);
+            timer.Interval = TimeSpan.FromMilliseconds(frame.Renderer.DurationMs);
             timer.Tick += (_, _) =>
             {
                 timer.Stop();

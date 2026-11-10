@@ -630,14 +630,13 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// A centre release: the analyzed pixel layers sweep radially while colour returns under
-        /// the clearing grey cover. Usually capture and analysis are already complete; a faster
-        /// release waits for them rather than skipping the effect.
+        /// A centre release starts the two reference depth-scan effects. Capture and learned
+        /// depth usually prepare during the hold; a faster release waits for them.
         /// </summary>
         /// <remarks>
         /// The screen stays grey until the menu has its grey still of the monitor on screen and
-        /// calls back. The colour matrix can only change the whole desktop at once, so the still
-        /// clears in an image-guided radial wave over the re-coloured desktop.
+        /// calls back. The colour matrix can only change the whole desktop at once; the cover
+        /// handoff hides that transition before the reference-effect playback begins.
         /// If the menu closes first, its Closed handler restores colour instead.
         /// </remarks>
         private async void PlayRefresh()

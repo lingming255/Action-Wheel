@@ -17,7 +17,7 @@ namespace Action_Wheel.Overlay
     internal sealed class RefreshPlayback : IDisposable
     {
         private readonly CancellationTokenSource _cancellation = new();
-        private readonly RefreshRenderer _renderer;
+        private readonly IRefreshRenderer _renderer;
         private readonly DispatcherQueue _dispatcher;
         private readonly WriteableBitmap _bitmap;
         private readonly Action _failed;
@@ -52,10 +52,10 @@ namespace Action_Wheel.Overlay
                     while (!token.IsCancellationRequested)
                     {
                         double elapsed = clock.Elapsed.TotalMilliseconds;
-                        if (elapsed >= RefreshTiming.TotalMs)
+                        if (elapsed >= _renderer.DurationMs)
                             return;
                         long begin = clock.ElapsedMilliseconds;
-                        _renderer.Render(elapsed, _pixels, _light);
+                        _renderer.Render(elapsed, _pixels, _light, token);
                         token.ThrowIfCancellationRequested();
                         var uploaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                         if (!_dispatcher.TryEnqueue(() =>
@@ -63,7 +63,7 @@ namespace Action_Wheel.Overlay
                             try
                             {
                                 if (!_disposed && !token.IsCancellationRequested
-                                    && clock.Elapsed.TotalMilliseconds < RefreshTiming.TotalMs)
+                                    && clock.Elapsed.TotalMilliseconds < _renderer.DurationMs)
                                 {
                                     _pixelStream.Position = 0;
                                     _pixelStream.Write(_pixels, 0, _pixels.Length);

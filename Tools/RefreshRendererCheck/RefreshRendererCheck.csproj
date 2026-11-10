@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/IRefreshRenderer.cs" Link="IRefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshRenderer.cs" Link="RefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshIllumination.cs" Link="RefreshIllumination.cs" />
     <Compile Include="../../Services/RefreshLightComposite.cs" Link="RefreshLightComposite.cs" />

@@ -62,6 +62,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\RefreshReference\*.rgb.gz" LogicalName="ActionWheel.Refresh.%(Filename)%(Extension)" />
     <!-- Also ship the real application icon as content for the transparent custom title bars. -->
     <None Remove="icon.ico" />
     <Content Include="icon.ico" CopyToOutputDirectory="PreserveNewest" />
@@ -115,6 +116,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
   </ItemGroup>
 
   <!-- Publish-only properties for Release. These must stay scoped to an actual publish

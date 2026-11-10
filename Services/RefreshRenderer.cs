@@ -8,7 +8,7 @@ namespace Action_Wheel.Services
     /// Bounded worker renderer for whole-particle radial pulses. Source layers remain immutable;
     /// the caller supplies reusable output buffers and must not render one instance concurrently.
     /// </summary>
-    internal sealed class RefreshRenderer
+    internal sealed class RefreshRenderer : IRefreshRenderer
     {
         private readonly int _width, _bloomStep;
         private readonly byte[] _grey;
@@ -24,6 +24,7 @@ namespace Action_Wheel.Services
         private static readonly int[] LayerOrder = { 0, 2, 1 };
         public int BloomWidth { get; }
         public int BloomHeight { get; }
+        public double DurationMs => RefreshTiming.TotalMs;
 
         private readonly record struct CoverTile(int Left, int Top, int Width, int Height, double StartMs);
         private readonly record struct LightSample(int Index, float Blue, float Green, float Red);
@@ -108,8 +109,10 @@ namespace Action_Wheel.Services
             }
         }
 
-        public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer)
+        public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,
+            System.Threading.CancellationToken cancellation = default)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (fullBuffer.Length != _grey.Length || bloomBuffer.Length != BloomWidth * BloomHeight * 4)
                 throw new ArgumentException("Output buffer dimensions do not match the renderer.");
             fullBuffer.AsSpan().Clear(); bloomBuffer.AsSpan().Clear();

@@ -1,0 +1,41 @@
+{
+  "model": "Depth Anything V2 Small, Transformers.js ONNX dynamic int8",
+  "source_model": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small",
+  "repository": "https://huggingface.co/onnx-community/depth-anything-v2-small",
+  "revision": "4472b7362082ad9968fee890ca0f1e5aca36b93d",
+  "url": "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model_quantized.onnx",
+  "file": "depth-anything-v2-small-quantized.onnx",
+  "sha256": "fcf51f1b230362b28690bb9d1809bf0431f29cad20534e3f589bd7285547f20d",
+  "bytes": 27258801,
+  "license": "Apache-2.0",
+  "license_url": "https://raw.githubusercontent.com/DepthAnything/Depth-Anything-V2/main/LICENSE",
+  "input": "pixel_values: float32 NCHW RGB, ImageNet mean/std; spatial dimensions multiple of 14",
+  "output": "predicted_depth: float32 [batch,height,width], relative inverse depth; larger values nearer",
+  "license_evidence": "Hugging Face onnx-community cardData license=apache-2.0 and source model card",
+  "preprocessing_used": {
+    "longest_side": 392,
+    "spatial_multiple": 14,
+    "interpolation": "bilinear half-pixel, clamp edges",
+    "rgb_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "rgb_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "normalization": "channel/255 then (value-mean)/std",
+    "output": "min-max normalized 0..1; top-down relative inverse depth"
+  },
+  "verification": {
+    "date": "2026-11-10",
+    "onnxruntime_dotnet": "1.23.2 CPU, <=4 intra-op threads",
+    "dotnet_input": "640x360 synthetic BGRA",
+    "dotnet_output": "392x224, finite, normalized min0 max1",
+    "dotnet_first_estimate_ms": 542.63,
+    "dotnet_repeat_estimate_ms": 114.05,
+    "python_ort": "1.30.0 CPU; real reference image277x178 ->392x252; prediction121.55/115.63ms"
+  }
+}
