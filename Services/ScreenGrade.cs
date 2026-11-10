@@ -18,7 +18,7 @@ namespace Action_Wheel.Services
     internal static class ScreenGrade
     {
         /// <summary>Saturation left while held: 0 is pure grey, 1 is untouched.</summary>
-        public const float Saturation = 0.1f;
+        public const float Saturation = 0.0f;
 
         // Rec. 601 luma.
         public const float LumR = 0.30f, LumG = 0.59f, LumB = 0.11f;

@@ -181,6 +181,13 @@ internal static class SpectrumOverlayTests
         foreach ((int width, int height) in new[] { (1, 1), (1, 73), (7, 5), (417, 235), (1281, 9) })
         {
             var renderer = new SpectrumOverlayRefreshRenderer(width, height, Scene(width, height), Depth(9, 7), 0, 0);
+            byte[] initial = new byte[width * height * 4], initialLight = new byte[4];
+            Array.Fill(initial, (byte)239);
+            renderer.Render(0, initial, initialLight);
+            for (int offset = 0; offset < initial.Length; offset += 4)
+                Require(initial[offset] == initial[offset + 1] && initial[offset + 1] == initial[offset + 2]
+                    && initial[offset + 3] == 255,
+                    "The zero-band ASCII host leaked source colour or transparency into the initial full-grey desktop.");
             double scale = Math.Min(1, 1280.0 / Math.Max(width, height));
             int workWidth = Math.Max(1, (int)Math.Round(width * scale));
             int workHeight = Math.Max(1, (int)Math.Round(height * scale));
@@ -222,7 +229,7 @@ internal static class SpectrumOverlayTests
             "Flat-depth ASCII pixels do not activate progressively away from the release pixel.");
         Require(At(40, 35) == At(60, 35) && At(50, 25) == At(50, 45),
             "Equal spatial distances at equal depth have different ASCII arrival times.");
-        Console.WriteLine("Spectrum distance arrival: independent 119+1590*depth+700*distance oracle, actual clamped release pixel, flat-depth radial order, equal-distance symmetry, 1280 work scaling, 1x1/narrow/corner cases and 3000ms duration passed.");
+        Console.WriteLine("Spectrum distance arrival: independent 119+1590*depth+700*distance oracle, actual clamped release pixel, flat-depth radial order, equal-distance symmetry, opaque full-grey initial native pixels (including 1281-to-1280 work scaling), 1x1/narrow/corner cases and 3000ms duration passed.");
     }
 
     private static double PlaneDepth(double u, double v)
@@ -242,7 +249,7 @@ internal static class SpectrumOverlayTests
         reference.Prepare(source, depth);
         var ungraded = new ReferenceTexture(width, height);
         byte[] output = new byte[width * height * 4], light = new byte[4];
-        int fadedSamples = 0, peakSamples = 0;
+        int fadedSamples = 0, peakSamples = 0, greySamples = 0;
         float maximumError = 0;
         foreach (double time in new[] { 130, 250, 500, 900, 1500, 2100, 2700 })
         {
@@ -254,7 +261,7 @@ internal static class SpectrumOverlayTests
                 double age = time - starts[pixel];
                 double rise = Math.Clamp(age / 85, 0, 1), fall = Math.Clamp((age - 187) / 323, 0, 1);
                 double band = age <= 0 || age >= 510 ? 0 : rise * rise * (3 - 2 * rise) * (1 - fall * fall * (3 - 2 * fall));
-                float saturation = (float)(.45 + .55 * band);
+                float saturation = (float)band;
                 float luma = .2126f * positive.X + .7152f * positive.Y + .0722f * positive.Z;
                 Vector3 expected = (new Vector3(luma) * (1 - saturation) + positive * saturation) * (.35f * 255);
                 Vector3 actual = actualDelta.Pixels[pixel];
@@ -268,13 +275,19 @@ internal static class SpectrumOverlayTests
                         "ASCII chroma does not follow the whole-pixel age envelope.");
                     if (saturation < .98f) fadedSamples++;
                     if (saturation > .995f) peakSamples++;
+                    if (saturation == 0)
+                    {
+                        Require(Maximum(actual) - Minimum(actual) < .001f,
+                            "The ASCII light retained chroma outside its 0-to-1-to-0 saturation envelope.");
+                        greySamples++;
+                    }
                 }
             }
             CheckPbgra(output);
         }
-        Require(maximumError < .001f && fadedSamples > 100 && peakSamples > 20,
-            "The independent Rec709 ASCII saturation oracle failed or did not cover both fades and full colour.");
-        Console.WriteLine($"Spectrum host saturation: positive reference-A delta, independent Rec709/age oracle, fade/full-colour chroma, nonnegative unchanged gain and PBGRA passed; maximum error={maximumError:F6} byte.");
+        Require(maximumError < .001f && fadedSamples > 100 && peakSamples > 20 && greySamples > 20,
+            "The independent Rec709 ASCII saturation oracle failed or did not cover zero chroma, fades and full colour.");
+        Console.WriteLine($"Spectrum host saturation: positive reference-A delta, independent Rec709/age oracle, 0-to-1-to-0 chroma, nonnegative unchanged gain and PBGRA passed; maximum error={maximumError:F6} byte.");
     }
 
     public static void Measure()

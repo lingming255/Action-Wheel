@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current experiment: colour pulse and longer distance stagger (2026-11-11)
+## Current experiment: full grey-to-colour pulse and longer distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
 its own publish at `bin/Publish/refresh-bidirectional-depth-20261111-win-x64`. The experiment
@@ -42,13 +42,23 @@ distance work is added. The preceding ASCII version `0578f0e` is preserved at
 ZIP verified against all 172 Git blobs, complete runtime and models with verified hashes.
 
 The user also requested saturation motion. Whole-block colour and its emitted bloom now use
-`s = .45 + .55 * opacity/.88`, interpolating between Rec709 grey and the prepared pigment.
-This keeps luma, reaches the original colour at the pulse peak and softens colour at either
+`s = opacity/.88`, interpolating between Rec709 grey and the prepared pigment.
+This keeps luma, reaches the original colour at the pulse peak and removes colour at either
 end. The ASCII layer applies the same local-age colour envelope to its positive light delta;
 the source image and original reference A shader remain unchanged. Prepared geometry and
 pigment stay immutable; there is no added colour texture inside a native block. The previously
 accepted `8156f2e` is archived at `archive/refresh-before-saturation-delay-20261111`, with
 172 source blobs and all six runtime/model files verified in the matching backup directory.
+
+The clarification was explicitly full grey at the start, vivid at the peak and grey again
+as the light disappears. The hold's `ScreenGrade.Saturation` is now zero. The native starting
+background is also fully opaque grey: its reference .3 LUT difference is first reconstructed
+over the original capture, then its visible Rec601 luma is retained without colour. This is
+prepared once, preserving native detail and the reference brightness. The same per-cell
+background envelope gradually reveals the live coloured desktop; desaturation on the falling
+side applies to the blocks and their light. The intermediate soft-colour version `a346e31`
+is archived at `archive/refresh-soft-saturation-before-full-grey-20261111`, with all 172 source
+blobs and six runtime/model files verified.
 
 ## Plain bidirectional block foundation (2026-11-11)
 
@@ -283,7 +293,7 @@ the unique running path and enabled startup entry match. Published/deployed SHA-
 The plain `160a753` branch and no-distance ASCII `0578f0e` publish/archive remain available.
 No desktop animation was automatically triggered.
 
-### Saturation pulse and 700 ms staggering validation (2026-11-11)
+### Soft saturation pulse before the full-grey clarification (2026-11-11)
 
 Both affected suites passed. New checks cover whole-block saturation rising/falling with
 opacity, full original pigment at peak, Rec709 luma preservation, neutral colours and an
@@ -310,6 +320,34 @@ unique running path and enabled startup entry match. Published/deployed SHA-256 
 `AB0D8CF296217D5164882BD6943C823FF6930844A6258562B1A7722EE1E67D5A`.
 No desktop animation was automatically triggered; the accepted preceding version remains
 available in the complete archive above.
+
+### Full-grey clarification validation (2026-11-11)
+
+Both affected suites check the zero-to-one-to-zero saturation envelope and its independent
+Rec709 colour oracle. New initial-frame checks require neutral RGB with alpha 255 at every
+native pixel, including 1x1 and a 1281-side work/native boundary. Primary-colour cases preserve
+the visible LUT grade's Rec601 luma within rounding, while source data remains unchanged.
+The existing origin, full-pulse timing, whole-core uniformity, positive-light composition,
+PBGRA, deterministic time and cancellation checks continue passing. The 700 ms spatial
+stagger and 3000 ms close were retained.
+
+The combined ASCII wrapper also starts fully opaque grey at every native pixel, including
+1281-to-1280 mapping. Its independent zero-to-one-to-zero colour oracle stays within
+0.000008 byte, including fully neutral residual light outside the local band. Debug built
+with zero warnings/errors, and read-only review found no actionable issue.
+The final full-grey Release run measured active p50/p95/max 20.47/26.09/27.53 ms at 1080p
+and 34.37/41.61/41.83 ms at 4K. Warmed retiming p50/p95 was 4.72/6.09 ms and 4.92/6.02 ms;
+preparation was 308/358 ms and process-wide managed allocation about 165 KB per five frames.
+These use the same 300–2000 ms synthetic interval, excluding capture, model and UI. They
+record the current version's CPU cost and do not establish desktop fps; 4K remains above
+the 30 Hz budget before UI upload. Visual timing, grey-to-colour transitions and handoff
+brightness remain user acceptance.
+
+Release publish `refresh-full-grey-saturation-delay-20261111-win-x64` was deployed to the
+usual `quick-info-win-x64` directory and restarted. PID 37048 survived five seconds; the
+unique running path and enabled startup entry match. Published/deployed SHA-256 is
+`A1D98C8F7952EBD47DA7A3525DF542544A384A7C7C42ED9A2080D95DDE4AAFE1`.
+No desktop animation was automatically triggered.
 
 ## Archived implementation: the two reference pipelines (2026-11-10)
 

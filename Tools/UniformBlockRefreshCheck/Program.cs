@@ -12,6 +12,7 @@ internal static class UniformBlockRefreshTests
         CheckWholeBlocks();
         CheckDepthAndEnvelope();
         CheckSaturationEnvelope();
+        CheckGreyStart();
         CheckPreparedPropagation();
         CheckBidirectionalTiming();
         CheckClickWave();
@@ -134,8 +135,8 @@ internal static class UniformBlockRefreshTests
     {
         var colour = new Vector3(.8f, .2f, .1f);
         float expectedLuma = .8f * .2126f + .2f * .7152f + .1f * .0722f;
-        Require(UniformBlockRefreshRenderer.SaturationAt(0) == .45f
-            && UniformBlockRefreshRenderer.SaturationAt(510) == .45f
+        Require(UniformBlockRefreshRenderer.SaturationAt(0) == 0
+            && UniformBlockRefreshRenderer.SaturationAt(510) == 0
             && Math.Abs(UniformBlockRefreshRenderer.SaturationAt(120) - 1) < .000001,
             "Saturation did not move from soft colour to full pigment and back.");
         Require(UniformBlockRefreshRenderer.SaturationAt(30) < UniformBlockRefreshRenderer.SaturationAt(60)
@@ -148,7 +149,7 @@ internal static class UniformBlockRefreshTests
             Vector3 expected = new(expectedLuma + (colour.X - expectedLuma) * saturation,
                 expectedLuma + (colour.Y - expectedLuma) * saturation,
                 expectedLuma + (colour.Z - expectedLuma) * saturation);
-            Require(saturation >= .45f && saturation <= 1
+            Require(saturation >= 0 && saturation <= 1
                 && Vector3.Distance(adjusted, expected) < .000001f
                 && Math.Abs(adjusted.X * .2126f + adjusted.Y * .7152f + adjusted.Z * .0722f - expectedLuma) < .000001,
                 "Whole-block saturation changed luma or failed the independent colour oracle.");
@@ -161,9 +162,38 @@ internal static class UniformBlockRefreshTests
             Require(Largest(Vector3.Abs(Rgb(core) - expectedRgb)) <= .51f,
                 "The native core did not apply one colour envelope to the whole block.");
         }
-        Require(Vector3.Distance(UniformBlockRefreshRenderer.AdjustSaturation(new Vector3(.3f), .45f), new Vector3(.3f)) < .000001,
+        Require(Vector3.Distance(UniformBlockRefreshRenderer.AdjustSaturation(new Vector3(.3f), 0), new Vector3(.3f)) < .000001,
             "Saturation tinted a neutral pigment.");
         Console.WriteLine("Saturation envelope checks: whole-block rise/fall, original pigment at peak, Rec709 luma preservation, independent native-core colour oracle and neutral pigments.");
+    }
+
+    private static void CheckGreyStart()
+    {
+        foreach ((int width, int height) in new[] { (1, 1), (7, 5), (1281, 5) })
+        {
+            byte[] capture = Scene(width, height), before = (byte[])capture.Clone();
+            var renderer = new UniformBlockRefreshRenderer(width, height, capture,
+                new RefreshDepthMap(1, 1, [.5f]), 0, 0);
+            byte[] frame = new byte[capture.Length], bloom = new byte[4];
+            renderer.Render(0, frame, bloom);
+            for (int offset = 0; offset < frame.Length; offset += 4)
+                Require(frame[offset] == frame[offset + 1] && frame[offset + 1] == frame[offset + 2]
+                    && frame[offset + 3] == 255,
+                    "The initial native frame leaked live colour through its grey background.");
+            Require(capture.AsSpan().SequenceEqual(before), "Preparing the grey background changed the capture.");
+        }
+        var lut = ReferenceEffectMath.LoadTexture("pixel-lut.rgb.gz");
+        foreach (var colour in new[] { new Vector3(200, 0, 0), new Vector3(0, 200, 0), new Vector3(0, 0, 200) })
+        {
+            byte[] capture = Solid(1, 1, colour), frame = new byte[4];
+            var renderer = new UniformBlockRefreshRenderer(1, 1, capture, new RefreshDepthMap(1, 1, [.5f]), 0, 0);
+            renderer.Render(0, frame, new byte[4]);
+            Vector3 graded = Vector3.Lerp(colour / 255, ReferenceEffectMath.Lut(lut, colour / 255), .3f) * 255;
+            double expected = .30 * graded.X + .59 * graded.Y + .11 * graded.Z;
+            Require(Math.Abs(frame[0] - expected) <= 1.1,
+                "Initial grey did not preserve the reference grade's visible Rec601 luma.");
+        }
+        Console.WriteLine("Initial-grey checks: opaque neutral native start, work/native edges, preserved inputs and independent primary-colour LUT/luma oracle.");
     }
 
     private static void CheckPreparedPropagation()
@@ -596,10 +626,13 @@ internal static class UniformBlockRefreshTests
             Vector3 source = channelColour / 255;
             Vector3 strongestBackground = Vector3.Max(source,
                 Vector3.Lerp(source, ReferenceEffectMath.Lut(lut, source), .3f)) * 255;
+            Vector3 gradedBackground = Vector3.Lerp(source, ReferenceEffectMath.Lut(lut, source), .3f) * 255;
+            float greyBackground = .30f * gradedBackground.X + .59f * gradedBackground.Y + .11f * gradedBackground.Z;
+            strongestBackground = Vector3.Max(strongestBackground, new Vector3(greyBackground));
             int active = channelColour.X > 0 ? 0 : 2;
             Vector3 pigment = blocks[0].Colour;
             float luma = pigment.X * .2126f + pigment.Y * .7152f + pigment.Z * .0722f;
-            float maximumGreyHalo = .55f * luma * .88f * .8f * .95f * 255 + 2;
+            float maximumGreyHalo = luma * .88f * .8f * .95f * 255 + 2;
             int litExterior = 0;
             for (int pixel = 0; pixel < core.Length; pixel++)
             {
