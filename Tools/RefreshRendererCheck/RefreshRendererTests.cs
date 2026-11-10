@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 CheckBehaviour();
 RefreshWavefrontTests.Run();
+RefreshIlluminationTests.Run();
 if (args.Length == 2 && args[0] == "--export") Export(args[1]);
 foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
 {
@@ -37,9 +38,11 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
             wavefront.FrontAt(x + w * 0.5, y + h * 0.5)));
     }
     byte[][] layers = [source, fine, edge];
+    var scene = new byte[grey.Length];
+    Fill(scene, size.W, 0, 0, size.W, size.H, 40, 180, 255, 255);
     var prepare = Stopwatch.StartNew();
     var renderer = new RefreshRenderer(size.W, size.H, tile, 1, size.W / 2, size.H / 2,
-        grey, layers, layers, particles.ToArray(), wavefront);
+        grey, layers, layers, particles.ToArray(), wavefront, scene);
     prepare.Stop();
     var output = new byte[grey.Length];
     var bloom = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
@@ -49,7 +52,7 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
     for (int repeat = 0; repeat < 5; repeat++) renderer.Render(250, output, bloom);
     timer.Stop();
     long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
-    Console.WriteLine($"Renderer {size.W}x{size.H}: {particles.Count:N0} particles, prepare={prepare.ElapsedMilliseconds}ms, "
+    Console.WriteLine($"Renderer with scene light {size.W}x{size.H}: {particles.Count:N0} particles, prepare={prepare.ElapsedMilliseconds}ms, "
         + $"render250={timer.Elapsed.TotalMilliseconds / 5:F2}ms, measured allocations={allocated} bytes / 5 frames.");
     Require(allocated < 1024, "render does not allocate frame-size buffers");
     foreach (double t in new[] { 0d, 100d, 250d, 400d, 600d, 800d })
@@ -59,7 +62,7 @@ foreach (var size in new[] { (W: 1920, H: 1080), (W: 3840, H: 2160) })
         Console.WriteLine($"  t={t:F0}ms: {timer.Elapsed.TotalMilliseconds:F2}ms");
     }
 }
-Console.WriteLine("Refresh renderer checks passed: independent particle timing, whole merged rectangles, radial cover, active bloom, transparency and immutable sources.");
+Console.WriteLine("Refresh renderer checks passed: independent particle timing, whole merged rectangles, radial cover, scene illumination, active bloom, transparency and immutable sources.");
 
 static void CheckBehaviour()
 {
@@ -147,7 +150,7 @@ static void Export(string directory)
     byte[][] original = [analysis.Subject, analysis.Background, analysis.Boundary];
     byte[][] outlined = original.Select(layer => RefreshOutline.Apply(layer, width, height, 1)).ToArray();
     var renderer = new RefreshRenderer(width, height, 11, 1, 160, 180,
-        grey, original, outlined, analysis.Particles, analysis.Wavefront);
+        grey, original, outlined, analysis.Particles, analysis.Wavefront, source);
     var frame = new byte[source.Length];
     var bloom = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
     Directory.CreateDirectory(directory);

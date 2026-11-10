@@ -52,8 +52,9 @@ namespace Action_Wheel.Services
                 if (pixels == null)
                     return null;
 
-                // Both calculations read the original colour capture. The grey cover and pixel
-                // layers never alias the raw screenshot, which is released after this method returns.
+                // The grey cover, particle layers and illumination correction never alias the
+                // raw capture. Only the derived correction/emission survive preparation; live
+                // desktop content remains visible through them during playback.
                 byte[] grey = BuildGrey(pixels);
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);
@@ -72,7 +73,7 @@ namespace Action_Wheel.Services
                 {
                     Grey = grey,
                     Renderer = new RefreshRenderer(w, h, tile, scale, originX, originY,
-                        grey, originalLayers, outlinedLayers, analysis.Particles, analysis.Wavefront),
+                        grey, originalLayers, outlinedLayers, analysis.Particles, analysis.Wavefront, pixels),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

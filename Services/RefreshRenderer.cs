@@ -12,9 +12,12 @@ namespace Action_Wheel.Services
     {
         private readonly int _width, _bloomStep;
         private readonly byte[] _grey;
+        private readonly bool _opaqueGrey;
         private readonly byte[][] _outlined;
         private readonly ParticleState[][] _particles;
         private readonly CoverTile[] _cover;
+        private readonly RefreshIllumination? _illumination;
+        private readonly double[]? _sceneStarts;
         private readonly float[] _emission, _horizontal, _near, _far, _verticalSums;
         private static readonly int[] LayerOrder = { 0, 2, 1 };
         public int BloomWidth { get; }
@@ -27,7 +30,7 @@ namespace Action_Wheel.Services
 
         public RefreshRenderer(int width, int height, int tile, double scale, int originX, int originY,
             byte[] grey, byte[][] originalLayers, byte[][] outlinedLayers, RefreshParticle[] particles,
-            RefreshWavefront? wavefront = null)
+            RefreshWavefront? wavefront = null, byte[]? scene = null)
         {
             if (width <= 0 || height <= 0 || tile <= 0 || !double.IsFinite(scale) || scale <= 0)
                 throw new ArgumentOutOfRangeException(nameof(width));
@@ -39,6 +42,9 @@ namespace Action_Wheel.Services
                     throw new ArgumentException("Layer dimensions must match the renderer.");
             _width = width;
             _grey = grey; _outlined = outlinedLayers;
+            _opaqueGrey = true;
+            for (int i = 3; i < grey.Length; i += 4)
+                if (grey[i] != 255) { _opaqueGrey = false; break; }
             _bloomStep = Math.Max(2, (int)Math.Round(4 * scale));
             BloomWidth = (width + _bloomStep - 1) / _bloomStep;
             BloomHeight = (height + _bloomStep - 1) / _bloomStep;
@@ -46,6 +52,24 @@ namespace Action_Wheel.Services
             _emission = new float[lightLength]; _horizontal = new float[lightLength];
             _near = new float[lightLength]; _far = new float[lightLength];
             _verticalSums = new float[BloomWidth * 3];
+            if (scene != null)
+            {
+                _illumination = new RefreshIllumination(width, height, _bloomStep, originX, originY, scene);
+                _sceneStarts = new double[BloomWidth * BloomHeight];
+                for (int cy = 0; cy < BloomHeight; cy++)
+                for (int cx = 0; cx < BloomWidth; cx++)
+                {
+                    // Use the containing cover tile's arrival so emission starts with the
+                    // desktop reveal. The subsequent blur can spill across its boundary.
+                    int x = Math.Min(width - 1, cx * _bloomStep + _bloomStep / 2);
+                    int y = Math.Min(height - 1, cy * _bloomStep + _bloomStep / 2);
+                    int left = x / tile * tile, top = y / tile * tile;
+                    double centreX = left + Math.Min(tile, width - left) * 0.5;
+                    double centreY = top + Math.Min(tile, height - top) * 0.5;
+                    _sceneStarts[cy * BloomWidth + cx] = wavefront?.FrontAt(centreX, centreY)
+                        ?? RefreshTiming.FrontAt(centreX, centreY, width, height, originX, originY);
+                }
+            }
             var cover = new List<CoverTile>();
             for (int y = 0; y < height; y += tile)
             for (int x = 0; x < width; x += tile)
@@ -88,20 +112,60 @@ namespace Action_Wheel.Services
             if (elapsedMs >= RefreshTiming.TotalMs || !double.IsFinite(elapsedMs)) return;
             Span<uint> output = MemoryMarshal.Cast<byte, uint>(fullBuffer.AsSpan());
             ReadOnlySpan<uint> grey = MemoryMarshal.Cast<byte, uint>(_grey);
+            float sceneStrength = _illumination == null ? 0 : RefreshIllumination.StrengthAt(elapsedMs);
+            int lightOpacity = (int)MathF.Round(sceneStrength * 256);
+            ReadOnlySpan<uint> illumination = _illumination == null
+                ? ReadOnlySpan<uint>.Empty : MemoryMarshal.Cast<byte, uint>(_illumination.Overlay);
             foreach (CoverTile tile in _cover)
             {
                 double fade = Math.Clamp((elapsedMs - tile.StartMs) / RefreshTiming.CoverFadeMs, 0, 1);
                 int opacity = (int)Math.Round((1 - fade) * 256);
-                if (opacity == 0) continue;
+                if (opacity == 0 && lightOpacity == 0) continue;
                 for (int y = tile.Top; y < tile.Top + tile.Height; y++)
                 {
                     int first = y * _width + tile.Left, last = first + tile.Width;
-                    if (opacity == 256) grey.Slice(first, tile.Width).CopyTo(output.Slice(first, tile.Width));
+                    if (opacity == 256 && _opaqueGrey)
+                        grey.Slice(first, tile.Width).CopyTo(output.Slice(first, tile.Width));
+                    else if (opacity == 0)
+                    {
+                        // Revealed tiles only need the correction; avoid reading and scaling
+                        // the absent grey cover or performing a redundant source-over blend.
+                        for (int pixel = first; pixel < last; pixel++)
+                            output[pixel] = Scale(illumination[pixel], lightOpacity);
+                    }
+                    else if (lightOpacity != 0)
+                    {
+                        for (int pixel = first; pixel < last; pixel++)
+                        {
+                            // This is a scene-colour correction with a derived alpha, not a
+                            // white radial sprite. Keep it below the cover and the particles.
+                            uint light = Scale(illumination[pixel], lightOpacity);
+                            uint cover = Scale(grey[pixel], opacity);
+                            int a = (int)(cover >> 24);
+                            output[pixel] = cover + Scale(light, 256 - a - (a >> 7));
+                        }
+                    }
+                    else if (opacity == 256) grey.Slice(first, tile.Width).CopyTo(output.Slice(first, tile.Width));
                     else for (int pixel = first; pixel < last; pixel++) output[pixel] = Scale(grey[pixel], opacity);
                 }
             }
             _emission.AsSpan().Clear();
             bool anyLight = false;
+            if (sceneStrength > 0 && _illumination != null && _sceneStarts != null)
+            {
+                float[] sceneLight = _illumination.Emission;
+                for (int cell = 0, channel = 0; cell < _sceneStarts.Length; cell++, channel += 3)
+                {
+                    float reveal = (float)Math.Clamp((elapsedMs - _sceneStarts[cell])
+                        / RefreshTiming.CoverFadeMs, 0, 1);
+                    float strength = sceneStrength * reveal;
+                    _emission[channel] = sceneLight[channel] * strength;
+                    _emission[channel + 1] = sceneLight[channel + 1] * strength;
+                    _emission[channel + 2] = sceneLight[channel + 2] * strength;
+                    anyLight |= _emission[channel] > 0 || _emission[channel + 1] > 0
+                        || _emission[channel + 2] > 0;
+                }
+            }
             // Match the existing visual stacking: subject, boundary, then quieter fine background.
             foreach (int layerIndex in LayerOrder)
             {
