@@ -245,6 +245,7 @@ namespace Action_Wheel.Overlay
         private GpuRefreshPlayback? _gpuRefreshPlayback;
         private RefreshFrame? _preparedRefreshFrame;
         private bool _fullRefreshStarted;
+        private RefreshReclaimIntro? _refreshReclaimIntro;
         private ContainerVisual? _refreshFeedbackVisual;
         private readonly List<IDisposable> _refreshFeedbackResources = new();
         internal bool IsRefreshPlaying { get; private set; }
@@ -292,6 +293,8 @@ namespace Action_Wheel.Overlay
             _gpuRefreshPlayback?.Dispose();
             _gpuRefreshPlayback = null;
             _preparedRefreshFrame = null;
+            _refreshReclaimIntro?.Dispose();
+            _refreshReclaimIntro = null;
             ClearRefreshFeedback();
             _refreshTimer?.Stop();
             _refreshTimer = null;
@@ -1718,6 +1721,19 @@ namespace Action_Wheel.Overlay
             _preparedRefreshFrame = null;
         }
 
+        /// <summary>Transfers the inward decoration from the held gesture to this playback window.</summary>
+        internal bool AdoptRefreshReclaimIntro(RefreshReclaimIntro intro)
+        {
+            ArgumentNullException.ThrowIfNull(intro);
+            if (_closed || _fullRefreshStarted || _refreshReclaimIntro != null)
+            {
+                intro.Dispose();
+                return false;
+            }
+            _refreshReclaimIntro = intro;
+            return true;
+        }
+
         /// <summary>Gives a release immediate local feedback while exact depth preparation finishes.</summary>
         internal void BeginRefreshFeedback(PointInt32 release)
         {
@@ -1881,6 +1897,14 @@ namespace Action_Wheel.Overlay
             RootGrid.IsHitTestVisible = false;
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
+
+            // The inward decoration started behind this menu. Once this HWND covers the monitor,
+            // raise the unfinished inward pulse above it without restarting its Composition clock.
+            if (_refreshReclaimIntro != null && !_refreshReclaimIntro.PromoteForPlayback())
+            {
+                _refreshReclaimIntro.Dispose();
+                _refreshReclaimIntro = null;
+            }
 
             // Hardware frames stay on GPU from shading through the Composition surface.
             // A device/interop failure before handoff retains the existing CPU image path.

@@ -653,7 +653,6 @@ namespace Action_Wheel.Services
         private Task<RefreshFrame?>? _refreshFrame;
         private CancellationTokenSource? _refreshCaptureCancellation;
         private RefreshReclaimIntro? _refreshIntro;
-        private Task<bool>? _refreshGradeTransition;
         private TaskCompletionSource<bool>? _refreshCapturePresented;
 
         /// <summary>
@@ -688,14 +687,13 @@ namespace Action_Wheel.Services
                         // A cold startup can outlast the opening. Still use a short smooth fade
                         // rather than jumping from colour to grey when its raw capture arrives.
                         double remaining = Math.Max(100, _refreshIntro?.RemainingMs ?? RefreshReclaimIntro.DurationMs);
-                        _refreshGradeTransition = ScreenGrade.LowerGraduallyAsync(TimeSpan.FromMilliseconds(remaining));
+                        _ = ScreenGrade.LowerGraduallyAsync(TimeSpan.FromMilliseconds(remaining));
                         capturedOnUi.TrySetResult(true);
                     }
                     catch (Exception)
                     {
                         // Native grading/intro are decorative. Keep the existing release path usable.
                         ScreenGrade.Lower();
-                        _refreshGradeTransition = Task.FromResult(false);
                         capturedOnUi.TrySetResult(false);
                     }
                 })) capturedOnUi.TrySetResult(false);
@@ -732,7 +730,6 @@ namespace Action_Wheel.Services
             _refreshIntro = null;
             _refreshCapturePresented?.TrySetResult(false);
             _refreshCapturePresented = null;
-            _refreshGradeTransition = null;
             _gradedMenu?.DetachBorrowedRefreshPresentation();
             _gradedMenu = null;
             _refreshFrame = null;
@@ -787,15 +784,22 @@ namespace Action_Wheel.Services
                 if (frame != null)
                 {
                     // Capture completion can beat its queued UI notification. Await that exact
-                    // gesture's notification before reading its fade task, then let the inward
-                    // opening finish without freezing the wheel's ordinary hit-testing/actions.
+                    // gesture's notification so pigment is applied before transferring the intro.
+                    // The outward grey cover may take over before the opening/fade completes.
                     if (capturedOnUi != null) await capturedOnUi.Task;
-                    if (!ReferenceEquals(_currentMenu, menu) || !ReferenceEquals(_refreshFrame, pending)) return;
-                    await Task.WhenAll(intro?.Completion ?? Task.CompletedTask,
-                        (Task?)_refreshGradeTransition ?? Task.CompletedTask);
                     if (!ReferenceEquals(_currentMenu, menu) || !ReferenceEquals(_refreshFrame, pending)) return;
                 }
                 frame?.PrepareRelease(release);
+                if (frame != null && intro != null && ReferenceEquals(_refreshIntro, intro))
+                {
+                    // Transfer the inward decoration before the fullscreen outward window is
+                    // created. It then promotes itself above that window and owns its natural
+                    // completion; the grade transition is allowed to finish or be restored by
+                    // the opaque handoff instead of delaying playback.
+                    menu.AdoptRefreshReclaimIntro(intro);
+                    // Adoption consumes the reference even when a closed menu rejects it.
+                    _refreshIntro = null;
+                }
                 menu.PlayRefresh(frame, () =>
                 {
                     if (ReferenceEquals(_gradedMenu, menu))

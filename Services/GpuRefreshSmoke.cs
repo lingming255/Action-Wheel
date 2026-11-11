@@ -115,6 +115,7 @@ namespace Action_Wheel.Services
                 }
                 object releasePreparation = await RadialMenu.RunReleasePreparationProbeAsync();
                 object reclaimOpening = await RefreshReclaimIntro.RunHiddenProbeAsync(verifyOffscreenShow: true);
+                object parallelIntro = await RadialMenu.RunParallelIntroProbeAsync();
                 object gradeTransition = await ScreenGrade.RunTransitionProbeAsync();
                 object presentation = await GpuRefreshPresentationProbe.RunAsync();
                 JsonElement presentationResult = JsonSerializer.SerializeToElement(presentation);
@@ -134,6 +135,7 @@ namespace Action_Wheel.Services
                     Presentation = presentation,
                     ReleasePreparation = releasePreparation,
                     ReclaimOpening = reclaimOpening,
+                    ParallelIntro = parallelIntro,
                     GradeTransition = gradeTransition,
                     SyntheticDepthWarmupMs = depthWarmupMs,
                     UsedDesktopCapture = false, DisplayedEffect = false }, new JsonSerializerOptions { WriteIndented = true }));

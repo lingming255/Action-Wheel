@@ -245,6 +245,153 @@ namespace Action_Wheel.Overlay
                 UsedModel = false, DisplayedEffect = false, UsedScreenGrade = false };
         }
 
+        /// <summary>
+        /// Exercises real inward-to-outward ownership with synthetic, never-shown windows.
+        /// Manual cover callbacks separate lifecycle assertions from DWM's hidden-window rate.
+        /// No model, desktop capture or native screen-grade matrix participates in this check.
+        /// </summary>
+        internal static async Task<object> RunParallelIntroProbeAsync()
+        {
+            var rounds = new List<object>();
+            foreach (bool closeBeforeIntroEnds in new[] { false, true })
+            {
+                RadialMenu? menu = null;
+                RefreshFrame? frame = null;
+                RefreshReclaimIntro? intro = null;
+                try
+                {
+                    menu = new RadialMenu();
+                    menu.AppWindow.Hide();
+                    menu.AppWindow.Move(new PointInt32(-20000, -20000));
+                    menu._screenOrigin = new PointInt32(-20000, -20000);
+                    await Task.Delay(120);
+                    RequireReleaseProbe(menu.RootGrid.XamlRoot != null,
+                        "The parallel inward/outward probe has no hidden XamlRoot.");
+
+                    // All expensive reference/GPU/swapchain preparation precedes the inward
+                    // clock, so a cold graphics backend cannot consume its 240 ms test window.
+                    frame = CreateReleaseProbeFrame();
+                    menu.PrepareRefreshPresentation(frame);
+                    var gpu = frame.BorrowGpuRenderer()
+                        ?? throw new InvalidOperationException("Parallel intro probe requires the real hardware renderer.");
+                    RequireReleaseProbe(menu._gpuRefreshPlayback != null,
+                        "Parallel intro preparation did not construct its hidden GPU surface.");
+                    var release = new PointInt32(-19680, -19820);
+                    frame.PrepareRelease(release);
+                    menu.BeginRefreshFeedback(release);
+                    intro = RefreshReclaimIntro.CreateHiddenForProbe(frame.Bounds, release, menu._windowHandle);
+                    intro.UpdateCapture(frame.Renderer.CapturePixels, frame.Bounds);
+                    Task introCompletion = intro.Completion;
+                    double elapsedBeforeTransfer = intro.ElapsedMs;
+                    double remainingBeforeTransfer = intro.RemainingMs;
+                    RequireReleaseProbe(menu.AdoptRefreshReclaimIntro(intro)
+                        && ReferenceEquals(menu._refreshReclaimIntro, intro),
+                        "The ready outward window did not adopt its inward decoration.");
+
+                    bool restored = false;
+                    RefreshFrame readyFrame = frame;
+                    var handoffClock = Stopwatch.StartNew();
+                    menu.PlayRefresh(readyFrame, () =>
+                    {
+                        // Mirrors EndGrade after the renderer's ownership has moved, without
+                        // applying any actual screen-wide colour effect in this diagnostic.
+                        readyFrame.Dispose();
+                        restored = true;
+                    });
+                    RequireReleaseProbe(menu._fullRefreshStarted && !restored
+                        && !intro.AlreadyCompleted && !introCompletion.IsCompleted
+                        && ReferenceEquals(menu._refreshReclaimIntro, intro),
+                        "Outward preparation waited for or destroyed the unfinished inward pulse.");
+                    EventHandler<object>? cover = menu._refreshOnRendering;
+                    RequireReleaseProbe(cover != null,
+                        "Parallel playback has no cover-commit handoff callback.");
+                    // The cover's existing three callbacks are the only display-order fence.
+                    // Drive them synchronously, before any timer can complete the intro.
+                    for (int callback = 0; callback < 3; callback++)
+                        menu._refreshOnRendering?.Invoke(null, null!);
+                    double synchronousHandoffMs = handoffClock.Elapsed.TotalMilliseconds;
+                    double introElapsedAtOutwardStart = intro.ElapsedMs;
+                    RequireReleaseProbe(restored && menu._refreshOnRendering == null
+                        && !intro.AlreadyCompleted && !introCompletion.IsCompleted
+                        && menu._gpuRefreshPlayback != null
+                        && ReferenceEquals(menu._gpuRefreshPlayback.Renderer, gpu)
+                        && readyFrame.BorrowGpuRenderer() == null,
+                        "Outward playback did not start while the same inward pulse remained unfinished.");
+                    RequireReleaseProbe(ReferenceEquals(introCompletion, intro.Completion)
+                        && intro.ElapsedMs >= elapsedBeforeTransfer
+                        && intro.RemainingMs <= remainingBeforeTransfer,
+                        "Transferring/promoting the inward pulse restarted its clock or completion.");
+                    RequireReleaseProbe((GetWindowLong(menu._windowHandle, GWL_EXSTYLE) & 0x08080020) == 0x08080020
+                        && !menu.RootGrid.IsHitTestVisible && menu.IsRefreshPlaying
+                        && !IsReleaseProbeWindowVisible(menu._windowHandle),
+                        "Parallel inward/outward playback intercepted input or showed the hidden menu.");
+
+                    var activePlayback = menu._gpuRefreshPlayback
+                        ?? throw new InvalidOperationException("Parallel playback lost its GPU surface.");
+                    int framesBeforeManualRender = activePlayback.PresentedFrames;
+                    activePlayback.RenderFrame(130);
+                    RequireReleaseProbe(activePlayback.PresentedFrames > framesBeforeManualRender,
+                        "The outward GPU renderer did not submit a frame during the inward pulse.");
+                    if (closeBeforeIntroEnds)
+                    {
+                        RequireReleaseProbe(!introCompletion.IsCompleted,
+                            "The cancellation round did not close an unfinished inward decoration.");
+                        menu.CloseMenu();
+                        await Task.Delay(60); // Window.Closed may be dispatched after Close returns.
+                        RequireReleaseProbe(introCompletion.IsCompletedSuccessfully && intro.AlreadyCompleted,
+                            "Closing outward playback did not release its unfinished inward decoration.");
+                    }
+                    else
+                    {
+                        RequireReleaseProbe(await Task.WhenAny(introCompletion, Task.Delay(1500)) == introCompletion,
+                            "The transferred inward pulse never reached its natural end.");
+                        await introCompletion;
+                        RequireReleaseProbe(intro.AlreadyCompleted && intro.RemainingMs == 0
+                            && !intro.PromoteForPlayback() && !menu._closed && menu._gpuRefreshPlayback != null,
+                            "Natural inward completion interrupted or outlived its outward owner.");
+                        int framesBeforeContinue = activePlayback.PresentedFrames;
+                        activePlayback.RenderFrame(420);
+                        RequireReleaseProbe(activePlayback.PresentedFrames > framesBeforeContinue,
+                            "The outward scan stopped when the inward decoration completed.");
+                        menu.CloseMenu();
+                    }
+
+                    await Task.Delay(60);
+                    RequireReleaseProbe(menu._closed && menu._refreshReclaimIntro == null
+                        && menu._gpuRefreshPlayback == null && menu._refreshPlayback == null
+                        && menu._preparedRefreshFrame == null && menu._refreshTimer == null
+                        && menu._refreshFeedbackResources.Count == 0 && introCompletion.IsCompletedSuccessfully,
+                        "Closing parallel playback left an inward, outward or feedback resource attached.");
+                    bool gpuDisposed = false;
+                    try { gpu.Render(0); } catch (ObjectDisposedException) { gpuDisposed = true; }
+                    RequireReleaseProbe(gpuDisposed, "The parallel playback renderer survived owner teardown.");
+                    rounds.Add(new
+                    {
+                        CloseBeforeIntroEnds = closeBeforeIntroEnds,
+                        IntroDurationMs = RefreshReclaimIntro.DurationMs,
+                        SynchronousHandoffMs = synchronousHandoffMs,
+                        IntroElapsedMsAtOutwardStart = introElapsedAtOutwardStart,
+                        IntroIncompleteAtOutwardStart = true,
+                        UsedManualCoverCommitCallbacks = true,
+                        TransferRetainedClockAndCompletion = true,
+                        OutwardFrameSubmittedDuringIntro = true,
+                        NaturalCompletionKeptOutwardAlive = !closeBeforeIntroEnds,
+                        ClosedResourcesReleased = true,
+                        ClickThrough = true,
+                    });
+                }
+                finally
+                {
+                    if (menu is { _closed: false }) menu.CloseMenu();
+                    intro?.Dispose();
+                    frame?.Dispose();
+                }
+            }
+            return new { Passed = true, Rounds = rounds, UsedDesktopCapture = false, UsedModel = false,
+                DisplayedEffect = false, UsedScreenGrade = false,
+                TimingBoundary = "Prepared synthetic frames and manually committed hidden covers; this verifies independent lifetimes, not real input-to-visible latency." };
+        }
+
         private static RefreshFrame CreateReleaseProbeFrame()
         {
             const int width = 640, height = 360;
