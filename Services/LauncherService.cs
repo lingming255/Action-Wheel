@@ -20,6 +20,9 @@ namespace Action_Wheel.Services
         private readonly ConfigWatcher _configWatcher;
         private readonly DispatcherQueueTimer _hookHealthTimer;
         private RadialMenu? _currentMenu;
+        private readonly HashSet<RadialMenu> _playingRefreshes = new();
+        private long _menuRequestGeneration;
+        private bool _stopped;
         private IReadOnlyList<ActionItem> _actions;
         private IReadOnlyList<ActionItem> _quickInfoActions = Array.Empty<ActionItem>();
         private int _quickInfoPage;
@@ -73,6 +76,10 @@ namespace Action_Wheel.Services
             ActiveProfileLabel = ActiveProfileSettings.Load();
 
             _mouseHook = new MouseHook();
+            // Before the cover handoff finishes it still owns the grading transition.
+            // A second trigger passes through during that short interval instead of
+            // replacing the window and cancelling its animation.
+            _mouseHook.CanTrigger = () => _currentMenu?.IsRefreshPlaying != true;
             ApplyTriggerSettings();
             _mouseHook.MiddleClick += OnMiddleClick;
             _mouseHook.AnyButtonDown += OnAnyButtonDown;
@@ -106,6 +113,7 @@ namespace Action_Wheel.Services
         /// </summary>
         public LauncherStatus Start()
         {
+            _stopped = false;
             string error = string.Empty;
             bool mouse = TryStart(_mouseHook.Start, "mouse", ref error);
             bool keyboard = TryStart(_keyboardHook.Start, "keyboard", ref error);
@@ -154,6 +162,8 @@ namespace Action_Wheel.Services
         /// </summary>
         public void Stop()
         {
+            _stopped = true;
+            _menuRequestGeneration++;
             _gestureActive = false;
             _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
@@ -163,6 +173,11 @@ namespace Action_Wheel.Services
             Status = LauncherStatus.NotStarted;
             StatusChanged?.Invoke(this, EventArgs.Empty);
             CloseCurrentMenu();
+            // Finished gestures are independent decorative windows. Only service shutdown,
+            // their own timer or a rendering failure may end their remaining playback.
+            foreach (var menu in new List<RadialMenu>(_playingRefreshes))
+                CloseMenu(menu);
+            _playingRefreshes.Clear();
         }
 
         private void CheckHookHealth(DispatcherQueueTimer sender, object args)
@@ -346,12 +361,15 @@ namespace Action_Wheel.Services
 
         private void OpenMenuAt(PointInt32 position, IReadOnlyList<ActionItem> actions, bool quickInfo = false)
         {
+            if (_stopped) return;
+            long requestGeneration = ++_menuRequestGeneration;
             _targetWindow = ActionDispatcher.CaptureTargetWindow();
 
             // Closing and opening both have to happen in the same UI-thread turn. Closing the old
             // menu right here (on the hook's callback) would touch the window from off the UI thread.
             _dispatcherQueue.TryEnqueue(() =>
             {
+                if (_stopped || requestGeneration != _menuRequestGeneration) return;
                 try
                 {
                     // Close any existing menu first
@@ -374,6 +392,7 @@ namespace Action_Wheel.Services
                     // never close on the next middle-click.
                     menu.Closed += (s, e) =>
                     {
+                        _playingRefreshes.Remove(menu);
                         if (ReferenceEquals(_currentMenu, menu))
                             _currentMenu = null;
                         // Every way out of a gesture closes its menu, so this is the one place a
@@ -403,12 +422,14 @@ namespace Action_Wheel.Services
         {
             if (_gestureActive)
             {
+                long requestGeneration = _menuRequestGeneration;
                 var mouseTag = RingGeometry.TagForDirection(
                     position.X - _gestureOrigin.X,
                     position.Y - _gestureOrigin.Y);
 
                 _dispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_stopped || requestGeneration != _menuRequestGeneration) return;
                     // Radius and child choice can change without crossing a main-ring sector.
                     _currentMenu?.UpdateGesture(position, mouseTag, allowHold: true);
                 });
@@ -418,12 +439,14 @@ namespace Action_Wheel.Services
             if (!_keyboardGestureActive)
                 return;
 
+            long keyboardRequestGeneration = _menuRequestGeneration;
             var keyboardTag = RingGeometry.TagForDirection(
                 position.X - _keyboardGestureOrigin.X,
                 position.Y - _keyboardGestureOrigin.Y);
 
             _dispatcherQueue.TryEnqueue(() =>
             {
+                if (_stopped || keyboardRequestGeneration != _menuRequestGeneration) return;
                 _currentMenu?.UpdateGesture(position, keyboardTag, allowHold: false);
             });
         }
@@ -439,6 +462,7 @@ namespace Action_Wheel.Services
 
             _gestureActive = false;
             _mouseHook.TrackMovement = false;
+            long requestGeneration = _menuRequestGeneration;
 
             var tag = RingGeometry.TagForDirection(
                 position.X - _gestureOrigin.X,
@@ -446,6 +470,7 @@ namespace Action_Wheel.Services
 
             _dispatcherQueue.TryEnqueue(() =>
             {
+                if (_stopped || requestGeneration != _menuRequestGeneration) return;
                 // Ends whatever countdown ShowHoldProgress started, regardless of whether a tag was
                 // resolved - released too close to the centre to choose a direction still ends it.
                 // If the hold already fired on its own (RadialMenu.FireHold runs preemptively, while
@@ -465,7 +490,14 @@ namespace Action_Wheel.Services
         {
             _gestureActive = false;
             _mouseHook.TrackMovement = false;
-            _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
+            long canceledGeneration = _menuRequestGeneration;
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                // The opening itself may still be queued. Match its request rather than
+                // capturing a null window, while preserving any newer gesture's wheel.
+                if (canceledGeneration == _menuRequestGeneration && _currentMenu?.IsRefreshPlaying != true)
+                    CloseCurrentMenu();
+            });
         }
 
         /// <summary>
@@ -477,13 +509,19 @@ namespace Action_Wheel.Services
         private void OnAnyButtonDown(object? sender, PointInt32 position)
         {
             var menu = _currentMenu;
-            if (menu == null || menu.ContainsScreenPoint(position))
+            if (menu == null || menu.IsRefreshPlaying || menu.ContainsScreenPoint(position))
                 return;
 
             _gestureActive = false;
             _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
-            _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                // A queued outside click may run after the release has already converted
+                // this menu into an animation, or after a different wheel has opened.
+                if (ReferenceEquals(_currentMenu, menu) && !menu.IsRefreshPlaying)
+                    CloseCurrentMenu();
+            });
         }
 
         /// <summary>
@@ -491,13 +529,18 @@ namespace Action_Wheel.Services
         /// </summary>
         private bool OnEscapePressed()
         {
-            if (_currentMenu == null)
+            var menu = _currentMenu;
+            if (menu == null || menu.IsRefreshPlaying)
                 return false;
 
             _gestureActive = false;
             _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
-            _dispatcherQueue.TryEnqueue(CloseCurrentMenu);
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                if (ReferenceEquals(_currentMenu, menu) && !menu.IsRefreshPlaying)
+                    CloseCurrentMenu();
+            });
             return true;
         }
 
@@ -534,6 +577,7 @@ namespace Action_Wheel.Services
         /// can change - startup and a save from the settings window.
         /// </remarks>
         private RingAppearance _appearance = RingAppearance.Default;
+        private RefreshAnimationSettings _refreshSettings = RefreshAnimationSettings.Default;
 
         private void ApplyTriggerSettings()
         {
@@ -542,6 +586,7 @@ namespace Action_Wheel.Services
             _mouseHook.ChordTimeoutMs = preferences.ChordTimeoutMs;
             _mouseHook.ChordMovementThreshold = preferences.MovementThreshold;
             _appearance = preferences.Appearance ?? RingAppearance.Default;
+            _refreshSettings = (preferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
         }
 
         /// <summary>
@@ -584,9 +629,11 @@ namespace Action_Wheel.Services
             var tag = RingGeometry.TagForDirection(
                 position.X - _keyboardGestureOrigin.X,
                 position.Y - _keyboardGestureOrigin.Y);
+            long requestGeneration = _menuRequestGeneration;
 
             _dispatcherQueue.TryEnqueue(() =>
             {
+                if (_stopped || requestGeneration != _menuRequestGeneration) return;
                 if (_currentMenu?.TryInvokeGroupChildAt(position) == true)
                     return;
                 if (tag is int selected && selected < _quickInfoActions.Count
@@ -621,7 +668,7 @@ namespace Action_Wheel.Services
                 // The gesture may already have ended while the capture ran.
                 if (ReferenceEquals(_gradedMenu, menu))
                     ScreenGrade.Lower();
-            }), cancellation.Token);
+            }), cancellation.Token, settings: _refreshSettings);
         }
 
         /// <summary>Restores colour and hands back the gesture's mosaic. UI thread.</summary>
@@ -675,6 +722,14 @@ namespace Action_Wheel.Services
                 {
                     if (ReferenceEquals(_gradedMenu, menu))
                         EndGrade();
+                    // The grey cover has been presented and the gesture has ended. Keep
+                    // playback alive independently so ordinary clicks, Esc and another
+                    // wheel can reach their usual targets without cancelling this effect.
+                    if (menu.IsRefreshPlaying && ReferenceEquals(_currentMenu, menu))
+                    {
+                        _playingRefreshes.Add(menu);
+                        _currentMenu = null;
+                    }
                 });
             }
             catch (Exception)
@@ -707,6 +762,11 @@ namespace Action_Wheel.Services
 
             _currentMenu = null;
 
+            CloseMenu(menu);
+        }
+
+        private void CloseMenu(RadialMenu menu)
+        {
             try
             {
                 menu.CloseMenu();

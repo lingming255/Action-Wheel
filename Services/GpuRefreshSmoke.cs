@@ -26,10 +26,14 @@ namespace Action_Wheel.Services
                 // owner alive while individual playback windows exercise repeated teardown.
                 lifetimeWindow = new Window();
                 lifetimeWindow.AppWindow.Hide();
-                for (int round = 0; round < 2; round++)
+                for (int round = 0; round < 3; round++)
                 {
-                    int width = round == 0 ? 1920 : 3840;
-                    int height = round == 0 ? 1080 : 2160;
+                    int width = round == 0 ? 1920 : round == 1 ? 3840 : 640;
+                    int height = round == 0 ? 1080 : round == 1 ? 2160 : 360;
+                    var timing = round == 2 ? new RefreshTimingProfile(new RefreshAnimationSettings
+                    {
+                        DurationMs = 1400, DistanceDelayPercent = 75, PixelDurationPercent = 50,
+                    }) : RefreshTimingProfile.Default;
                     var window = new Window();
                     var host = new Canvas();
                     window.Content = host;
@@ -61,19 +65,19 @@ namespace Action_Wheel.Services
                             depths[p] = x / (float)(width - 1);
                         }
                         var reference = new SpectrumOverlayRefreshRenderer(width, height, capture,
-                            new RefreshDepthMap(width, height, depths), width / 2, height / 2);
+                            new RefreshDepthMap(width, height, depths), width / 2, height / 2, timing: timing);
                         renderer = new GpuRefreshRenderer(new GpuRefreshScene(reference));
                         playback = new GpuRefreshPlayback(renderer, host);
                         bool playbackFailed = false;
-                        foreach (double elapsed in new double[] { 0, 300, 800, 1600, 2490, 2500 })
+                        foreach (double fraction in new double[] { 0, .12, .32, .64, .996, 1 })
                         {
-                            playback.RenderFrame(elapsed);
+                            playback.RenderFrame(fraction * renderer.DurationMs);
                             await Task.Delay(35);
                         }
                         int initialFrames = playback.PresentedFrames;
                         var clock = Stopwatch.StartNew();
                         playback.Start(() => playbackFailed = true);
-                        await Task.Delay(2700);
+                        await Task.Delay((int)Math.Ceiling(renderer.DurationMs + 200));
                         double observedMs = clock.Elapsed.TotalMilliseconds;
                         int automaticFrames = playback.PresentedFrames - initialFrames;
                         int endingFrames = playback.PresentedFrames;
@@ -113,6 +117,10 @@ namespace Action_Wheel.Services
                     && matches.GetBoolean();
                 if (pixelCaptureAvailable && !pixelMappingVerified)
                     throw new InvalidOperationException("Captured Composition pixels do not match the native coordinate pattern: "
+                        + presentationResult.GetRawText());
+                if (pixelCaptureAvailable && presentationResult.TryGetProperty("AlphaCompositionMatches", out var alphaMatches)
+                    && !alphaMatches.GetBoolean())
+                    throw new InvalidOperationException("Layered input transparency changed the visible GPU composition: "
                         + presentationResult.GetRawText());
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(new { Passed = true, Rounds = rounds,
                     PixelMappingVerified = pixelMappingVerified,

@@ -12,6 +12,8 @@
     <Compile Include="../../Services/RefreshSpectrumEffect.cs" Link="RefreshSpectrumEffect.cs" />
     <Compile Include="../../Services/UniformBlockRefreshRenderer.cs" Link="UniformBlockRefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshDepthSweep.cs" Link="RefreshDepthSweep.cs" />
+    <Compile Include="../../Services/RefreshTimingProfile.cs" Link="RefreshTimingProfile.cs" />
+    <Compile Include="../../ActionWheel.Core/RefreshAnimationSettings.cs" Link="RefreshAnimationSettings.cs" />
     <Compile Include="../../Services/RefreshDepthEstimator.cs" Link="RefreshDepthEstimator.cs" />
     <Compile Include="../../Services/SpectrumOverlayRefreshRenderer.cs" Link="SpectrumOverlayRefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshRenderWarmup.cs" Link="RefreshRenderWarmup.cs" />

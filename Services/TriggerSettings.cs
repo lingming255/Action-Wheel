@@ -46,6 +46,7 @@ namespace Action_Wheel.Services
                         OrbitRadius = ReadInt(root, "orbitRadius", (int)RingGeometry.OrbitRadiusDip),
                         AnimationDurationMs = ReadAnimationDurationMs(root),
                     }.Normalised(),
+                    Refresh = ReadRefreshSettings(root),
                 };
             }
             catch (Exception)
@@ -61,6 +62,7 @@ namespace Action_Wheel.Services
             try
             {
                 var appearance = (preferences.Appearance ?? RingAppearance.Default).Normalised();
+                var refresh = (preferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
 
                 using var stream = new MemoryStream();
                 using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -73,6 +75,11 @@ namespace Action_Wheel.Services
                     writer.WriteNumber("buttonSize", (int)appearance.ButtonSize);
                     writer.WriteNumber("orbitRadius", (int)appearance.OrbitRadius);
                     writer.WriteNumber("animationDurationMs", (int)appearance.AnimationDurationMs);
+                    writer.WriteStartObject("refresh");
+                    writer.WriteNumber("durationMs", refresh.DurationMs);
+                    writer.WriteNumber("distanceDelayPercent", refresh.DistanceDelayPercent);
+                    writer.WriteNumber("pixelDurationPercent", refresh.PixelDurationPercent);
+                    writer.WriteEndObject();
                     writer.WriteEndObject();
                 }
 
@@ -84,6 +91,24 @@ namespace Action_Wheel.Services
                 return false;
             }
         }
+
+        private static RefreshAnimationSettings ReadRefreshSettings(JsonElement root)
+        {
+            if (!root.TryGetProperty("refresh", out var value) || value.ValueKind != JsonValueKind.Object)
+                return RefreshAnimationSettings.Default;
+
+            var defaults = RefreshAnimationSettings.Default;
+            return new RefreshAnimationSettings
+            {
+                DurationMs = ReadDouble(value, "durationMs", defaults.DurationMs),
+                DistanceDelayPercent = ReadDouble(value, "distanceDelayPercent", defaults.DistanceDelayPercent),
+                PixelDurationPercent = ReadDouble(value, "pixelDurationPercent", defaults.PixelDurationPercent),
+            }.Normalised();
+        }
+
+        private static double ReadDouble(JsonElement root, string name, double fallback)
+            => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out double result) ? result : fallback;
 
         private static int ReadInt(JsonElement root, string name, int fallback)
         {
@@ -123,5 +148,8 @@ namespace Action_Wheel.Services
         /// settings screen that saved only the trigger would erase whatever this was set to.
         /// </summary>
         public RingAppearance Appearance { get; init; } = RingAppearance.Default;
+
+        /// <summary>The desktop refresh effect, saved independently from the ring's opening animation.</summary>
+        public RefreshAnimationSettings Refresh { get; init; } = RefreshAnimationSettings.Default;
     }
 }

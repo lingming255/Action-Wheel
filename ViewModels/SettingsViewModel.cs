@@ -135,6 +135,7 @@ namespace Action_Wheel.ViewModels
             _chordTimeoutMs = triggerPreferences.ChordTimeoutMs;
             _movementThreshold = triggerPreferences.MovementThreshold;
             _appearance = (triggerPreferences.Appearance ?? RingAppearance.Default).Normalised();
+            _refreshSettings = (triggerPreferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
             _activeProfileName = ActiveProfileSettings.Load();
             _loadedProfileName = _activeProfileName;
 
@@ -175,6 +176,8 @@ namespace Action_Wheel.ViewModels
             Raise(nameof(AnimationDurationMs));
             Raise(nameof(AnimationDurationMsText));
             Raise(nameof(Appearance));
+
+            RaiseRefreshSettings();
 
             UndoCommand.RaiseCanExecuteChanged();
             RedoCommand.RaiseCanExecuteChanged();
@@ -611,6 +614,7 @@ namespace Action_Wheel.ViewModels
         private List<ActionItem> _savedActions = new();
 
         private RingAppearance _savedAppearance = RingAppearance.Default;
+        private RefreshAnimationSettings _savedRefreshSettings = RefreshAnimationSettings.Default;
         private int _savedTriggerIndex;
         private double _savedChordTimeoutMs;
         private double _savedMovementThreshold;
@@ -618,6 +622,7 @@ namespace Action_Wheel.ViewModels
         /// <summary>True when closing now would lose something the user typed.</summary>
         public bool HasUnsavedChanges =>
             _appearance != _savedAppearance
+            || _refreshSettings != _savedRefreshSettings
             || _triggerIndex != _savedTriggerIndex
             || _chordTimeoutMs != _savedChordTimeoutMs
             || _movementThreshold != _savedMovementThreshold
@@ -630,6 +635,7 @@ namespace Action_Wheel.ViewModels
         {
             _savedActions = Snapshot();
             _savedAppearance = _appearance;
+            _savedRefreshSettings = _refreshSettings;
             _savedTriggerIndex = _triggerIndex;
             _savedChordTimeoutMs = _chordTimeoutMs;
             _savedMovementThreshold = _movementThreshold;
@@ -742,11 +748,12 @@ namespace Action_Wheel.ViewModels
                     ChordTimeoutMs = (int)_chordTimeoutMs,
                     MovementThreshold = (int)_movementThreshold,
                     Appearance = _appearance,
+                    Refresh = _refreshSettings,
                 }, out triggerError))
             {
                 // preferences.json now carries the ring's size and animation as well as the trigger,
                 // so the heading can no longer name only the trigger.
-                ShowStatus(InfoBarSeverity.Error, "Could not save the trigger and ring preferences",
+                ShowStatus(InfoBarSeverity.Error, "Could not save preferences",
                     string.IsNullOrEmpty(triggerError) ? "The selected trigger is invalid." : triggerError);
                 return;
             }
@@ -842,11 +849,12 @@ namespace Action_Wheel.ViewModels
             // user who had made the buttons huge got the default nine actions back inside a ring
             // that was still nothing like the default one.
             ApplyAppearance(RingAppearance.Default, nameof(Appearance));
+            ApplyRefreshSettings(RefreshAnimationSettings.Default, nameof(RefreshSettings));
 
             // Undo is a stack of ActionItem snapshots and does not carry the appearance, so the
             // message must not promise that it does.
             ShowStatus(InfoBarSeverity.Informational, "Defaults loaded",
-                "The rows, the ring size and the animation are all back to their defaults. "
+                "The rows, ring appearance and desktop refresh are back to their defaults. "
                 + "Press Save to overwrite the current file; Undo restores the rows only.");
         }
 

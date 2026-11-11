@@ -843,6 +843,52 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="16">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Desktop refresh" FontWeight="SemiBold"/>
+                                <TextBlock Text="Release in the centre of the wheel to play the refresh effect. Save to apply these settings to the next refresh."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <Grid ColumnSpacing="18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <Slider Header="Total duration"
+                                                Minimum="600" Maximum="6000" StepFrequency="100"
+                                                Value="{Binding RefreshDurationMs, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="How long the complete refresh lasts. Lower values play the whole effect faster. The default is 2500 ms."/>
+                                        <TextBlock Text="{Binding RefreshDurationMsText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <Slider Header="Distance stagger"
+                                                Minimum="0" Maximum="200" StepFrequency="5"
+                                                Value="{Binding RefreshDistanceDelayPercent, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="Delay between nearby and distant pixels at similar depth. Lower values spread faster. 100% is the default; 0% removes this distance delay."/>
+                                        <TextBlock Text="{Binding RefreshDistanceDelayPercentText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Spacing="2">
+                                        <Slider Header="Pixel duration"
+                                                Minimum="25" Maximum="200" StepFrequency="5"
+                                                Value="{Binding RefreshPixelDurationPercent, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="How long each block glows and fades, relative to the default. Lower values produce a shorter pulse. 100% is the default."/>
+                                        <TextBlock Text="{Binding RefreshPixelDurationPercentText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="For a crisper refresh, try a lower total duration and a shorter pixel pulse. Clicks pass through while the animation continues."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
 

@@ -8,7 +8,7 @@ cbuffer Parameters : register(b0)
     float4 Rain;         // rain colour RGB, Gaussian spacing in source texels
     float4 StageSizes;         // target width/height, source width/height
     float4 Kernel;       // box radius, horizontal, reserved
-    float4 Reserved0;
+    float4 Timing;       // block lifetime, rise, fade start, background restore (reference ms)
     float4 Reserved1;
 };
 Texture2D<float4> Input0 : register(t0);
@@ -26,8 +26,8 @@ float Smooth(float low, float high, float value)
 }
 float Opacity(float age)
 {
-    if (age <= 0 || age >= 510) return 0;
-    return .88 * Smooth(0, 85, age) * (1 - Smooth(187, 510, age));
+    if (age <= 0 || age >= Timing.x) return 0;
+    return .88 * Smooth(0, Timing.y, age) * (1 - Smooth(Timing.z, Timing.x, age));
 }
 float3 Saturation(float3 colour, float amount)
 {
@@ -179,13 +179,13 @@ uint4 AddLight(uint4 overlay, uint3 source, uint3 addition)
 }
 float4 FinalPS(float4 position : SV_Position) : SV_Target
 {
-    if (Native.w < .5 || Native.z >= 3000) return 0;
+    if (Native.w < .5) return 0;
     int2 pixel = (int2)position.xy;
     int2 cell = pixel / (int)Grid.x;
     float4 block = Input2.Load(int3(cell, 0)), rect = Input3.Load(int3(cell, 0));
     float age = Native.z - block.w;
     float opacity = Opacity(age);
-    uint amount = (uint)round(256 * (1 - Smooth(0, 340, age)));
+    uint amount = (uint)round(256 * (1 - Smooth(0, Timing.w, age)));
     uint4 background = (uint4)round(Input1.Load(int3(pixel, 0)) * 255);
     uint4 output = (background * amount + 128) >> 8;
     uint3 capture = (uint3)round(Input0.Load(int3(pixel, 0)).rgb * 255);

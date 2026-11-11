@@ -242,6 +242,7 @@ namespace Action_Wheel.Overlay
         private DispatcherQueueTimer? _refreshTimer;
         private RefreshPlayback? _refreshPlayback;
         private GpuRefreshPlayback? _gpuRefreshPlayback;
+        internal bool IsRefreshPlaying { get; private set; }
 
         /// <summary>
         /// The one path that ever closes this window - a button click, a click elsewhere on the
@@ -272,6 +273,7 @@ namespace Action_Wheel.Overlay
         private void RadialMenu_Closed(object sender, WindowEventArgs args)
         {
             _closed = true;
+            IsRefreshPlaying = false;
             _holdTimer.Stop();
             // Rendering is static. If a refresh is cancelled before its three-frame handoff,
             // there may be no next frame to detach it and release all its prepared bitmaps.
@@ -1597,7 +1599,7 @@ namespace Action_Wheel.Overlay
         /// Microsoft.UI.Composition.Compositor used for XAML element visuals - so a dedicated
         /// Compositor has to be created here (the standard pattern for custom system backdrops).
         /// </summary>
-        private sealed class TransparentSystemBackdrop : SystemBackdrop
+        internal sealed class TransparentSystemBackdrop : SystemBackdrop
         {
             private WindowsSystemDispatcherQueueHelper? _dispatcherQueueHelper;
             private Windows.UI.Composition.Compositor? _compositor;
@@ -1705,6 +1707,7 @@ namespace Action_Wheel.Overlay
             }
 
             var bounds = frame.Bounds;
+            IsRefreshPlaying = true;
             double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
             double layerW = bounds.Width / scale, layerH = bounds.Height / scale;
 
@@ -1721,6 +1724,8 @@ namespace Action_Wheel.Overlay
             int exStyle = GetWindowLong(_windowHandle, GWL_EXSTYLE);
             SetWindowLong(_windowHandle, GWL_EXSTYLE,
                 exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
+            RefreshInputTransparency.Enable(_windowHandle);
+            RootGrid.IsHitTestVisible = false;
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
@@ -1745,7 +1750,7 @@ namespace Action_Wheel.Overlay
             // Playback lifetime is independent of decorative visuals.
             var timer = DispatcherQueue.CreateTimer();
             timer.IsRepeating = false;
-            timer.Interval = TimeSpan.FromMilliseconds(RefreshFrame.PlaybackDurationMs);
+            timer.Interval = TimeSpan.FromMilliseconds(frame.PlaybackDurationMs);
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
@@ -1916,6 +1921,7 @@ namespace Action_Wheel.Overlay
 
         private void RootGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
+            if (IsRefreshPlaying) return;
             // If the click landed on a Button, that button's own Click handler deals with it - don't
             // close here. This used to compute the distance to each button's centre by hand, but
             // that had to be kept in sync manually with the button sizes in XAML and drifted the

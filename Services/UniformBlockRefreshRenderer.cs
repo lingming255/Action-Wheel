@@ -49,7 +49,8 @@ namespace Action_Wheel.Services
         private bool _horizontalPass;
         private CancellationToken _cancellation;
 
-        public double DurationMs => RefreshDepthSweep.DurationMs;
+        internal RefreshTimingProfile Timing { get; }
+        public double DurationMs => Timing.ReferenceDurationMs;
         public double FrameIntervalMs => 1000.0 / 60;
         // The final bitmap already contains core, background correction and bloom.
         public int BloomWidth => 1;
@@ -64,7 +65,7 @@ namespace Action_Wheel.Services
         internal float OriginDepth { get; private set; }
 
         public UniformBlockRefreshRenderer(int width, int height, byte[] capture, RefreshDepthMap depth,
-            int originX, int originY)
+            int originX, int originY, RefreshTimingProfile? timing = null)
         {
             ArgumentNullException.ThrowIfNull(capture);
             ArgumentNullException.ThrowIfNull(depth);
@@ -78,6 +79,7 @@ namespace Action_Wheel.Services
                 if (!float.IsFinite(value) || value < 0 || value > 1)
                     throw new ArgumentException("Depth values must be finite and normalized.", nameof(depth));
 
+            Timing = timing ?? RefreshTimingProfile.Default;
             _width = width; _height = height; _capture = capture;
             _depthMap = depth;
             _cellSize = Math.Max(4, 2 * (int)MathF.Floor(MosaicFraction * Math.Min(width, height) / 2));
@@ -140,20 +142,24 @@ namespace Action_Wheel.Services
                     block.CellTop + block.CellHeight * .5, originX, originY, farthest);
                 _blocks[index] = block with
                 {
-                    StartMs = RefreshDepthSweep.StartAt(block.Depth, OriginDepth, distance),
+                    StartMs = Timing.StartAt(block.Depth, OriginDepth, distance),
                 };
             }
             _originX = originX; _originY = originY;
         }
 
         /// <summary>The same scalar applies to every pixel of a block; age is in milliseconds.</summary>
-        internal static float OpacityAt(double ageMs)
-            => !double.IsFinite(ageMs) || ageMs <= 0 || ageMs >= RefreshDepthSweep.LifetimeMs ? 0
-                : MaximumOpacity * Smooth(0, RefreshDepthSweep.RiseMs, ageMs)
-                    * (1 - Smooth(RefreshDepthSweep.FadeStartMs, RefreshDepthSweep.LifetimeMs, ageMs));
+        internal static float OpacityAt(double ageMs, RefreshTimingProfile? timing = null)
+        {
+            timing ??= RefreshTimingProfile.Default;
+            return !double.IsFinite(ageMs) || ageMs <= 0 || ageMs >= timing.LifetimeMs ? 0
+                : MaximumOpacity * Smooth(0, timing.RiseMs, ageMs)
+                    * (1 - Smooth(timing.FadeStartMs, timing.LifetimeMs, ageMs));
+        }
 
         /// <summary>Start/end fully grey; the full pulse retains its prepared pigment.</summary>
-        internal static float SaturationAt(double ageMs) => OpacityAt(ageMs) / MaximumOpacity;
+        internal static float SaturationAt(double ageMs, RefreshTimingProfile? timing = null)
+            => OpacityAt(ageMs, timing) / MaximumOpacity;
 
         internal static Vector3 AdjustSaturation(Vector3 colour, float saturation)
         {
@@ -161,12 +167,12 @@ namespace Action_Wheel.Services
             return Vector3.Lerp(new Vector3(luma), colour, saturation);
         }
 
-        internal static uint CoreAt(Block block, double elapsedMs)
+        internal static uint CoreAt(Block block, double elapsedMs, RefreshTimingProfile? timing = null)
         {
-            float opacity = OpacityAt(elapsedMs - block.StartMs);
+            float opacity = OpacityAt(elapsedMs - block.StartMs, timing);
             float brightness = .75f + .25f * (opacity / MaximumOpacity);
             int alpha = Math.Clamp((int)MathF.Round(opacity * 255), 0, 255);
-            Vector3 colour = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs))
+            Vector3 colour = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs, timing))
                 * (brightness * alpha);
             int r = Math.Clamp((int)MathF.Round(colour.X), 0, alpha);
             int g = Math.Clamp((int)MathF.Round(colour.Y), 0, alpha);
@@ -176,8 +182,9 @@ namespace Action_Wheel.Services
 
         // Reveal the ungraded desktop behind the same arriving light pulse. Bloom already uses
         // this block's age, so all three layers follow the same two depth fronts.
-        internal static int BackgroundAmountAt(Block block, double elapsedMs)
-            => (int)MathF.Round(256 * (1 - Smooth(0, RefreshDepthSweep.BackgroundRestoreMs, elapsedMs - block.StartMs)));
+        internal static int BackgroundAmountAt(Block block, double elapsedMs, RefreshTimingProfile? timing = null)
+            => (int)MathF.Round(256 * (1 - Smooth(0, (timing ?? RefreshTimingProfile.Default).BackgroundRestoreMs,
+                elapsedMs - block.StartMs)));
 
         public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,
             CancellationToken cancellation = default)
@@ -207,12 +214,12 @@ namespace Action_Wheel.Services
                 {
                     if ((index & 63) == 0) cancellation.ThrowIfCancellationRequested();
                     Block block = _blocks[index];
-                    float opacity = OpacityAt(elapsedMs - block.StartMs);
+                    float opacity = OpacityAt(elapsedMs - block.StartMs, Timing);
                     float brightness = .75f + .25f * (opacity / MaximumOpacity);
                     ref State state = ref _states[index];
-                    state.Core = CoreAt(block, elapsedMs);
-                    state.BackgroundAmount = BackgroundAmountAt(block, elapsedMs);
-                    state.Emission = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs))
+                    state.Core = CoreAt(block, elapsedMs, Timing);
+                    state.BackgroundAmount = BackgroundAmountAt(block, elapsedMs, Timing);
+                    state.Emission = AdjustSaturation(block.Colour, SaturationAt(elapsedMs - block.StartMs, Timing))
                         * (opacity * brightness * BloomGain);
                     if (state.Emission == Vector3.Zero) continue;
                     anyEmission = true;

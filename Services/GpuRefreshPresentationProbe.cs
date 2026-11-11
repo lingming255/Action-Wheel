@@ -26,6 +26,79 @@ namespace Action_Wheel.Services
         {
             if (!GraphicsCaptureSession.IsSupported())
                 return new { Supported = false, Reason = "Windows Graphics Capture is unavailable." };
+            // WGC's treatment of the window backdrop is not the swap chain's alpha contract.
+            // Compare two otherwise identical native windows instead of assuming either an
+            // opaque black background or that capture bytes are premultiplied GPU bytes.
+            ProbeCase baseline = await RunCaseAsync(clickThrough: false);
+            ProbeCase clickThrough = await RunCaseAsync(clickThrough: true);
+            bool mappingMatches = baseline.MappingMatches && clickThrough.MappingMatches;
+            bool compositionMatches = mappingMatches
+                && baseline.Phases.Count == 2 && clickThrough.Phases.Count == 2;
+            var comparisons = new List<object>();
+            for (int i = 0; i < Math.Min(baseline.Phases.Count, clickThrough.Phases.Count); i++)
+            {
+                PhaseCapture before = baseline.Phases[i], after = clickThrough.Phases[i];
+                bool dimensionsMatch = before.Width == after.Width && before.Height == after.Height
+                    && before.Width == 640 && before.Height == 360;
+                bool gpuInputsMatch = before.Gpu.AsSpan().SequenceEqual(after.Gpu);
+                int maximumRgbError = 0, maximumAlphaError = 0, differentPixels = 0;
+                if (dimensionsMatch)
+                    for (int p = 0; p < before.Pixels.Length; p += 4)
+                    {
+                        bool different = false;
+                        for (int c = 0; c < 4; c++)
+                        {
+                            int error = Math.Abs(before.Pixels[p + c] - after.Pixels[p + c]);
+                            if (c == 3) maximumAlphaError = Math.Max(maximumAlphaError, error);
+                            else maximumRgbError = Math.Max(maximumRgbError, error);
+                            different |= error != 0;
+                        }
+                        if (different) differentPixels++;
+                    }
+                // Include alpha as well as RGB: equality here proves the new native styles
+                // preserved what WGC observed, regardless of its representation of alpha.
+                bool matches = dimensionsMatch && gpuInputsMatch && before.ElapsedMs == after.ElapsedMs
+                    && maximumRgbError <= 2 && maximumAlphaError <= 2;
+                compositionMatches &= matches;
+                comparisons.Add(new
+                {
+                    ElapsedMs = before.ElapsedMs, DimensionsMatch = dimensionsMatch,
+                    GpuInputsMatch = gpuInputsMatch, MaximumRgbError = maximumRgbError,
+                    MaximumAlphaError = maximumAlphaError, DifferentPixels = differentPixels,
+                    BaselineCentre = Centre(before.Pixels, before.Width, before.Height),
+                    ClickThroughCentre = Centre(after.Pixels, after.Width, after.Height),
+                    Matches = matches,
+                });
+            }
+            return new
+            {
+                Supported = true,
+                PixelCaptureAvailable = baseline.CaptureAvailable && clickThrough.CaptureAvailable,
+                PixelMappingMatches = mappingMatches,
+                ClickThroughStylesApplied = true,
+                AlphaCompositionMatches = compositionMatches,
+                CompositionComparison = "Same synthetic pixels and times, separate offscreen windows; all captured BGRA channels compared to the unmodified native-style baseline.",
+                Baseline = baseline.Metadata, ClickThrough = clickThrough.Metadata,
+                AlphaPhases = comparisons, UsedDesktopCapture = false, OffscreenOnly = true,
+            };
+        }
+
+        private sealed class ProbeCase
+        {
+            internal object Metadata { get; init; } = new { };
+            internal bool CaptureAvailable { get; init; }
+            internal bool MappingMatches { get; init; }
+            internal List<PhaseCapture> Phases { get; init; } = new();
+        }
+
+        private sealed record PhaseCapture(double ElapsedMs, int Width, int Height, byte[] Pixels, byte[] Gpu);
+
+        private static string Centre(byte[] pixels, int width, int height)
+            => width > 0 && height > 0 && pixels.Length == (long)width * height * 4
+                ? Convert.ToHexString(pixels.AsSpan((height / 2 * width + width / 2) * 4, 4)) : "Unavailable";
+
+        private static async Task<ProbeCase> RunCaseAsync(bool clickThrough)
+        {
             const int width = 640, height = 360;
             Window? window = null;
             GpuRefreshRenderer? renderer = null;
@@ -38,21 +111,36 @@ namespace Action_Wheel.Services
             var frameGate = new object();
             Direct3D11CaptureFrame? latest = null;
             bool accepting = false;
+            nint backgroundHwnd = 0;
             try
             {
                 window = new Window();
-                var host = new Canvas { Background = new SolidColorBrush(Microsoft.UI.Colors.Black) };
+                var host = new Canvas();
                 window.Content = host;
                 if (window.AppWindow.Presenter is OverlappedPresenter presenter)
                     presenter.SetBorderAndTitleBar(false, false);
                 nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+                window.SystemBackdrop = new RadialMenu.TransparentSystemBackdrop();
+                var blur = new BlurBehind { Flags = 1, Enabled = true };
+                GpuRefreshDevice.Check(DwmEnableBlurBehindWindow(hwnd, ref blur));
+                if (!SetWindowSubclass(hwnd, ClearNativeBackground, new UIntPtr(37), UIntPtr.Zero))
+                    throw new InvalidOperationException("Probe background subclass could not be installed.");
+                backgroundHwnd = hwnd;
                 // Match the actual overlay's borderless native HWND, including removal of
                 // the invisible overlapped-window resize margins excluded by WGC.
                 SetWindowLong(hwnd, -16, unchecked((int)0x82000000)); // POPUP | CLIPCHILDREN
                 SetWindowLong(hwnd, -20, 0x08000080); // NOACTIVATE | TOOLWINDOW
+                if (clickThrough) RefreshInputTransparency.Enable(hwnd);
                 if (!SetWindowPos(hwnd, 0, -20000, -20000, width, height, 0x234))
                     throw new InvalidOperationException("Probe popup sizing failed.");
                 window.AppWindow.Show(false);
+                nint backgroundDc = GetDC(hwnd);
+                if (backgroundDc != 0)
+                {
+                    GetClientRect(hwnd, out Rect eraseRect);
+                    FillRect(backgroundDc, ref eraseRect, GetStockObject(4));
+                    ReleaseDC(hwnd, backgroundDc);
+                }
                 await Task.Delay(250);
                 if (!GetClientRect(hwnd, out Rect client))
                     throw new InvalidOperationException("Probe client size is unavailable.");
@@ -137,9 +225,9 @@ namespace Action_Wheel.Services
                 {
                     arrived.TrySetCanceled();
                     lock (frameGate) { accepting = false; latest?.Dispose(); latest = null; }
-                    return new { Supported = true, PixelCaptureAvailable = false,
+                    return new ProbeCase { Metadata = new { Supported = true, PixelCaptureAvailable = false,
                         Reason = "No WGC frame for the fully offscreen synthetic window.",
-                        Mapping = playback.GetMappingDiagnostic(), UsedDesktopCapture = false };
+                        Mapping = playback.GetMappingDiagnostic(), UsedDesktopCapture = false } };
                 }
                 await arrived.Task;
                 await Task.Delay(250);
@@ -161,7 +249,46 @@ namespace Action_Wheel.Services
                     samples.Add(new { X = x, Y = y, Expected = expected[nativeOffset],
                         Actual = actual[capturedOffset], Error = error });
                 }
-                return new { Supported = true, PixelCaptureAvailable = nonzeroInterior >= 3,
+                var alphaPhases = new List<object>();
+                var phaseCaptures = new List<PhaseCapture>();
+                foreach (double elapsed in new[] { renderer.DurationMs * .28, renderer.DurationMs })
+                {
+                    lock (frameGate) { accepting = true; latest?.Dispose(); latest = null; }
+                    playback.RenderFrame(elapsed);
+                    renderer.Device.WaitIdle();
+                    byte[] expectedPhase = renderer.Device.ReadbackBgra(renderer.OutputTexture);
+                    await Task.Delay(300);
+                    Direct3D11CaptureFrame? capturedPhase;
+                    lock (frameGate) { accepting = false; capturedPhase = latest; latest = null; }
+                    if (capturedPhase == null)
+                        throw new InvalidOperationException("No Composition frame after changing the layered refresh output.");
+                    using (capturedPhase)
+                    {
+                        byte[] pixels = ReadCapturedSurface(renderer.Device, capturedPhase.Surface,
+                            out int phaseWidth, out int phaseHeight);
+                        int partialAlphaPixels = 0, clearAlphaPixels = 0;
+                        bool dimensionsMatch = phaseWidth == width && phaseHeight == height;
+                        if (dimensionsMatch)
+                            for (int p = 0; p < expectedPhase.Length; p += 4)
+                            {
+                                if (expectedPhase[p + 3] == 0) clearAlphaPixels++;
+                                else if (expectedPhase[p + 3] < 255) partialAlphaPixels++;
+                            }
+                        phaseCaptures.Add(new PhaseCapture(elapsed, phaseWidth, phaseHeight, pixels, expectedPhase));
+                        alphaPhases.Add(new { ElapsedMs = elapsed, DimensionsMatch = dimensionsMatch,
+                            PartialAlphaPixels = partialAlphaPixels, ClearAlphaPixels = clearAlphaPixels,
+                            CapturedCentre = Centre(pixels, phaseWidth, phaseHeight),
+                            GpuCentre = Centre(expectedPhase, width, height) });
+                    }
+                }
+                bool mappingMatches = nonzeroInterior >= 3 && count == 9 && maximum <= 2
+                    && actualWidth == width && actualHeight == height;
+                return new ProbeCase
+                {
+                    CaptureAvailable = nonzeroInterior >= 3,
+                    MappingMatches = mappingMatches,
+                    Phases = phaseCaptures,
+                    Metadata = new { Supported = true, PixelCaptureAvailable = nonzeroInterior >= 3,
                     Reason = nonzeroInterior >= 3 ? "Captured final synthetic Composition frame."
                         : "WGC supplied a blank offscreen Composition interior; pixel mapping is unverified.",
                     Width = width, Height = height, CaptureWidth = actualWidth, CaptureHeight = actualHeight,
@@ -169,13 +296,16 @@ namespace Action_Wheel.Services
                     ClientWidth = client.Right, ClientHeight = client.Bottom, ReceivedFrames = receivedFrames,
                     Mapping = playback.GetMappingDiagnostic(), Samples = samples,
                     MaximumSampleError = maximum, MeanSampleError = count == 0 ? 0 : sum / (double)count,
-                    PixelMappingMatches = nonzeroInterior >= 3 && maximum <= 2 && actualWidth == width && actualHeight == height,
-                    UsedDesktopCapture = false, OffscreenOnly = true };
+                    PixelMappingMatches = mappingMatches,
+                    ClickThroughStylesApplied = clickThrough,
+                    AlphaPhases = alphaPhases,
+                    UsedDesktopCapture = false, OffscreenOnly = true },
+                };
             }
             catch (Exception error)
             {
-                return new { Supported = true, PixelCaptureAvailable = false,
-                    Error = error.ToString(), UsedDesktopCapture = false };
+                return new ProbeCase { Metadata = new { Supported = true, PixelCaptureAvailable = false,
+                    Error = error.ToString(), UsedDesktopCapture = false } };
             }
             finally
             {
@@ -184,9 +314,32 @@ namespace Action_Wheel.Services
                 if (item is WinRT.IWinRTObject itemNative) itemNative.NativeObject.Dispose();
                 if (captureDevice is IDisposable disposableDevice) disposableDevice.Dispose();
                 else if (captureDevice is WinRT.IWinRTObject deviceNative) deviceNative.NativeObject.Dispose();
+                if (backgroundHwnd != 0) RemoveWindowSubclass(backgroundHwnd, ClearNativeBackground, new UIntPtr(37));
                 playback?.Dispose(); renderer?.Dispose(); window?.Close();
             }
         }
+
+        private static readonly SubclassProc ClearNativeBackground = (hwnd, message, wParam, lParam, id, data) =>
+        {
+            if (message == 0x14 && GetClientRect(hwnd, out Rect rect))
+            {
+                FillRect(wParam, ref rect, GetStockObject(4));
+                return 1;
+            }
+            return DefSubclassProc(hwnd, message, wParam, lParam);
+        };
+
+        private delegate nint SubclassProc(nint hwnd, uint message, nint wParam, nint lParam, UIntPtr id, UIntPtr data);
+        [StructLayout(LayoutKind.Sequential)] private struct BlurBehind
+        { public uint Flags; [MarshalAs(UnmanagedType.Bool)] public bool Enabled; public nint Region; [MarshalAs(UnmanagedType.Bool)] public bool Transition; }
+        [DllImport("dwmapi.dll")] private static extern int DwmEnableBlurBehindWindow(nint hwnd, ref BlurBehind blur);
+        [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint hwnd, SubclassProc callback, UIntPtr id, UIntPtr data);
+        [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint hwnd, SubclassProc callback, UIntPtr id);
+        [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint hwnd, uint message, nint wParam, nint lParam);
+        [DllImport("user32.dll")] private static extern nint GetDC(nint hwnd);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(nint hwnd, nint dc);
+        [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref Rect rect, nint brush);
+        [DllImport("gdi32.dll")] private static extern nint GetStockObject(int index);
 
         private static unsafe GraphicsCaptureItem CreateItem(nint hwnd)
         {

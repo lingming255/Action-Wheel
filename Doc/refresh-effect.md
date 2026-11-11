@@ -4,7 +4,7 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current playback: hardware GPU, 2.5 seconds (2026-11-11)
+## Current playback: hardware GPU, configurable timing (2026-11-11)
 
 The GPU migration is on `codex/refresh-gpu`. The preceding deployed CPU version `a3b54c0`
 is preserved at `archive/refresh-before-gpu-20261111` and in the matching `bin/Backups/`
@@ -20,15 +20,48 @@ per capture and is not involved in animation frames.
 `GpuRefreshPlayback` presents a premultiplied DXGI swapchain through the WinUI Composition
 surface directly. There is no per-frame pixel readback, `WriteableBitmap` or CPU image beneath
 the GPU layer. A 60 Hz elapsed-time schedule follows Composition rendering callbacks, skipping
-missed states without simulation catch-up. It stops at 2500 ms, matching the menu's close timer.
-The entire reference time domain advances at 1.2x: spatial delay is now at most 583.33 ms,
+missed states without simulation catch-up. By default it stops at 2500 ms, matching the menu's close timer.
+The default reference time domain advances at 1.2x: spatial delay is at most 583.33 ms,
 depth travel 1325 ms and block lifetime 425 ms. The latest full fade finishes at 2432.5 ms.
-The archived 3000-ms formulas below remain the CPU reference domain, not the wall clock.
+The archived 3000-ms formulas below remain the default CPU reference domain, not the wall clock.
+
+Settings > Appearance & trigger > Desktop refresh exposes three saved controls:
+
+| Control | Default | Range | Effect |
+| --- | --- | --- | --- |
+| Total duration | 2500 ms | 600–6000 ms | Lower values finish the whole refresh sooner. |
+| Distance stagger | 100% | 0–200% | The weight of screen distance in same-depth arrival delays. |
+| Pixel duration | 100% | 25–200% | The weight of each complete brightness/saturation pulse, including its fade. |
+
+Save applies settings to the next gesture; existing preferences without `refresh` retain the
+accepted defaults. The nested `refresh` object lives in `preferences.json`, separately from
+the ring opening animation. Each capture freezes one immutable `RefreshTimingProfile` used
+by CPU, GPU and the closing timer. Percentages adjust the relative timing weights within the
+fixed total duration. The profile fits the entire depth travel, distance stagger, pulse and
+81 reference-ms tail into that total, so extreme allowed combinations cannot truncate late
+blocks. For a shorter, crisper trial, try 1400 ms / 75% / 50%, then tune by eye.
+
+During playback the window becomes a decorative, independently owned overlay. Ordinary
+clicks and Escape pass through; they do not cancel it. After the three-frame grey handoff,
+another wheel can open while the old effect finishes. The short handoff rejects new mouse
+triggers while forwarding complete down/up pairs. The launcher retains playing windows until
+their own timer, rendering failure or application shutdown; old Closed callbacks cannot close
+a newer menu. Queued open/cancel/release events use a request generation to avoid acting on
+another gesture. `RefreshInputTransparency` applies `WS_EX_LAYERED | WS_EX_TRANSPARENT |
+WS_EX_NOACTIVATE`, leaving opacity to Composition. `SetLayeredWindowAttributes` is deliberately
+omitted: its constant-alpha path whitened translucent WinUI pixels in the offscreen comparison.
+Transparent alone was experimentally insufficient:
+a fully offscreen two-process native hit-test continued to hit the overlay until the layered
+style was added, after which it hit the other process's underlying window.
+
+There is no explicit CS, game or fullscreen suppression condition in the current source.
+The user's observation that CS does not trigger the effect has no confirmed cause; this
+change does not add or remove a game-specific rule.
 
 Device/shader/upload work happens on the capture worker before playback. Startup primes the
 same GPU path offscreen; its shader bytecode is cached process-wide. The former longer CPU
 warmup runs only if hardware preparation fails. Hardware/interop failure before handoff uses
-the retained CPU renderer with the same 1.2x clock and 2500-ms duration, at its original 30 Hz
+the retained CPU renderer with the same configured timing, at its original 30 Hz
 budget. Failure during GPU playback closes the decoration and restores the desktop. Stale
 capture results dispose GPU resources; ownership transfers once to the playing menu.
 
@@ -72,6 +105,18 @@ The hidden 4K host also updates correctly from 125% to 150% (3840 physical pixel
 4608). These checks supplement the original frame-count-only smoke, which missed display
 mapping. Reports are in `bin/Review/gpu-size-fix-20261111/`. Normal launches write no logs.
 Complex visual acceptance remains with the user.
+
+The timing/interaction revision is preserved before editing at
+`archive/refresh-before-controls-clickthrough-20261111` and the matching `bin/Backups/`
+directory: 183 source blobs, three runtime files, three model files and twelve actual local
+configuration files were verified. Validation adds 107 GPU/CPU image comparisons (including
+custom timing and release retargeting), 6734 timing assertions across the allowed extremes,
+41 real mouse-dispatch assertions and 20 isolated preference read/write checks. All 148 settings
+binding paths resolve. The expanded hidden smoke includes a 1400-ms custom playback and
+compares full captured BGRA of synthetic offscreen windows with and without click-through
+styles at intermediate and ending frames. RGB and alpha differences are both zero. This
+test caught and rejected the earlier constant-alpha layered-window path; the final helper
+lets Composition own opacity. It does not synthesize clicks or capture the user's desktop.
 
 ## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
 

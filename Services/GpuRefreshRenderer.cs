@@ -12,6 +12,7 @@ namespace Action_Wheel.Services
     /// </summary>
     internal sealed class GpuRefreshRenderer : IDisposable
     {
+        // Default configuration only. Live playback reads the immutable scene timing below.
         internal const double PlaybackDurationMs = 2500;
         internal const double ReferenceTimeRatio = 3000.0 / PlaybackDurationMs;
         private static readonly string Source = LoadShader();
@@ -27,16 +28,19 @@ namespace Action_Wheel.Services
         private readonly GpuRefreshDevice.Texture[] _four = new GpuRefreshDevice.Texture[4];
         private readonly GpuRefreshDevice.Texture[] _finalInputs = new GpuRefreshDevice.Texture[7];
         private bool _disposed;
+        private readonly RefreshTimingProfile _timing;
 
         internal GpuRefreshDevice Device { get; }
         internal GpuRefreshDevice.Texture OutputTexture { get; }
         internal int Width { get; }
         internal int Height { get; }
-        internal double DurationMs => PlaybackDurationMs;
+        internal double DurationMs => _timing.PlaybackDurationMs;
+        internal double TimeRatio => _timing.ReferenceTimeRatio;
 
         internal GpuRefreshRenderer(GpuRefreshScene scene)
         {
             ArgumentNullException.ThrowIfNull(scene);
+            _timing = scene.Timing;
             Width = scene.Width; Height = scene.Height;
             Device = new GpuRefreshDevice();
             try
@@ -68,6 +72,8 @@ namespace Action_Wheel.Services
                 _constants[1] = new Vector4(scene.CellSize, scene.Columns, scene.BloomStep, scene.Rows);
                 _constants[2] = new Vector4(scene.BloomWidth, scene.BloomHeight, scene.WorkWidth, scene.WorkHeight);
                 _constants[3] = new Vector4(scene.RainColour, 0);
+                _constants[6] = new Vector4((float)_timing.LifetimeMs, (float)_timing.RiseMs,
+                    (float)_timing.FadeStartMs, (float)_timing.BackgroundRestoreMs);
                 _finalInputs[0] = _capture; _finalInputs[1] = _background;
                 _finalInputs[2] = _blocks; _finalInputs[3] = _rects;
                 _finalInputs[4] = _near; _finalInputs[5] = _far; _finalInputs[6] = _delta;
@@ -88,7 +94,7 @@ namespace Action_Wheel.Services
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             bool valid = double.IsFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs < DurationMs;
-            _constants[0].Z = valid ? (float)(elapsedMs * ReferenceTimeRatio) : 3000;
+            _constants[0].Z = valid ? (float)(elapsedMs * _timing.ReferenceTimeRatio) : (float)_timing.ReferenceDurationMs;
             _constants[0].W = valid ? 1 : 0;
 
             _two[0] = _blocks; _two[1] = _rects;

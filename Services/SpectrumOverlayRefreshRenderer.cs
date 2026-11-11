@@ -39,7 +39,8 @@ namespace Action_Wheel.Services
         internal Vector3[] PreparedSource => _source.Pixels;
         internal double[] PreparedStarts => _starts;
         internal RefreshSpectrumEffect PreparedSpectrum => _spectrum;
-        public double DurationMs => RefreshDepthSweep.DurationMs;
+        internal RefreshTimingProfile Timing => BlocksRenderer.Timing;
+        public double DurationMs => Timing.ReferenceDurationMs;
         // A runs three Gaussian pairs and native delta composition in addition to the base.
         // A display-only 30 Hz budget skips directly to elapsed time, without history catch-up.
         public double FrameIntervalMs => 1000.0 / 30;
@@ -47,11 +48,11 @@ namespace Action_Wheel.Services
         public int BloomHeight => 1;
 
         public SpectrumOverlayRefreshRenderer(int width, int height, byte[] capture, RefreshDepthMap depth,
-            int originX, int originY, float overlayGain = .35f)
+            int originX, int originY, float overlayGain = .35f, RefreshTimingProfile? timing = null)
         {
             if (!float.IsFinite(overlayGain) || overlayGain < 0 || overlayGain > 1)
                 throw new ArgumentOutOfRangeException(nameof(overlayGain));
-            BlocksRenderer = new UniformBlockRefreshRenderer(width, height, capture, depth, originX, originY);
+            BlocksRenderer = new UniformBlockRefreshRenderer(width, height, capture, depth, originX, originY, timing);
             _width = width; _height = height; _capture = capture; _overlayGain = overlayGain;
             double scale = Math.Min(1, 1280.0 / Math.Max(width, height));
             _workWidth = Math.Max(1, (int)Math.Round(width * scale));
@@ -103,7 +104,7 @@ namespace Action_Wheel.Services
                     int pixel = y * _workWidth + x;
                     double centerX = (x + .5) * _width / _workWidth;
                     double distance = RefreshDepthSweep.DistanceAt(centerX, centerY, originX, originY, farthest);
-                    _starts[pixel] = RefreshDepthSweep.StartAt(_depth[pixel], originDepth, distance);
+                    _starts[pixel] = Timing.StartAt(_depth[pixel], originDepth, distance);
                 }
             }
         }
@@ -147,7 +148,7 @@ namespace Action_Wheel.Services
                 _cancellation.ThrowIfCancellationRequested();
                 int last = (y + 1) * _workWidth;
                 for (int pixel = y * _workWidth; pixel < last; pixel++)
-                    _envelope[pixel] = UniformBlockRefreshRenderer.OpacityAt(_elapsedMs - _starts[pixel]) / .88f;
+                    _envelope[pixel] = UniformBlockRefreshRenderer.OpacityAt(_elapsedMs - _starts[pixel], Timing) / .88f;
             }
         }
 
@@ -161,7 +162,7 @@ namespace Action_Wheel.Services
                 for (int pixel = y * _workWidth; pixel < last; pixel++)
                 {
                     Vector3 delta = Vector3.Max(Vector3.Zero, _spectrumFrame.Pixels[pixel] - _source.Pixels[pixel]);
-                    float saturation = UniformBlockRefreshRenderer.SaturationAt(_elapsedMs - _starts[pixel]);
+                    float saturation = UniformBlockRefreshRenderer.SaturationAt(_elapsedMs - _starts[pixel], Timing);
                     _spectrumFrame.Pixels[pixel] = UniformBlockRefreshRenderer.AdjustSaturation(delta, saturation)
                         * (_overlayGain * 255);
                 }

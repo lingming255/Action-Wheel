@@ -24,7 +24,7 @@ namespace Action_Wheel.Services
         private GpuRefreshScene? _gpuScene;
         private GpuRefreshRenderer? _gpuRenderer;
 
-        internal const double PlaybackDurationMs = AcceleratedRefreshRenderer.PlaybackDurationMs;
+        internal double PlaybackDurationMs => Renderer.Timing.PlaybackDurationMs;
 
         /// <summary>Transfers GPU ownership to the menu. Other gesture completions can safely dispose the frame.</summary>
         internal GpuRefreshRenderer? TakeGpuRenderer()
@@ -78,20 +78,22 @@ namespace Action_Wheel.Services
         /// run twice on failure paths, so callers must keep it idempotent.
         /// </summary>
         public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action grabbed,
-            CancellationToken cancellation = default)
+            CancellationToken cancellation = default, RefreshAnimationSettings? settings = null)
             => Task.Run(async () =>
             {
                 try
                 {
                     // Cancel only this gesture's wait, never the process-wide training task.
                     await RefreshRenderWarmup.EnsureAsync().WaitAsync(cancellation).ConfigureAwait(false);
-                    return Capture(position, grabbed, cancellation);
+                    return Capture(position, grabbed, cancellation,
+                        new RefreshTimingProfile(settings ?? RefreshAnimationSettings.Default));
                 }
                 catch (OperationCanceledException) { return null; }
                 finally { grabbed(); }
             });
 
-        private static RefreshFrame? Capture(PointInt32 position, Action grabbed, CancellationToken cancellation)
+        private static RefreshFrame? Capture(PointInt32 position, Action grabbed, CancellationToken cancellation,
+            RefreshTimingProfile timing)
         {
             try
             {
@@ -121,7 +123,7 @@ namespace Action_Wheel.Services
                 var frame = new RefreshFrame
                 {
                     Grey = grey,
-                    Renderer = new SpectrumOverlayRefreshRenderer(w, h, pixels, depth, originX, originY),
+                    Renderer = new SpectrumOverlayRefreshRenderer(w, h, pixels, depth, originX, originY, timing: timing),
                     Bounds = new RectInt32(x, y, w, h),
                     OriginX = originX,
                     OriginY = originY,

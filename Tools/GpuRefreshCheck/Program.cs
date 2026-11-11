@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Action_Wheel.Services;
+using Action_Wheel.Core;
 
 internal static class Program
 {
@@ -107,6 +108,40 @@ internal static class Program
             Require(SHA256.HashData(source).AsSpan().SequenceEqual(sourceHash), "GPU preparation/render mutated capture pixels.");
         }
 
+        foreach (var options in new RefreshAnimationSettings[]
+        {
+            new() { DurationMs = 600, DistanceDelayPercent = 0, PixelDurationPercent = 25 },
+            new() { DurationMs = 6000, DistanceDelayPercent = 200, PixelDurationPercent = 200 },
+            new() { DurationMs = 1400, DistanceDelayPercent = 75, PixelDurationPercent = 50 },
+        })
+        {
+            const int width = 173, height = 97;
+            byte[] source = Scene(width, height);
+            var timing = new RefreshTimingProfile(options);
+            float[] depths = Enumerable.Range(0, width * height)
+                .Select(p => (p % width) / (float)(width - 1)).ToArray();
+            var reference = new SpectrumOverlayRefreshRenderer(width, height, source,
+                new RefreshDepthMap(width, height, depths), width / 2, height / 2, timing: timing);
+            using var gpu = new GpuRefreshRenderer(new GpuRefreshScene(reference));
+            var fallback = new AcceleratedRefreshRenderer(reference, timing);
+            Require(gpu.DurationMs == options.DurationMs && fallback.DurationMs == options.DurationMs,
+                "Custom duration differs between CPU and GPU.");
+            byte[] pixels = new byte[source.Length], light = new byte[4], fallbackPixels = new byte[source.Length];
+            foreach (double fraction in new[] { 0, .15, .4, .75, .99, 1.0 })
+            {
+                double referenceMs = fraction * timing.ReferenceDurationMs;
+                Compare(reference, gpu, source, pixels, light, referenceMs,
+                    $"custom {options.DurationMs}ms stagger{options.DistanceDelayPercent}% pulse{options.PixelDurationPercent}%");
+                fallback.Render(fraction * timing.PlaybackDurationMs, fallbackPixels, light);
+                reference.Render(fraction * timing.PlaybackDurationMs * timing.ReferenceTimeRatio, pixels, light);
+                Require(fallbackPixels.AsSpan().SequenceEqual(pixels), "Custom CPU fallback clock is inconsistent.");
+            }
+            reference.SetOrigin(0, height - 1);
+            var retimed = new GpuRefreshScene(reference);
+            gpu.SetTimings(retimed.Blocks, retimed.SpectrumParameters);
+            Compare(reference, gpu, source, pixels, light, timing.ReferenceDurationMs * .4, "custom release retiming");
+        }
+
         // Disposal is intentionally repeated because menu cancellation and close can converge.
         var disposable = new GpuRefreshRenderer(new GpuRefreshScene(Reference(17, 9, Scene(17, 9))));
         disposable.Render(200);
@@ -125,14 +160,14 @@ internal static class Program
         byte[] source, byte[] cpuFrame, byte[] light, double referenceMs, string phase)
     {
         reference.Render(referenceMs, cpuFrame, light);
-        gpu.Render(referenceMs / GpuRefreshRenderer.ReferenceTimeRatio);
+        gpu.Render(referenceMs / gpu.TimeRatio);
         byte[] actual = Readback(gpu);
         Require(actual.Length == source.Length, "GPU readback has the wrong native dimensions.");
         if (referenceMs == 0)
             for (int pixel = 0; pixel < actual.Length; pixel += 4)
                 Require(actual[pixel] == actual[pixel + 1] && actual[pixel] == actual[pixel + 2]
                     && actual[pixel + 3] == 255, "The initial GPU frame is not opaque grey.");
-        if (referenceMs == 3000)
+        if (referenceMs >= reference.DurationMs)
             Require(actual.All(value => value == 0), "The ending GPU frame is not fully transparent.");
 
         int[] differences = new int[source.Length / 4 * 3];
@@ -161,7 +196,7 @@ internal static class Program
         }
         foreach (var block in reference.BlocksRenderer.Blocks)
         {
-            if (UniformBlockRefreshRenderer.OpacityAt(referenceMs - block.StartMs) <= 0) continue;
+            if (UniformBlockRefreshRenderer.OpacityAt(referenceMs - block.StartMs, reference.Timing) <= 0) continue;
             for (int y = block.Top; y < block.Top + block.Height; y++)
             for (int x = block.Left; x < block.Left + block.Width; x++)
             {
@@ -180,7 +215,7 @@ internal static class Program
         var entry = new
         {
             Width = gpu.Width, Height = gpu.Height, ReferenceMs = referenceMs,
-            PlaybackMs = referenceMs / GpuRefreshRenderer.ReferenceTimeRatio, Phase = phase,
+            PlaybackMs = referenceMs / gpu.TimeRatio, Phase = phase,
             MaximumVisibleByteError = maximum,
             P99VisibleByteError = p99,
             MeanVisibleByteError = (double)visibleDifference / differences.Length,

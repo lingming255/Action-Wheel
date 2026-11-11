@@ -69,9 +69,13 @@ namespace Action_Wheel.Services
         private readonly LowLevelMouseProc _proc;
         private readonly ChordGate _chordGate = new();
         private ChordTrigger _activeChord;
+        private bool _swallowMiddleUp;
+        private int _swallowXButtonUp;
         public long LastCallbackTick { get; private set; }
 
         public MouseTrigger Trigger { get; set; } = MouseTrigger.MiddleButton;
+        /// <summary>A declined trigger forwards its complete button pair to the app underneath.</summary>
+        public Func<bool>? CanTrigger { get; set; }
 
         public int ChordTimeoutMs
         {
@@ -155,6 +159,8 @@ namespace Action_Wheel.Services
         public void Stop()
         {
             _activeChord = ChordTrigger.None;
+            _swallowMiddleUp = false;
+            _swallowXButtonUp = 0;
             if (_hookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_hookID);
@@ -251,12 +257,18 @@ namespace Action_Wheel.Services
                     bool isConfigured = (Trigger == MouseTrigger.MouseButton4 && button == 1)
                         || (Trigger == MouseTrigger.MouseButton5 && button == 2);
 
-                    if (isConfigured)
+                    if (msg == WM_XBUTTONUP && _swallowXButtonUp == button)
                     {
-                        if (msg == WM_XBUTTONDOWN)
-                            MiddleClick?.Invoke(this, at);
-                        else
-                            MiddleUp?.Invoke(this, at);
+                        _swallowXButtonUp = 0;
+                        MiddleUp?.Invoke(this, at);
+                        return true;
+                    }
+
+                    if (isConfigured && msg == WM_XBUTTONDOWN)
+                    {
+                        if (CanTrigger?.Invoke() == false) return false;
+                        _swallowXButtonUp = button;
+                        MiddleClick?.Invoke(this, at);
                         return true;
                     }
 
@@ -266,12 +278,15 @@ namespace Action_Wheel.Services
 
                 if (msg == WM_MBUTTONDOWN && Trigger == MouseTrigger.MiddleButton)
                 {
+                    if (CanTrigger?.Invoke() == false) return false;
+                    _swallowMiddleUp = true;
                     MiddleClick?.Invoke(this, at);
                     return true;
                 }
 
-                if (msg == WM_MBUTTONUP && Trigger == MouseTrigger.MiddleButton)
+                if (msg == WM_MBUTTONUP && _swallowMiddleUp)
                 {
+                    _swallowMiddleUp = false;
                     MiddleUp?.Invoke(this, at);
                     return true;
                 }
@@ -287,7 +302,7 @@ namespace Action_Wheel.Services
 
                 if (msg == WM_LBUTTONDOWN)
                 {
-                    var chordTrigger = Trigger == MouseTrigger.HoldRightPressLeft
+                    var chordTrigger = Trigger == MouseTrigger.HoldRightPressLeft && CanTrigger?.Invoke() != false
                         ? ChordTrigger.HoldRightPressLeft : ChordTrigger.None;
                     bool swallow = _chordGate.OnLeftDown(chordTrigger, DateTime.UtcNow, at.X, at.Y, out bool chordFired);
 
@@ -305,7 +320,7 @@ namespace Action_Wheel.Services
 
                 else if (msg == WM_RBUTTONDOWN)
                 {
-                    var chordTrigger = Trigger == MouseTrigger.HoldLeftPressRight
+                    var chordTrigger = Trigger == MouseTrigger.HoldLeftPressRight && CanTrigger?.Invoke() != false
                         ? ChordTrigger.HoldLeftPressRight : ChordTrigger.None;
                     bool swallow = _chordGate.OnRightDown(chordTrigger, DateTime.UtcNow, at.X, at.Y, out bool chordFired);
 

@@ -5,8 +5,8 @@ namespace Action_Wheel.Services
 {
     /// <summary>
     /// A one-time upload of the same prepared geometry, pigment and grey LUT background used
-    /// by the CPU reference. Timings retain the original three-second domain; the GPU clock
-    /// advances that domain at 1.2x, preserving all envelopes in a 2.5-second playback.
+    /// by the CPU reference. Each gesture freezes its configured timing profile; the GPU clock
+    /// fits its complete envelopes into the requested wall-clock duration.
     /// </summary>
     internal sealed class GpuRefreshScene
     {
@@ -28,9 +28,11 @@ namespace Action_Wheel.Services
         public Vector4[] SpectrumPigment { get; }
         public Vector4[] SpectrumParameters { get; }
         public Vector3 RainColour { get; }
+        internal RefreshTimingProfile Timing { get; }
 
         public GpuRefreshScene(SpectrumOverlayRefreshRenderer reference)
         {
+            Timing = reference.Timing;
             Width = reference.NativeWidth; Height = reference.NativeHeight;
             UniformBlockRefreshRenderer blocks = reference.BlocksRenderer;
             CellSize = blocks.CellSize; Columns = blocks.Columns;

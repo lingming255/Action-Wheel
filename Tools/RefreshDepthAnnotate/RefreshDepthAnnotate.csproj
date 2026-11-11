@@ -11,6 +11,8 @@
     <Compile Include="../../Services/UniformBlockRefreshRenderer.cs" Link="UniformBlockRefreshRenderer.cs" />
     <Compile Include="../../Services/RefreshPropagation.cs" Link="RefreshPropagation.cs" />
     <Compile Include="../../Services/RefreshDepthSweep.cs" Link="RefreshDepthSweep.cs" />
+    <Compile Include="../../Services/RefreshTimingProfile.cs" Link="RefreshTimingProfile.cs" />
+    <Compile Include="../../ActionWheel.Core/RefreshAnimationSettings.cs" Link="RefreshAnimationSettings.cs" />
     <Compile Include="../../Services/IRefreshRenderer.cs" Link="IRefreshRenderer.cs" />
     <Compile Include="../../Services/ReferenceEffectMath.cs" Link="ReferenceEffectMath.cs" />
     <Compile Include="../../Services/RefreshOutputEncoder.cs" Link="RefreshOutputEncoder.cs" />

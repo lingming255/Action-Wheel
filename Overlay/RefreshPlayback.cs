@@ -30,7 +30,7 @@ namespace Action_Wheel.Overlay
         public RefreshPlayback(RefreshFrame frame, DispatcherQueue dispatcher,
             WriteableBitmap bitmap, Action failed)
         {
-            _renderer = new AcceleratedRefreshRenderer(frame.Renderer);
+            _renderer = new AcceleratedRefreshRenderer(frame.Renderer, frame.Renderer.Timing);
             _dispatcher = dispatcher;
             _bitmap = bitmap;
             _failed = failed;
