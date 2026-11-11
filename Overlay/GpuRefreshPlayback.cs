@@ -21,12 +21,33 @@ namespace Action_Wheel.Overlay
         private SpriteVisual? _visual;
         private CompositionSurfaceBrush? _brush;
         private ICompositionSurface? _surface;
+        private XamlRoot? _xamlRoot;
         private readonly Stopwatch _clock = new();
         private Action? _failed;
         private long _lastFrameSlot = -1;
-        private bool _disposed, _started, _subscribed, _attached;
+        private bool _disposed, _started, _subscribed, _attached, _hostEventsSubscribed;
+        private bool _geometryPresentPending;
         internal int PresentedFrames { get; private set; }
         internal string AdapterName => _renderer.Device.AdapterName;
+        internal object GetMappingDiagnostic()
+        {
+            var parent = ElementCompositionPreview.GetElementVisual(_host);
+            return new
+            {
+                HostWidth = _host.Width, HostHeight = _host.Height,
+                _host.ActualWidth, _host.ActualHeight,
+                RasterizationScale = _host.XamlRoot?.RasterizationScale,
+                SwapChainRasterizationScale = _renderer.Device.SwapChainScale,
+                PhysicalWidth = _host.ActualWidth * (_host.XamlRoot?.RasterizationScale ?? 1),
+                PhysicalHeight = _host.ActualHeight * (_host.XamlRoot?.RasterizationScale ?? 1),
+                ParentSize = parent.Size.ToString(), ParentScale = parent.Scale.ToString(),
+                ParentTransform = parent.TransformMatrix.ToString(),
+                VisualSize = _visual?.Size.ToString(),
+                RelativeSize = _visual?.RelativeSizeAdjustment.ToString(),
+                VisualScale = _visual?.Scale.ToString(), BrushStretch = _brush?.Stretch.ToString(),
+                BrushScale = _brush?.Scale.ToString(),
+            };
+        }
 
         public GpuRefreshPlayback(GpuRefreshRenderer renderer, FrameworkElement host)
         {
@@ -52,8 +73,11 @@ namespace Action_Wheel.Overlay
                 _brush.Stretch = CompositionStretch.Fill;
                 _brush.BitmapInterpolationMode = CompositionBitmapInterpolationMode.NearestNeighbor;
                 _visual = compositor.CreateSpriteVisual();
-                _visual.RelativeSizeAdjustment = Vector2.One;
                 _visual.Brush = _brush;
+                _host.Loaded += OnHostLoaded;
+                _host.Unloaded += OnHostUnloaded;
+                _hostEventsSubscribed = true;
+                SyncGeometry();
                 // Establish the grey starting cover before the existing three-frame handoff.
                 RenderFrame(0);
                 if (PresentedFrames == 0)
@@ -63,6 +87,7 @@ namespace Action_Wheel.Overlay
             }
             catch
             {
+                StopWatchingGeometry();
                 try { DetachSurface(); } catch { }
                 throw;
             }
@@ -72,9 +97,72 @@ namespace Action_Wheel.Overlay
         {
             if (_disposed || _started) return;
             _started = true; _failed = failed;
+            try { SyncGeometry(); }
+            catch { failed(); return; }
             _clock.Start();
             CompositionTarget.Rendering += OnRendering;
             _subscribed = true;
+        }
+
+        private void SyncGeometry()
+        {
+            if (_disposed) return;
+            XamlRoot? root = _host.XamlRoot;
+            if (root != _xamlRoot)
+            {
+                StopWatchingRoot();
+                _xamlRoot = root;
+                if (root != null) root.Changed += OnRootChanged;
+            }
+            // The capture and swapchain use physical pixels. XAML/Composition use DIPs;
+            // moving/resizing the full-screen cover may update this scale asynchronously.
+            // The native swapchain also needs its own inverse-DPI matrix; brush stretching
+            // alone does not resize pixels from a composition swapchain.
+            double scale = root?.RasterizationScale ?? 1;
+            bool matrixChanged = _renderer.Device.SetSwapChainScale(scale);
+            double width = _renderer.Width / scale, height = _renderer.Height / scale;
+            if (_host.Width != width) _host.Width = width;
+            if (_host.Height != height) _host.Height = height;
+            var size = new Vector2((float)width, (float)height);
+            if (_visual != null && _visual.Size != size) _visual.Size = size;
+            // DXGI applies a new matrix at the next Present. Reuse the current opaque
+            // cover during the handoff so correcting DPI never waits for animation start.
+            _geometryPresentPending |= matrixChanged;
+            if (_geometryPresentPending && PresentedFrames > 0 && _renderer.Device.Present(_renderer.OutputTexture))
+            {
+                PresentedFrames++;
+                _geometryPresentPending = false;
+            }
+        }
+
+        private void OnHostLoaded(object sender, RoutedEventArgs args) => RefreshGeometry();
+        private void OnHostUnloaded(object sender, RoutedEventArgs args) => StopWatchingRoot();
+        private void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => RefreshGeometry();
+
+        private void RefreshGeometry()
+        {
+            if (_disposed) return;
+            try { SyncGeometry(); }
+            catch
+            {
+                Unsubscribe();
+                _failed?.Invoke();
+            }
+        }
+
+        private void StopWatchingRoot()
+        {
+            XamlRoot? root = _xamlRoot; _xamlRoot = null;
+            if (root != null) TryClose(() => root.Changed -= OnRootChanged);
+        }
+
+        private void StopWatchingGeometry()
+        {
+            StopWatchingRoot();
+            if (!_hostEventsSubscribed) return;
+            TryClose(() => _host.Loaded -= OnHostLoaded);
+            TryClose(() => _host.Unloaded -= OnHostUnloaded);
+            _hostEventsSubscribed = false;
         }
 
         private void OnRendering(object? sender, object args)
@@ -107,7 +195,11 @@ namespace Action_Wheel.Overlay
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _renderer.Render(elapsedMs);
-            if (_renderer.Device.Present(_renderer.OutputTexture)) PresentedFrames++;
+            if (_renderer.Device.Present(_renderer.OutputTexture))
+            {
+                PresentedFrames++;
+                _geometryPresentPending = false;
+            }
         }
 
         private void Unsubscribe()
@@ -141,6 +233,7 @@ namespace Action_Wheel.Overlay
             if (_disposed) return;
             _disposed = true;
             Unsubscribe();
+            StopWatchingGeometry();
             _clock.Stop();
             try { DetachSurface(); }
             finally { _renderer.Dispose(); }

@@ -20,7 +20,11 @@ namespace Action_Wheel.Services
         private nint _device, _context, _vertexShader, _sampler, _rasterizer, _constants, _swapChain;
         private readonly List<IDisposable> _resources = new();
         private bool _disposed;
+        private double _swapChainScale;
         internal nint SwapChain => _swapChain;
+        internal nint NativeDevice => _device;
+        internal nint NativeContext => _context;
+        internal double SwapChainScale => _swapChainScale;
         internal string AdapterName { get; private set; } = "";
         internal uint VendorId { get; private set; }
         internal uint FeatureLevel { get; private set; }
@@ -200,6 +204,25 @@ namespace Action_Wheel.Services
                 _swapChain = swapchain;
             }
             finally { Release(ref factory); Release(ref adapter); Release(ref dxgi); }
+        }
+
+        internal bool SetSwapChainScale(double scale)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!double.IsFinite(scale) || scale <= 0) throw new ArgumentOutOfRangeException(nameof(scale));
+            if (_swapChainScale == scale) return false;
+            nint swapChain2 = Query(_swapChain, new Guid("a8be2ac4-199f-4946-b331-79599fb98de7"));
+            try
+            {
+                // Raw composition swapchains do not apply SurfaceBrush.Fill to their
+                // pixels. Match Win2D's physical-pixel -> DIP matrix explicitly.
+                var matrix = Matrix3x2.CreateScale((float)(1 / scale));
+                Check(((delegate* unmanaged[Stdcall]<nint, Matrix3x2*, int>)V(swapChain2, 34))(
+                    swapChain2, &matrix));
+                _swapChainScale = scale;
+                return true;
+            }
+            finally { Release(ref swapChain2); }
         }
 
         public bool Present(Texture output)

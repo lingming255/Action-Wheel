@@ -31,9 +31,17 @@ namespace Action_Wheel.Services
                     int width = round == 0 ? 1920 : 3840;
                     int height = round == 0 ? 1080 : 2160;
                     var window = new Window();
-                    var host = new Canvas { Width = width, Height = height };
+                    var host = new Canvas();
                     window.Content = host;
+                    // XamlRoot is assigned asynchronously, even for a hidden window.
+                    await Task.Delay(120);
+                    double scale = host.XamlRoot?.RasterizationScale
+                        ?? throw new InvalidOperationException("Hidden host has no XamlRoot.");
+                    host.Width = width / scale; host.Height = height / scale;
                     window.AppWindow.Resize(new SizeInt32(width, height));
+                    host.Measure(new Windows.Foundation.Size(host.Width, host.Height));
+                    host.Arrange(new Windows.Foundation.Rect(0, 0, host.Width, host.Height));
+                    host.UpdateLayout();
                     // The window is deliberately never activated or shown.
                     window.AppWindow.Hide();
                     GpuRefreshPlayback? playback = null;
@@ -77,10 +85,17 @@ namespace Action_Wheel.Services
                             throw new InvalidOperationException("GPU smoke playback failed.");
                         if (automaticFrames < 2)
                             throw new InvalidOperationException("Composition rendering callbacks did not advance playback.");
+                        double finalScale = host.XamlRoot?.RasterizationScale
+                            ?? throw new InvalidOperationException("Playback lost its XamlRoot.");
+                        if (Math.Abs(host.ActualWidth * finalScale - width) > .05
+                            || Math.Abs(host.ActualHeight * finalScale - height) > .05)
+                            throw new InvalidOperationException("Refresh cover does not match native capture pixels after the DPI change.");
                         rounds.Add(new { Width = width, Height = height, playback.AdapterName,
+                            InitialRasterizationScale = scale, FinalRasterizationScale = finalScale,
                             playback.PresentedFrames, AutomaticFrames = automaticFrames,
                             ObservedMs = observedMs, PlaybackDurationMs = renderer.DurationMs,
                             StoppedAtEnd = true,
+                            Mapping = playback.GetMappingDiagnostic(),
                             HiddenWindow = true, InteropSurfaceCreated = true });
                     }
                     finally
@@ -90,7 +105,18 @@ namespace Action_Wheel.Services
                         window.Close();
                     }
                 }
+                object presentation = await GpuRefreshPresentationProbe.RunAsync();
+                JsonElement presentationResult = JsonSerializer.SerializeToElement(presentation);
+                bool pixelCaptureAvailable = presentationResult.TryGetProperty("PixelCaptureAvailable", out var available)
+                    && available.GetBoolean();
+                bool pixelMappingVerified = presentationResult.TryGetProperty("PixelMappingMatches", out var matches)
+                    && matches.GetBoolean();
+                if (pixelCaptureAvailable && !pixelMappingVerified)
+                    throw new InvalidOperationException("Captured Composition pixels do not match the native coordinate pattern: "
+                        + presentationResult.GetRawText());
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(new { Passed = true, Rounds = rounds,
+                    PixelMappingVerified = pixelMappingVerified,
+                    Presentation = presentation,
                     UsedDesktopCapture = false, DisplayedEffect = false }, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch (Exception error)

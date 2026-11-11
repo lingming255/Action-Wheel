@@ -1705,7 +1705,7 @@ namespace Action_Wheel.Overlay
             }
 
             var bounds = frame.Bounds;
-            double scale = _rasterizationScale;
+            double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
             double layerW = bounds.Width / scale, layerH = bounds.Height / scale;
 
             MenuContainer.Visibility = Visibility.Collapsed;
@@ -1738,7 +1738,7 @@ namespace Action_Wheel.Overlay
                 using (var stream = bitmap.PixelBuffer.AsStream())
                     stream.Write(frame.Grey, 0, frame.Grey.Length);
                 bitmap.Invalidate();
-                AddRefreshImage(bitmap, layerW, layerH);
+                AddRefreshImage(bitmap, RefreshLayer.Width, RefreshLayer.Height);
                 _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, CloseMenu);
             }
 

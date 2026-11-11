@@ -51,10 +51,26 @@ are disjoint-validated; completion waits use no pixel readback. They demonstrate
 not guaranteed desktop fps or performance on another GPU. Raw results are in ignored
 `bin/Review/gpu-refresh-20261111/validation.json`.
 
+The first GPU release enlarged the capture on scaled monitors. Two coordinate bugs were
+confirmed: the native swapchain did not compensate for DPI (brush `Fill` alone does not do
+this), and the host retained stale DIP dimensions when WinUI changed DPI after resizing.
+`GpuRefreshPlayback` now tracks the current `XamlRoot`, sizes its host/visual to native pixels
+divided by live scale, and updates `IDXGISwapChain2.SetMatrixTransform` to the inverse scale.
+It re-presents the current cover when that matrix changes, including a pending retry when the
+nonblocking queue is busy. Events are detached before Composition/GPU teardown.
+The preceding source/runtime/model are saved at `archive/refresh-gpu-before-size-fix-20261111`
+and the matching `bin/Backups/` directory; 182 source blobs and all six file hashes were verified.
+
 `--refresh-gpu-smoke <absolute-report-path>` is an explicit integration diagnostic: it creates
 hidden, never activated WinUI windows, binds the real Composition surface and presents synthetic
 frames, without hooks, settings changes, desktop capture or visible effects. It checks repeated
-creation/disposal and the live Composition callback path. Normal launches write no logs.
+creation/disposal, live Composition callbacks and native dimensions after DPI changes. An
+additional borderless window is shown entirely offscreen and only that synthetic HWND is
+captured with WGC. At 125% scale its 640x360 corner/coordinate pattern initially exposed zoom
+even with correct host dimensions; after matrix compensation all nine samples match exactly.
+The hidden 4K host also updates correctly from 125% to 150% (3840 physical pixels, formerly
+4608). These checks supplement the original frame-count-only smoke, which missed display
+mapping. Reports are in `bin/Review/gpu-size-fix-20261111/`. Normal launches write no logs.
 Complex visual acceptance remains with the user.
 
 ## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
