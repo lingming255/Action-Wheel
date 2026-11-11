@@ -578,6 +578,7 @@ namespace Action_Wheel.Services
         /// </remarks>
         private RingAppearance _appearance = RingAppearance.Default;
         private RefreshAnimationSettings _refreshSettings = RefreshAnimationSettings.Default;
+        private ReclaimAnimationSettings _reclaimSettings = ReclaimAnimationSettings.Default;
 
         private void ApplyTriggerSettings()
         {
@@ -587,6 +588,7 @@ namespace Action_Wheel.Services
             _mouseHook.ChordMovementThreshold = preferences.MovementThreshold;
             _appearance = preferences.Appearance ?? RingAppearance.Default;
             _refreshSettings = (preferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
+            _reclaimSettings = (preferences.Reclaim ?? ReclaimAnimationSettings.Default).Normalised();
         }
 
         /// <summary>
@@ -686,7 +688,7 @@ namespace Action_Wheel.Services
                         _refreshIntro?.UpdateCapture(pixels, bounds);
                         // A cold startup can outlast the opening. Still use a short smooth fade
                         // rather than jumping from colour to grey when its raw capture arrives.
-                        double remaining = Math.Max(100, _refreshIntro?.RemainingMs ?? RefreshReclaimIntro.DurationMs);
+                        double remaining = Math.Max(100, _refreshIntro?.RemainingMs ?? _reclaimSettings.DurationMs);
                         _ = ScreenGrade.LowerGraduallyAsync(TimeSpan.FromMilliseconds(remaining));
                         capturedOnUi.TrySetResult(true);
                     }
@@ -698,7 +700,7 @@ namespace Action_Wheel.Services
                     }
                 })) capturedOnUi.TrySetResult(false);
             }, cancellation.Token, settings: _refreshSettings);
-            _refreshIntro = RefreshReclaimIntro.TryStart(position, WinRT.Interop.WindowNative.GetWindowHandle(menu));
+            _refreshIntro = RefreshReclaimIntro.TryStart(position, WinRT.Interop.WindowNative.GetWindowHandle(menu), _reclaimSettings);
             _ = PrepareRefreshPresentationAsync(menu, _refreshFrame);
         }
 

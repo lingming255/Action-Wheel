@@ -114,13 +114,13 @@ namespace Action_Wheel.ViewModels
 
         public string RingAnimationDescription => _appearance.Animation switch
         {
-            RingAnimation.None => "No animation. The ring is fully drawn on its first frame - the fastest option.",
-            RingAnimation.Pop => "Each button springs up from a quarter of its size, overshooting on the way.",
-            RingAnimation.Radiate => "The buttons start on the centre and fly out to their places, clockwise from the top.",
-            RingAnimation.Converge => "The buttons come in from outside and close around the centre, which appears last.",
-            RingAnimation.Sweep => "The ring turns one button-slot clockwise into place, icons staying upright.",
-            RingAnimation.CounterSweep => "The ring turns one button-slot anticlockwise into place, icons staying upright.",
-            _ => "The ring fades and scales up while the buttons arrive one after another.",
+            RingAnimation.None => "无动画，首帧完整显示，速度最快。/ No animation; the ring is fully drawn on its first frame — the fastest option.",
+            RingAnimation.Pop => "按钮从四分之一大小弹出，带回弹。/ Each button springs up from a quarter of its size with an overshoot.",
+            RingAnimation.Radiate => "按钮由中心飞出，从上方顺时针依次到位。/ Buttons fly out from the centre, clockwise from the top.",
+            RingAnimation.Converge => "按钮从外围聚拢，中心最后出现。/ Buttons converge from outside; the centre appears last.",
+            RingAnimation.Sweep => "轮盘顺时针转过一个按钮位置，图标保持正立。/ The ring sweeps one slot clockwise; icons stay upright.",
+            RingAnimation.CounterSweep => "轮盘逆时针转过一个按钮位置，图标保持正立。/ The ring sweeps one slot anticlockwise; icons stay upright.",
+            _ => "轮盘淡入并放大，按钮依次出现。/ The ring fades and scales up as buttons arrive in sequence.",
         };
 
         /// <summary>

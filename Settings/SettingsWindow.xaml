@@ -7,7 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="Action Wheel Settings">
+    Title="Action Wheel 设置 / Action Wheel Settings">
 
     <Window.SystemBackdrop>
         <MicaBackdrop/>
@@ -36,7 +36,7 @@
                     </Grid.ColumnDefinitions>
                     <FontIcon Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="{Binding Glyph}" FontSize="16"/>
                     <StackPanel Grid.Column="1">
-                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding Description}" FontSize="11" TextWrapping="Wrap"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
@@ -79,7 +79,7 @@
                     <FontIcon Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF047;" FontSize="12"
                               VerticalAlignment="Center"
                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                              ToolTipService.ToolTip="Drag to move this button"/>
+                              ToolTipService.ToolTip="拖动以移动按钮 / Drag to move this button"/>
 
                     <Border Grid.Column="1" Width="36" Height="36" CornerRadius="18"
                             Background="{Binding BackgroundColor, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}">
@@ -88,7 +88,7 @@
                     </Border>
 
                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="2,0,0,0">
-                        <TextBlock Text="{Binding PositionName}" FontWeight="SemiBold" FontSize="13"/>
+                        <TextBlock Text="{Binding PositionName}" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap"/>
                         <TextBlock FontSize="11" TextTrimming="CharacterEllipsis"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                    Text="{Binding Label}"/>
@@ -117,22 +117,22 @@
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF047;" FontSize="13"
                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                                             <StackPanel>
-                                                <TextBlock Text="{Binding PositionName}" FontSize="18" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding PositionName}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
                                                 <TextBlock Text="{Binding TagCaption}" FontSize="11"
-                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                             </StackPanel>
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                                             <Button Width="36" Height="34" Padding="0" Tag="{Binding}"
                                                     Click="TestAction_Click"
-                                                    AutomationProperties.Name="Test this action"
-                                                    ToolTipService.ToolTip="Test this action without saving">
+                                                    AutomationProperties.Name="测试此动作 / Test this action"
+                                                    ToolTipService.ToolTip="测试此动作，无需保存 / Test this action without saving">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF04B;" FontSize="14"/>
                                             </Button>
                                             <Button Width="36" Height="34" Padding="0"
                                                     Command="{Binding ResetCommand}"
-                                                    AutomationProperties.Name="Reset this button to its default"
-                                                    ToolTipService.ToolTip="Reset this button to its default">
+                                                    AutomationProperties.Name="将此按钮恢复为默认值 / Reset this button to its default"
+                                                    ToolTipService.ToolTip="将此按钮恢复为默认值 / Reset this button to its default">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF021;" FontSize="14"/>
                                             </Button>
                                         </StackPanel>
@@ -149,20 +149,20 @@
                                                 Content="{Binding IconSource, Mode=OneWay, Converter={StaticResource IconPreviewConverter}}"
                                                 Tag="{Binding}"
                                                 Click="PickGlyph_Click"
-                                                AutomationProperties.Name="Choose an icon"
-                                                ToolTipService.ToolTip="Choose an icon"/>
+                                                AutomationProperties.Name="选择图标 / Choose an icon"
+                                                ToolTipService.ToolTip="选择图标 / Choose an icon"/>
                                         <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center">
-                                            <TextBox PlaceholderText="Tooltip text"
+                                            <TextBox PlaceholderText="提示文字 / Tooltip text"
                                                      Text="{Binding Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <ComboBox HorizontalAlignment="Stretch"
                                                       SelectedIndex="{Binding KindIndex, Mode=TwoWay}">
-                                                <ComboBoxItem Content="Do nothing"/>
-                                                <ComboBoxItem Content="Send shortcut"/>
-                                                <ComboBoxItem Content="Open app / file"/>
-                                                <ComboBoxItem Content="Windows function"/>
-                                                <ComboBoxItem Content="Group (up to 5 buttons)" IsEnabled="{Binding CanBeGroup, Mode=OneWay}"
-                                                              ToolTipService.ToolTip="The centre button cannot be a group."/>
-                                                <ComboBoxItem Content="Copy text"/>
+                                                <ComboBoxItem><TextBlock Text="无操作 / Do nothing" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="发送快捷键 / Send shortcut" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="打开应用 / 文件 / Open app / file" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="Windows 功能 / Windows function" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem IsEnabled="{Binding CanBeGroup, Mode=OneWay}"
+                                                              ToolTipService.ToolTip="中心按钮不能设为分组。 / The centre button cannot be a group."><TextBlock Text="分组（最多5个按钮） / Group (up to 5 buttons)" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="复制文字 / Copy text" TextWrapping="Wrap"/></ComboBoxItem>
                                             </ComboBox>
                                         </StackPanel>
                                     </Grid>
@@ -192,7 +192,7 @@
                                                         SuggestionChosen="FunctionSuggestion_Chosen"
                                                         GotFocus="FunctionBox_OpenSuggestions"
                                                         Tapped="FunctionBox_OpenSuggestions"
-                                                        PlaceholderText="Search Windows functions…"/>
+                                                        PlaceholderText="搜索 Windows 功能… / Search Windows functions…"/>
 
                                         <ToggleButton Grid.Column="1" Width="40" Height="34"
                                                       Padding="0"
@@ -201,8 +201,8 @@
                                                       Unchecked="Record_Unchecked"
                                                       IsEnabled="{Binding CanRecord, Mode=OneWay}"
                                                       Visibility="{Binding IsGroup, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=Invert}"
-                                                      AutomationProperties.Name="Record a key press"
-                                                      ToolTipService.ToolTip="Record a key press">
+                                                      AutomationProperties.Name="录制按键 / Record a key press"
+                                                      ToolTipService.ToolTip="录制按键 / Record a key press">
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF11C;" FontSize="14"/>
                                         </ToggleButton>
                                         <Button Grid.Column="2" Width="40" Height="34"
@@ -211,19 +211,19 @@
                                                 Click="Browse_Click"
                                                 IsEnabled="{Binding CanBrowse, Mode=OneWay}"
                                                 Visibility="{Binding IsGroup, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=Invert}"
-                                                AutomationProperties.Name="Browse for a file"
-                                                ToolTipService.ToolTip="Browse for a file">
+                                                AutomationProperties.Name="浏览文件 / Browse for a file"
+                                                ToolTipService.ToolTip="浏览文件 / Browse for a file">
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF115;" FontSize="14"/>
                                         </Button>
                                         <Button Grid.Column="1" Grid.ColumnSpan="2" Padding="10,0" Height="34"
                                                 Tag="{Binding}"
                                                 Click="EditGroup_Click"
-                                                AutomationProperties.Name="Edit group"
+                                                AutomationProperties.Name="编辑分组 / Edit group"
                                                 Visibility="{Binding IsGroup, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                ToolTipService.ToolTip="Choose this group's up to 5 buttons">
+                                                ToolTipService.ToolTip="为此分组选择最多5个按钮 / Choose this group's up to 5 buttons">
                                             <StackPanel Orientation="Horizontal" Spacing="4">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF045;" FontSize="13"/>
-                                                <TextBlock Text="{Binding EditGroupText, Mode=OneWay}" FontSize="12" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding EditGroupText, Mode=OneWay}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </StackPanel>
                                         </Button>
                                     </Grid>
@@ -240,7 +240,7 @@
 
                                     <!-- Icon file -->
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Icon file" Style="{StaticResource SectionHeaderTextStyle}"/>
+                                        <TextBlock Text="图标文件 / Icon file" Style="{StaticResource SectionHeaderTextStyle}" TextWrapping="Wrap"/>
                                         <Grid ColumnSpacing="6">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -248,19 +248,19 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBox Grid.Column="0"
-                                                     PlaceholderText="none — using the glyph"
+                                                     PlaceholderText="无文件，使用字形图标 / none — using the glyph"
                                                      Text="{Binding IconPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <Button Grid.Column="1" Width="36" Height="32" Padding="0"
                                                     Tag="{Binding}" Click="BrowseSvg_Click"
-                                                    AutomationProperties.Name="Choose an icon file"
-                                                    ToolTipService.ToolTip="Choose an .svg, .png or .ico file">
+                                                    AutomationProperties.Name="选择图标文件 / Choose an icon file"
+                                                    ToolTipService.ToolTip="选择 .svg、.png 或 .ico 文件 / Choose an .svg, .png or .ico file">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF115;" FontSize="13"/>
                                             </Button>
                                             <Button Grid.Column="2" Width="36" Height="32" Padding="0"
                                                     Command="{Binding ClearIconCommand}"
                                                     IsEnabled="{Binding HasIconFile, Mode=OneWay}"
-                                                    AutomationProperties.Name="Back to the glyph icon"
-                                                    ToolTipService.ToolTip="Back to the glyph icon">
+                                                    AutomationProperties.Name="恢复字形图标 / Back to the glyph icon"
+                                                    ToolTipService.ToolTip="恢复字形图标 / Back to the glyph icon">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF00D;" FontSize="13"/>
                                             </Button>
                                         </Grid>
@@ -268,10 +268,10 @@
 
                                     <!-- Icon text -->
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Icon text" Style="{StaticResource SectionHeaderTextStyle}"/>
+                                        <TextBlock Text="文字图标 / Icon text" Style="{StaticResource SectionHeaderTextStyle}" TextWrapping="Wrap"/>
                                         <TextBlock FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                   Text="A short word, letter or emoji instead of a picture. An icon file above still wins over this."/>
+                                                   Text="用短词、字母或表情代替图片；已选图标文件时优先使用文件。 / A short word, letter or emoji instead of a picture. An icon file above still wins over this."/>
                                         <Grid ColumnSpacing="6">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -279,13 +279,13 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBox Grid.Column="0"
                                                      MaxLength="6"
-                                                     PlaceholderText="none — using the glyph"
+                                                     PlaceholderText="无文件，使用字形图标 / none — using the glyph"
                                                      Text="{Binding IconText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <Button Grid.Column="1" Width="36" Height="32" Padding="0"
                                                     Command="{Binding ClearIconTextCommand}"
                                                     IsEnabled="{Binding HasIconText, Mode=OneWay}"
-                                                    AutomationProperties.Name="Back to the glyph icon from text"
-                                                    ToolTipService.ToolTip="Back to the glyph icon">
+                                                    AutomationProperties.Name="清除文字并恢复字形图标 / Back to the glyph icon from text"
+                                                    ToolTipService.ToolTip="恢复字形图标 / Back to the glyph icon">
                                                 <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF00D;" FontSize="13"/>
                                             </Button>
                                         </Grid>
@@ -293,50 +293,50 @@
 
                                     <!-- Colours & shadow -->
                                     <StackPanel Spacing="10">
-                                        <TextBlock Text="Colours &amp; shadow" Style="{StaticResource SectionHeaderTextStyle}"/>
+                                        <TextBlock Text="颜色与阴影 / Colours &amp; shadow" Style="{StaticResource SectionHeaderTextStyle}" TextWrapping="Wrap"/>
                                         <StackPanel Orientation="Horizontal" Spacing="16">
                                             <StackPanel Spacing="4" HorizontalAlignment="Center">
                                                 <Button Width="56" Height="34" Padding="0"
                                                         Tag="{Binding}" Click="PickForeground_Click"
-                                                        AutomationProperties.Name="Icon colour"
-                                                        ToolTipService.ToolTip="Icon colour">
+                                                        AutomationProperties.Name="图标颜色 / Icon colour"
+                                                        ToolTipService.ToolTip="图标颜色 / Icon colour">
                                                     <Border Width="26" Height="18" CornerRadius="3"
                                                             BorderThickness="1"
                                                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                             Background="{Binding ForegroundColor, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}"/>
                                                 </Button>
-                                                <TextBlock Text="Icon" FontSize="11" HorizontalAlignment="Center"
-                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                <TextBlock Text="图标 / Icon" FontSize="11" HorizontalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                             </StackPanel>
                                             <StackPanel Spacing="4" HorizontalAlignment="Center">
                                                 <Button Width="56" Height="34" Padding="0"
                                                         Tag="{Binding}" Click="PickBackground_Click"
-                                                        AutomationProperties.Name="Button colour"
-                                                        ToolTipService.ToolTip="Button colour">
+                                                        AutomationProperties.Name="按钮颜色 / Button colour"
+                                                        ToolTipService.ToolTip="按钮颜色 / Button colour">
                                                     <Border Width="26" Height="18" CornerRadius="3"
                                                             BorderThickness="1"
                                                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                             Background="{Binding BackgroundColor, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}"/>
                                                 </Button>
-                                                <TextBlock Text="Button" FontSize="11" HorizontalAlignment="Center"
-                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                <TextBlock Text="按钮 / Button" FontSize="11" HorizontalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                             </StackPanel>
                                             <StackPanel Spacing="4" HorizontalAlignment="Center">
                                                 <Button Width="56" Height="34" Padding="0"
                                                         Tag="{Binding}" Click="PickShadow_Click"
-                                                        AutomationProperties.Name="Shadow colour"
-                                                        ToolTipService.ToolTip="Shadow colour">
+                                                        AutomationProperties.Name="阴影颜色 / Shadow colour"
+                                                        ToolTipService.ToolTip="阴影颜色 / Shadow colour">
                                                     <Border Width="26" Height="18" CornerRadius="3"
                                                             BorderThickness="1"
                                                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                             Background="{Binding ShadowColor, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}"/>
                                                 </Button>
-                                                <TextBlock Text="Shadow" FontSize="11" HorizontalAlignment="Center"
-                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                <TextBlock Text="阴影 / Shadow" FontSize="11" HorizontalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                             </StackPanel>
                                             <ToggleSwitch VerticalAlignment="Center" Margin="8,0,0,0"
-                                                          IsOn="{Binding ShadowEnabled, Mode=TwoWay}" OnContent="Shadow on" OffContent="Shadow off"
-                                                          ToolTipService.ToolTip="Enable button shadow"/>
+                                                          IsOn="{Binding ShadowEnabled, Mode=TwoWay}" OnContent="阴影开 / Shadow on" OffContent="阴影关 / Shadow off"
+                                                          ToolTipService.ToolTip="启用按钮阴影 / Enable button shadow"/>
                                         </StackPanel>
                                         <Grid ColumnSpacing="10" RowSpacing="8">
                                             <Grid.ColumnDefinitions>
@@ -352,74 +352,74 @@
                                             </Grid.RowDefinitions>
 
                                             <FontIcon Grid.Row="0" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF043;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Shadow opacity"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="阴影不透明度 / Shadow opacity"/>
                                             <Slider Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="1" StepFrequency="0.05"
                                                     TickFrequency="0.25" VerticalAlignment="Center"
                                                     Value="{Binding ShadowOpacity, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Shadow opacity (0–1)"/>
+                                                    ToolTipService.ToolTip="阴影不透明度（0–1） / Shadow opacity (0–1)"/>
                                             <Border Grid.Row="0" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Current shadow opacity">
+                                                    ToolTipService.ToolTip="当前阴影不透明度 / Current shadow opacity">
                                                 <TextBlock Text="{Binding ShadowOpacityText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
 
                                             <FontIcon Grid.Row="1" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF00B8;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Shadow blur"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="阴影模糊 / Shadow blur"/>
                                             <Slider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="64" StepFrequency="1"
                                                     TickFrequency="8" VerticalAlignment="Center"
                                                     Value="{Binding ShadowBlur, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Shadow blur"/>
+                                                    ToolTipService.ToolTip="阴影模糊 / Shadow blur"/>
                                             <Border Grid.Row="1" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Current shadow blur">
+                                                    ToolTipService.ToolTip="当前阴影模糊 / Current shadow blur">
                                                 <TextBlock Text="{Binding ShadowBlurText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
 
                                             <FontIcon Grid.Row="2" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF07E;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Shadow horizontal offset"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="阴影水平偏移 / Shadow horizontal offset"/>
                                             <Slider Grid.Row="2" Grid.Column="1" Minimum="-50" Maximum="50" StepFrequency="1"
                                                     TickFrequency="10" VerticalAlignment="Center"
                                                     Value="{Binding ShadowOffsetX, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Shadow horizontal offset"/>
+                                                    ToolTipService.ToolTip="阴影水平偏移 / Shadow horizontal offset"/>
                                             <Border Grid.Row="2" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Current shadow horizontal offset">
+                                                    ToolTipService.ToolTip="当前阴影水平偏移 / Current shadow horizontal offset">
                                                 <TextBlock Text="{Binding ShadowOffsetXText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
 
                                             <FontIcon Grid.Row="3" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF07D;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Shadow vertical offset"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="阴影垂直偏移 / Shadow vertical offset"/>
                                             <Slider Grid.Row="3" Grid.Column="1" Minimum="-50" Maximum="50" StepFrequency="1"
                                                     TickFrequency="10" VerticalAlignment="Center"
                                                     Value="{Binding ShadowOffsetY, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Shadow vertical offset"/>
+                                                    ToolTipService.ToolTip="阴影垂直偏移 / Shadow vertical offset"/>
                                             <Border Grid.Row="3" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Current shadow vertical offset">
+                                                    ToolTipService.ToolTip="当前阴影垂直偏移 / Current shadow vertical offset">
                                                 <TextBlock Text="{Binding ShadowOffsetYText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
                                         </Grid>
                                     </StackPanel>
 
                                     <!-- Icon position -->
                                     <StackPanel Spacing="10">
-                                        <TextBlock Text="Icon position" Style="{StaticResource SectionHeaderTextStyle}"/>
+                                        <TextBlock Text="图标位置 / Icon position" Style="{StaticResource SectionHeaderTextStyle}" TextWrapping="Wrap"/>
                                         <ToggleSwitch IsOn="{Binding IconTint, Mode=TwoWay}"
                                                       IsEnabled="{Binding CanTintIcon, Mode=OneWay}"
-                                                      OnContent="Icon colour" OffContent="File colours"
-                                                      ToolTipService.ToolTip="Recolour an .svg to the icon colour. Only an .svg can be recoloured."/>
+                                                      OnContent="图标颜色 / Icon colour" OffContent="文件原色 / File colours"
+                                                      ToolTipService.ToolTip="将 SVG 染为所选图标颜色；仅 SVG 支持重新着色。 / Recolour an .svg to the icon colour. Only an .svg can be recoloured."/>
                                         <Grid ColumnSpacing="10" RowSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
@@ -433,48 +433,48 @@
                                             </Grid.RowDefinitions>
 
                                             <FontIcon Grid.Row="0" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF065;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Icon size"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="图标大小 / Icon size"/>
                                             <Slider Grid.Row="0" Grid.Column="1" Minimum="0.25" Maximum="3" StepFrequency="0.05"
                                                     TickFrequency="0.25" SnapsTo="StepValues" VerticalAlignment="Center"
                                                     Value="{Binding IconScale, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Icon size (0.25× to 3×)"/>
+                                                    ToolTipService.ToolTip="图标大小（0.25×至3×） / Icon size (0.25× to 3×)"/>
                                             <Border Grid.Row="0" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Current icon size">
+                                                    ToolTipService.ToolTip="当前图标大小 / Current icon size">
                                                 <TextBlock Text="{Binding IconScaleText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
 
                                             <FontIcon Grid.Row="1" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF07E;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Icon horizontal position"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="图标水平位置 / Icon horizontal position"/>
                                             <Slider Grid.Row="1" Grid.Column="1" Minimum="-50" Maximum="50" StepFrequency="0.25"
                                                     TickFrequency="5" Value="{Binding IconOffsetX, Mode=TwoWay}"
                                                     IsEnabled="{Binding HasIconFile}"
-                                                    VerticalAlignment="Center" ToolTipService.ToolTip="Move icon horizontally"/>
+                                                    VerticalAlignment="Center" ToolTipService.ToolTip="水平移动图标 / Move icon horizontally"/>
                                             <Border Grid.Row="1" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Icon horizontal offset">
+                                                    ToolTipService.ToolTip="图标水平偏移 / Icon horizontal offset">
                                                 <TextBlock Text="{Binding IconOffsetXText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
 
                                             <FontIcon Grid.Row="2" Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF07D;" FontSize="13"
-                                                      VerticalAlignment="Center" ToolTipService.ToolTip="Icon vertical position"/>
+                                                      VerticalAlignment="Center" ToolTipService.ToolTip="图标垂直位置 / Icon vertical position"/>
                                             <Slider Grid.Row="2" Grid.Column="1" Minimum="-50" Maximum="50" StepFrequency="0.25"
                                                     TickFrequency="5" Value="{Binding IconOffsetY, Mode=TwoWay}"
                                                     IsEnabled="{Binding HasIconFile}"
-                                                    VerticalAlignment="Center" ToolTipService.ToolTip="Move icon vertically"/>
+                                                    VerticalAlignment="Center" ToolTipService.ToolTip="垂直移动图标 / Move icon vertically"/>
                                             <Border Grid.Row="2" Grid.Column="2" Height="26" CornerRadius="4" BorderThickness="1"
                                                     Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    ToolTipService.ToolTip="Icon vertical offset">
+                                                    ToolTipService.ToolTip="图标垂直偏移 / Icon vertical offset">
                                                 <TextBlock Text="{Binding IconOffsetYText, Mode=OneWay}" FontSize="12"
                                                            TextAlignment="Center" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             </Border>
                                         </Grid>
                                     </StackPanel>
@@ -482,10 +482,10 @@
                                     <!-- Hold action -->
                                     <StackPanel Spacing="10">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="Hold action" Style="{StaticResource SectionHeaderTextStyle}"/>
+                                            <TextBlock Text="长按动作 / Hold action" Style="{StaticResource SectionHeaderTextStyle}" TextWrapping="Wrap"/>
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF05A;" FontSize="12"
                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                      ToolTipService.ToolTip="What this button does when pressed and held (about half a second), instead of clicked. Optional - most buttons need only the action above."/>
+                                                      ToolTipService.ToolTip="按住约半秒触发的可选动作；多数按钮只需设置上方的点击动作。 / What this button does when pressed and held (about half a second), instead of clicked. Optional - most buttons need only the action above."/>
                                         </StackPanel>
                                         <Grid ColumnSpacing="8" RowSpacing="8">
                                             <Grid.ColumnDefinitions>
@@ -498,13 +498,13 @@
                                             </Grid.RowDefinitions>
                                             <ComboBox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Stretch"
                                                       SelectedIndex="{Binding HoldKindIndex, Mode=TwoWay}"
-                                                      ToolTipService.ToolTip="Hold action">
-                                                <ComboBoxItem Content="No hold action"/>
-                                                <ComboBoxItem Content="Send shortcut"/>
-                                                <ComboBoxItem Content="Open app / file"/>
-                                                <ComboBoxItem Content="Windows function"/>
-                                                <ComboBoxItem Content="Group" IsEnabled="False"/>
-                                                <ComboBoxItem Content="Copy text"/>
+                                                      ToolTipService.ToolTip="长按动作 / Hold action">
+                                                <ComboBoxItem><TextBlock Text="无长按动作 / No hold action" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="发送快捷键 / Send shortcut" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="打开应用 / 文件 / Open app / file" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="Windows 功能 / Windows function" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem IsEnabled="False"><TextBlock Text="分组 / Group" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="复制文字 / Copy text" TextWrapping="Wrap"/></ComboBoxItem>
                                             </ComboBox>
                                             <TextBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch"
                                                      IsEnabled="{Binding IsHoldValueEnabled, Mode=OneWay}"
@@ -517,11 +517,11 @@
                                                       DisplayMemberPath="Name"
                                                       SelectedValuePath="Id"
                                                       SelectedValue="{Binding HoldValue, Mode=TwoWay}"
-                                                      PlaceholderText="Choose a function"/>
+                                                      PlaceholderText="选择功能 / Choose a function"/>
                                             <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Stretch"
                                                      IsEnabled="{Binding CanBrowseHold, Mode=OneWay}"
-                                                     PlaceholderText="Arguments (only for Open app / file)"
-                                                     ToolTipService.ToolTip="Command-line arguments, only for Open app / file"
+                                                     PlaceholderText="参数（仅用于打开应用 / 文件） / Arguments (only for Open app / file)"
+                                                     ToolTipService.ToolTip="命令行参数，仅用于打开应用 / 文件 / Command-line arguments, only for Open app / file"
                                                      Text="{Binding HoldArguments, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                         </Grid>
                                     </StackPanel>
@@ -542,7 +542,7 @@
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="12,0,140,0"
                         VerticalAlignment="Center">
                 <Image Source="/icon.ico" Width="16" Height="16"/>
-                <TextBlock Text="Action Wheel — Settings" VerticalAlignment="Center" FontSize="12"/>
+                <TextBlock Text="Action Wheel — 设置 / Action Wheel — Settings" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap"/>
             </StackPanel>
         </Grid>
 
@@ -551,24 +551,24 @@
              this used to also carry all of that, which is what made it grow every time a feature
              was added to it. -->
         <StackPanel Grid.Row="1" Padding="24,6,24,10" Spacing="2">
-            <TextBlock Text="Button settings" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock Text="按钮设置 / Button settings" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap"/>
             <TextBlock TextWrapping="Wrap"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Text="Each button can send a keyboard shortcut or open an app, file, folder or URL. Drag a row to move that button around the ring. Save applies the changes to the next menu you open."/>
+                       Text="每个按钮可发送快捷键，或打开应用、文件、文件夹和网址。拖动列表项调整位置，保存后下次打开轮盘生效。 / Each button can send a keyboard shortcut or open an app, file, folder or URL. Drag a row to move that button around the ring. Save applies the changes to the next menu you open."/>
             <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,10,0,0">
-                <TextBlock Text="Appearance" VerticalAlignment="Bottom" Margin="0,0,0,9"
-                           ToolTipService.ToolTip="Apply an appearance preset to all nine buttons."/>
-                <Button Content="Light" Command="{Binding LightPresetCommand}" VerticalAlignment="Bottom"
+                <TextBlock Text="外观 / Appearance" VerticalAlignment="Bottom" Margin="0,0,0,9"
+                           ToolTipService.ToolTip="将外观预设应用到全部9个按钮。 / Apply an appearance preset to all nine buttons." TextWrapping="Wrap"/>
+                <Button Content="浅色 / Light" Command="{Binding LightPresetCommand}" VerticalAlignment="Bottom"
                         Background="#FFF7F7F7" Foreground="#FF202020"
                         BorderBrush="#FFB8B8B8" BorderThickness="1"
-                        ToolTipService.ToolTip="Apply the light preset to all buttons."/>
-                <Button Content="Dark" Command="{Binding DarkPresetCommand}" VerticalAlignment="Bottom"
+                        ToolTipService.ToolTip="将浅色预设应用到全部按钮。 / Apply the light preset to all buttons."/>
+                <Button Content="深色 / Dark" Command="{Binding DarkPresetCommand}" VerticalAlignment="Bottom"
                         Background="#FF242424" Foreground="#FFF5F5F5"
                         BorderBrush="#FF5A5A5A" BorderThickness="1"
-                        ToolTipService.ToolTip="Apply the dark preset to all buttons."/>
-                <Button Content="Colourful" Command="{Binding ColorfulPresetCommand}" VerticalAlignment="Bottom"
+                        ToolTipService.ToolTip="将深色预设应用到全部按钮。 / Apply the dark preset to all buttons."/>
+                <Button Content="多彩 / Colourful" Command="{Binding ColorfulPresetCommand}" VerticalAlignment="Bottom"
                         Foreground="White" BorderBrush="#668B5CF6" BorderThickness="1"
-                        ToolTipService.ToolTip="Apply a different accent colour to each button.">
+                        ToolTipService.ToolTip="为每个按钮应用不同的强调色。 / Apply a different accent colour to each button.">
                     <Button.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                             <GradientStop Color="#FF5B8DEF" Offset="0"/>
@@ -590,20 +590,20 @@
                         IsSettingsVisible="False"
                         IsBackButtonVisible="Collapsed"
                         IsTabStop="False"
-                        OpenPaneLength="208"
+                        OpenPaneLength="270"
                         SelectionChanged="SectionsNav_SelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Buttons" Tag="Buttons" IsSelected="True">
+                <NavigationViewItem Content="按钮&#x0a;Buttons" Tag="Buttons" IsSelected="True">
                     <NavigationViewItem.Icon>
                         <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF009;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Appearance &amp; trigger" Tag="Appearance">
+                <NavigationViewItem Content="外观与触发&#x0a;Appearance &amp; trigger" Tag="Appearance">
                     <NavigationViewItem.Icon>
                         <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF140;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Profiles &amp; backup" Tag="Profiles">
+                <NavigationViewItem Content="配置与备份&#x0a;Profiles &amp; backup" Tag="Profiles">
                     <NavigationViewItem.Icon>
                         <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF019;"/>
                     </NavigationViewItem.Icon>
@@ -628,8 +628,8 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Text="9 buttons — drag to reorder" FontSize="12" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="4,0,0,6"/>
+                        <TextBlock Grid.Row="0" Text="9个按钮，拖动排序 / 9 buttons — drag to reorder" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="4,0,0,6" TextWrapping="Wrap"/>
                         <ListView x:Name="ActionsHost"
                                   Grid.Row="1"
                                   ItemTemplate="{StaticResource CompactActionRowTemplate}"
@@ -661,14 +661,14 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
-                                        <TextBlock Text="Preview" FontSize="12" FontWeight="SemiBold"
+                                        <TextBlock Text="预览 / Preview" FontSize="12" FontWeight="SemiBold"
                                                    HorizontalAlignment="Center"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                                         <Canvas x:Name="PreviewCanvas" Width="230" Height="230"/>
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"
                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                               Text="This is the ring as it will look with your unsaved changes. Click a button here, or a row on the left, to edit it below. The first row is the centre button."/>
+                                               Text="预览包含尚未保存的更改。点击预览按钮或左侧列表项，在下方编辑；第一项是中心按钮。 / This is the ring as it will look with your unsaved changes. Click a button here, or a row on the left, to edit it below. The first row is the centre button."/>
                                 </Grid>
                             </Border>
 
@@ -696,22 +696,22 @@
 
                             <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16">
                                 <StackPanel Spacing="10">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF245;" FontSize="14"/>
-                                        <TextBlock Text="Open-menu mouse trigger" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center"/>
-                                        <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF05A;" FontSize="13"
+                                    <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <FontIcon Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF245;" FontSize="14"/>
+                                        <TextBlock Grid.Column="1" Text="鼠标触发 / Open-menu mouse trigger" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <FontIcon Grid.Column="2" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF05A;" FontSize="13"
                                                   Margin="4,0,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                  ToolTipService.ToolTip="Chord triggers must meet both limits. Emergency trigger: Ctrl+Alt+Space."/>
-                                    </StackPanel>
+                                                  ToolTipService.ToolTip="鼠标组合键须同时满足时间和移动限制。应急触发：Ctrl+Alt+Space。 / Chord triggers must meet both limits. Emergency trigger: Ctrl+Alt+Space."/>
+                                    </Grid>
                                     <ComboBox HorizontalAlignment="Stretch"
                                               SelectedIndex="{Binding TriggerIndex, Mode=TwoWay}"
-                                              ToolTipService.ToolTip="Choose the mouse gesture that opens the radial menu. Ctrl+Alt+Space always remains available as an emergency trigger.">
-                                        <ComboBoxItem Content="Middle mouse button"/>
-                                        <ComboBoxItem Content="Hold right + press left"/>
-                                        <ComboBoxItem Content="Hold left + press right"/>
-                                        <ComboBoxItem Content="Mouse Button 4 (Back)"/>
-                                        <ComboBoxItem Content="Mouse Button 5 (Forward)"/>
+                                              ToolTipService.ToolTip="选择打开轮盘的鼠标手势；始终可用 Ctrl+Alt+Space 应急触发。 / Choose the mouse gesture that opens the radial menu. Ctrl+Alt+Space always remains available as an emergency trigger.">
+                                        <ComboBoxItem><TextBlock Text="鼠标中键 / Middle mouse button" TextWrapping="Wrap"/></ComboBoxItem>
+                                        <ComboBoxItem><TextBlock Text="按住右键，再按左键 / Hold right + press left" TextWrapping="Wrap"/></ComboBoxItem>
+                                        <ComboBoxItem><TextBlock Text="按住左键，再按右键 / Hold left + press right" TextWrapping="Wrap"/></ComboBoxItem>
+                                        <ComboBoxItem><TextBlock Text="鼠标侧键4（后退） / Mouse Button 4 (Back)" TextWrapping="Wrap"/></ComboBoxItem>
+                                        <ComboBoxItem><TextBlock Text="鼠标侧键5（前进） / Mouse Button 5 (Forward)" TextWrapping="Wrap"/></ComboBoxItem>
                                     </ComboBox>
                                     <TextBlock Text="{Binding TriggerDescription, Mode=OneWay}"
                                                TextWrapping="Wrap" FontSize="12"
@@ -722,22 +722,22 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0" Spacing="2">
-                                            <Slider Header="Timeout (ms)"
+                                            <Slider Header="时限（ms）&#x0a;Timeout (ms)"
                                                     Minimum="200" Maximum="2000" StepFrequency="50" TickFrequency="450"
                                                     Value="{Binding ChordTimeoutMs, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Maximum delay between pressing the first and second mouse buttons. Lower values reduce accidental activation."/>
+                                                    ToolTipService.ToolTip="按下两个鼠标键之间允许的最长间隔；调低可减少误触。 / Maximum delay between pressing the first and second mouse buttons. Lower values reduce accidental activation."/>
                                             <TextBlock Text="{Binding ChordTimeoutMsText, Mode=OneWay}" FontSize="11"
                                                        HorizontalAlignment="Right"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Spacing="2">
-                                            <Slider Header="Movement (px)"
+                                            <Slider Header="移动（px）&#x0a;Movement (px)"
                                                     Minimum="2" Maximum="100" StepFrequency="1" TickFrequency="20"
                                                     Value="{Binding MovementThreshold, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Maximum pointer movement allowed while completing a mouse chord. Lower values make the chord more deliberate."/>
+                                                    ToolTipService.ToolTip="完成鼠标组合键时允许的最大位移；调低需更稳定地操作。 / Maximum pointer movement allowed while completing a mouse chord. Lower values make the chord more deliberate."/>
                                             <TextBlock Text="{Binding MovementThresholdText, Mode=OneWay}" FontSize="11"
                                                        HorizontalAlignment="Right"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Grid>
                                 </StackPanel>
@@ -745,14 +745,14 @@
 
                             <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="16">
                                 <StackPanel Spacing="10">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF140;" FontSize="14"/>
-                                        <TextBlock Text="Ring size and animation" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center"/>
-                                        <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF05A;" FontSize="13"
+                                    <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <FontIcon Grid.Column="0" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF140;" FontSize="14"/>
+                                        <TextBlock Grid.Column="1" Text="轮盘大小与动画 / Ring size and animation" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <FontIcon Grid.Column="2" FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF05A;" FontSize="13"
                                                   Margin="4,0,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                  ToolTipService.ToolTip="These apply to every profile - they are your preference, not part of a shared button set."/>
-                                    </StackPanel>
+                                                  ToolTipService.ToolTip="这些偏好应用到所有配置，不属于共享的按钮方案。 / These apply to every profile - they are your preference, not part of a shared button set."/>
+                                    </Grid>
 
                                     <Grid ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
@@ -761,21 +761,21 @@
                                         </Grid.ColumnDefinitions>
                                         <!-- This order must match SettingsViewModel.AnimationOrder, which maps it
                                              to the RingAnimation enum - see the original remark this preserves. -->
-                                        <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" Header="Opening animation"
+                                        <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" Header="展开动画&#x0a;Opening animation"
                                                   SelectedIndex="{Binding RingAnimationIndex, Mode=TwoWay}"
-                                                  ToolTipService.ToolTip="How the ring appears. Every option finishes within about 200 ms at the default effect duration, so none of them delays a click.">
-                                            <ComboBoxItem Content="None (instant)"/>
-                                            <ComboBoxItem Content="Fade and scale"/>
-                                            <ComboBoxItem Content="Pop"/>
-                                            <ComboBoxItem Content="Radiate from centre"/>
-                                            <ComboBoxItem Content="Converge from outside"/>
-                                            <ComboBoxItem Content="Clockwise sweep"/>
-                                            <ComboBoxItem Content="Counter-clockwise sweep"/>
+                                                  ToolTipService.ToolTip="轮盘出现的方式；默认时长下约200ms完成，不延迟点击。 / How the ring appears. Every option finishes within about 200 ms at the default effect duration, so none of them delays a click.">
+                                            <ComboBoxItem><TextBlock Text="无（立即显示） / None (instant)" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="淡入与缩放 / Fade and scale" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="弹出 / Pop" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="从中心散开 / Radiate from centre" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="从外侧聚拢 / Converge from outside" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="顺时针扫入 / Clockwise sweep" TextWrapping="Wrap"/></ComboBoxItem>
+                                            <ComboBoxItem><TextBlock Text="逆时针扫入 / Counter-clockwise sweep" TextWrapping="Wrap"/></ComboBoxItem>
                                         </ComboBox>
                                         <Button Grid.Column="1" VerticalAlignment="Bottom" Width="36" Height="32" Padding="0"
                                                 Command="{Binding PlayAnimationCommand}"
-                                                AutomationProperties.Name="Play the opening animation"
-                                                ToolTipService.ToolTip="Play the animation again in the preview above.">
+                                                AutomationProperties.Name="播放展开动画 / Play the opening animation"
+                                                ToolTipService.ToolTip="在上方预览中重播动画。 / Play the animation again in the preview above.">
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF04B;" FontSize="13"/>
                                         </Button>
                                     </Grid>
@@ -790,26 +790,26 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0" Spacing="2">
-                                            <Slider Header="Button size"
+                                            <Slider Header="按钮大小&#x0a;Button size"
                                                     Minimum="{Binding MinButtonSize, Mode=OneWay}"
                                                     Maximum="{Binding MaxButtonSize, Mode=OneWay}"
                                                     StepFrequency="2"
                                                     Value="{Binding ButtonSize, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Diameter of each outer button, in device-independent pixels. The centre button and the icons scale with it."/>
+                                                    ToolTipService.ToolTip="外圈按钮直径，单位为设备独立像素；中心按钮和图标同步缩放。 / Diameter of each outer button, in device-independent pixels. The centre button and the icons scale with it."/>
                                             <TextBlock Text="{Binding ButtonSizeText, Mode=OneWay}" FontSize="11"
                                                        HorizontalAlignment="Right"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Spacing="2">
-                                            <Slider Header="Distance from centre"
+                                            <Slider Header="距中心距离&#x0a;Distance from centre"
                                                     Minimum="{Binding MinOrbitRadius, Mode=OneWay}"
                                                     Maximum="{Binding MaxOrbitRadius, Mode=OneWay}"
                                                     StepFrequency="4"
                                                     Value="{Binding OrbitRadius, Mode=TwoWay}"
-                                                    ToolTipService.ToolTip="Distance from the ring's centre to each outer button. The lower limit rises as the buttons grow, so they never touch; the overlay window grows with the ring, so the upper limit does not move."/>
+                                                    ToolTipService.ToolTip="从轮盘中心到外圈按钮的距离。按钮增大时最小距离随之增大以避免相碰；窗口会随轮盘扩展。 / Distance from the ring's centre to each outer button. The lower limit rises as the buttons grow, so they never touch; the overlay window grows with the ring, so the upper limit does not move."/>
                                             <TextBlock Text="{Binding OrbitRadiusText, Mode=OneWay}" FontSize="11"
                                                        HorizontalAlignment="Right"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Grid>
 
@@ -820,24 +820,24 @@
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="Fast" VerticalAlignment="Bottom" Margin="0,0,0,7"
-                                                   FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                                        <Slider Grid.Column="1" Header="Effect duration" VerticalAlignment="Bottom"
+                                        <TextBlock Grid.Column="0" Text="快 / Fast" VerticalAlignment="Bottom" Margin="0,0,0,7"
+                                                   FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
+                                        <Slider Grid.Column="1" Header="动画时长&#x0a;Effect duration" VerticalAlignment="Bottom"
                                                 Minimum="{Binding MinAnimationDurationMs, Mode=OneWay}"
                                                 Maximum="{Binding MaxAnimationDurationMs, Mode=OneWay}"
                                                 StepFrequency="10" TickFrequency="100" TickPlacement="Outside"
                                                 Value="{Binding AnimationDurationMs, Mode=TwoWay}"
-                                                ToolTipService.ToolTip="How long the opening animation takes to finish, in milliseconds. 200 ms is the tuned default; lower plays faster, higher plays slower."/>
-                                        <TextBlock Grid.Column="2" Text="Slow" VerticalAlignment="Bottom" Margin="0,0,0,7"
-                                                   FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                ToolTipService.ToolTip="展开动画的总时长，默认200ms；数值越小越快。 / How long the opening animation takes to finish, in milliseconds. 200 ms is the tuned default; lower plays faster, higher plays slower."/>
+                                        <TextBlock Grid.Column="2" Text="慢 / Slow" VerticalAlignment="Bottom" Margin="0,0,0,7"
+                                                   FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                         <Border Grid.Column="3" Width="56" Height="32" CornerRadius="4" BorderThickness="1"
                                                 VerticalAlignment="Bottom"
                                                 Background="{ThemeResource ControlFillColorDefaultBrush}"
                                                 BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                ToolTipService.ToolTip="Current effect duration">
+                                                ToolTipService.ToolTip="当前动画时长 / Current effect duration">
                                             <TextBlock Text="{Binding AnimationDurationMsText, Mode=OneWay}" FontSize="12"
                                                        TextAlignment="Center" HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                                       VerticalAlignment="Center" TextWrapping="Wrap"/>
                                         </Border>
                                     </Grid>
                                 </StackPanel>
@@ -846,8 +846,59 @@
 
                         <Border Style="{StaticResource CardBorderStyle}" Padding="16">
                             <StackPanel Spacing="12">
-                                <TextBlock Text="Desktop refresh" FontWeight="SemiBold"/>
-                                <TextBlock Text="Release in the centre of the wheel to play the refresh effect. Save to apply these settings to the next refresh."
+                                <TextBlock Text="回收开场 / Reclaim opening" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <TextBlock Text="打开轮盘时由远及近亮起并消散，背景同时渐灰。保存后下次打开生效；松手后的外散可与之并行。 / Blocks pulse inward as the wheel opens while the scene fades to grey. Save to apply on the next opening; outward refresh can overlap it."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <Grid ColumnSpacing="18" RowSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2">
+                                        <Slider Header="总时长&#x0a;Total duration"
+                                                Minimum="100" Maximum="1500" StepFrequency="10"
+                                                Value="{Binding ReclaimDurationMs, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="回收开场从开始到结束的时长，默认240ms；不会阻止已准备好的外散刷新。 / Total time for the inward opening, 240 ms by default. Ready outward refresh does not wait for it."/>
+                                        <TextBlock Text="{Binding ReclaimDurationMsText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+                                        <Slider Header="单块持续&#x0a;Block pulse"
+                                                Minimum="20" Maximum="{Binding ReclaimMaxPixelDurationMs, Mode=OneWay}" StepFrequency="10"
+                                                Value="{Binding ReclaimPixelDurationMs, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="每块从亮起到消退的时长，默认60ms；上限为500ms且不超过总时长。 / Each block's glow-and-fade pulse, 60 ms by default. Limited to 500 ms and the total opening duration."/>
+                                        <TextBlock Text="{Binding ReclaimPixelDurationMsText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2">
+                                        <Slider Header="方块密度&#x0a;Block density"
+                                                Minimum="10" Maximum="200" StepFrequency="5"
+                                                Value="{Binding ReclaimDensityPercent, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="相对默认密度；100%最多600块，200%最多1200块。实际数量由屏幕大小和间距决定。 / Density relative to the default: up to 600 blocks at 100%, or 1200 at 200%. Actual count also depends on screen size and spacing."/>
+                                        <TextBlock Text="{Binding ReclaimDensityPercentText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                                        <Slider Header="发光强度&#x0a;Glow strength"
+                                                Minimum="0" Maximum="200" StepFrequency="5"
+                                                Value="{Binding ReclaimGlowPercent, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="仅调整方块附近柔光的强度；默认100%，0%关闭柔光并保留实心方块。 / Adjusts only the soft glow around each block. Default 100%; 0% removes the glow while keeping the solid blocks."/>
+                                        <TextBlock Text="{Binding ReclaimGlowPercentText, Mode=OneWay}" FontSize="11"
+                                                   HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="16">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="外散刷新 / Desktop refresh" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <TextBlock Text="在轮盘中心松手播放外散刷新；保存后下次刷新生效。 / Release in the centre of the wheel to play the refresh effect. Save to apply these settings to the next refresh."
                                            TextWrapping="Wrap" FontSize="12"
                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                                 <Grid ColumnSpacing="18">
@@ -857,34 +908,34 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" Spacing="2">
-                                        <Slider Header="Total duration"
+                                        <Slider Header="总时长&#x0a;Total duration"
                                                 Minimum="600" Maximum="6000" StepFrequency="100"
                                                 Value="{Binding RefreshDurationMs, Mode=TwoWay}"
-                                                ToolTipService.ToolTip="How long the complete refresh lasts. Lower values play the whole effect faster. The default is 2500 ms."/>
+                                                ToolTipService.ToolTip="外散刷新完整播放的时长；越小越快，默认2500ms。 / How long the complete refresh lasts. Lower values play the whole effect faster. The default is 2500 ms."/>
                                         <TextBlock Text="{Binding RefreshDurationMsText, Mode=OneWay}" FontSize="11"
                                                    HorizontalAlignment="Right"
-                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Spacing="2">
-                                        <Slider Header="Distance stagger"
+                                        <Slider Header="距离错峰&#x0a;Distance stagger"
                                                 Minimum="0" Maximum="200" StepFrequency="5"
                                                 Value="{Binding RefreshDistanceDelayPercent, Mode=TwoWay}"
-                                                ToolTipService.ToolTip="Delay between nearby and distant pixels at similar depth. Lower values spread faster. 100% is the default; 0% removes this distance delay."/>
+                                                ToolTipService.ToolTip="深度相近时，远近像素之间的延迟；越小蔓延越快。默认100%，0%取消距离延迟。 / Delay between nearby and distant pixels at similar depth. Lower values spread faster. 100% is the default; 0% removes this distance delay."/>
                                         <TextBlock Text="{Binding RefreshDistanceDelayPercentText, Mode=OneWay}" FontSize="11"
                                                    HorizontalAlignment="Right"
-                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" Spacing="2">
-                                        <Slider Header="Pixel duration"
+                                        <Slider Header="单块持续&#x0a;Pixel duration"
                                                 Minimum="25" Maximum="200" StepFrequency="5"
                                                 Value="{Binding RefreshPixelDurationPercent, Mode=TwoWay}"
-                                                ToolTipService.ToolTip="How long each block glows and fades, relative to the default. Lower values produce a shorter pulse. 100% is the default."/>
+                                                ToolTipService.ToolTip="每个方块发光和消退的相对时长；越小越短促，默认100%。 / How long each block glows and fades, relative to the default. Lower values produce a shorter pulse. 100% is the default."/>
                                         <TextBlock Text="{Binding RefreshPixelDurationPercentText, Mode=OneWay}" FontSize="11"
                                                    HorizontalAlignment="Right"
-                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Grid>
-                                <TextBlock Text="For a crisper refresh, try a lower total duration and a shorter pixel pulse. Clicks pass through while the animation continues."
+                                <TextBlock Text="缩短总时长和单块持续时间，可增强刷新感；动画播放中点击仍可穿透。 / For a crisper refresh, try a lower total duration and a shorter pixel pulse. Clicks pass through while the animation continues."
                                            TextWrapping="Wrap" FontSize="12"
                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                             </StackPanel>
@@ -898,10 +949,10 @@
                     <StackPanel Spacing="16" MaxWidth="900">
                         <Border Style="{StaticResource CardBorderStyle}" Padding="16">
                             <StackPanel Spacing="12">
-                                <TextBlock Text="Profiles" Style="{StaticResource SectionHeaderTextStyle}" FontSize="16"/>
+                                <TextBlock Text="配置方案 / Profiles" Style="{StaticResource SectionHeaderTextStyle}" FontSize="16" TextWrapping="Wrap"/>
                                 <TextBlock TextWrapping="Wrap" FontSize="12"
                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                           Text="A profile is a named, saved copy of all nine buttons. Save the current buttons under a name, then Load any saved profile back onto the ring."/>
+                                           Text="配置方案保存全部9个按钮；为当前按钮命名保存后，可随时载入任一方案。 / A profile is a named, saved copy of all nine buttons. Save the current buttons under a name, then Load any saved profile back onto the ring."/>
 
                                 <Border Padding="10,8" CornerRadius="6"
                                         Background="{ThemeResource AccentFillColorSecondaryBrush}"
@@ -917,9 +968,9 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Header="Profile name" Text="{Binding ProfileName, Mode=TwoWay}"
-                                             PlaceholderText="Work, Browser, Design…"/>
-                                    <Button Grid.Column="1" Content="Save profile" Command="{Binding SaveProfileCommand}" VerticalAlignment="Bottom"/>
+                                    <TextBox Grid.Column="0" Header="方案名称&#x0a;Profile name" Text="{Binding ProfileName, Mode=TwoWay}"
+                                             PlaceholderText="工作、浏览器、设计… / Work, Browser, Design…"/>
+                                    <Button Grid.Column="1" Content="保存方案 / Save profile" Command="{Binding SaveProfileCommand}" VerticalAlignment="Bottom"/>
                                 </Grid>
 
                                 <Grid ColumnSpacing="8">
@@ -929,24 +980,24 @@
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" Header="Saved profiles" ItemsSource="{Binding Profiles}"
+                                    <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" Header="已存方案&#x0a;Saved profiles" ItemsSource="{Binding Profiles}"
                                               SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"/>
-                                    <Button Grid.Column="1" Content="Load" Command="{Binding LoadProfileCommand}" VerticalAlignment="Bottom"/>
-                                    <Button Grid.Column="2" Content="Rename" Command="{Binding RenameProfileCommand}" VerticalAlignment="Bottom"/>
-                                    <Button Grid.Column="3" Content="Delete" Command="{Binding DeleteProfileCommand}" VerticalAlignment="Bottom"/>
+                                    <Button Grid.Column="1" Content="载入 / Load" Command="{Binding LoadProfileCommand}" VerticalAlignment="Bottom"/>
+                                    <Button Grid.Column="2" Content="重命名 / Rename" Command="{Binding RenameProfileCommand}" VerticalAlignment="Bottom"/>
+                                    <Button Grid.Column="3" Content="删除 / Delete" Command="{Binding DeleteProfileCommand}" VerticalAlignment="Bottom"/>
                                 </Grid>
                                 <TextBlock Text="{Binding ProfileCountText}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
 
                                 <!-- A button opening a dialog rather than an inline Expander: see the
                                      original remark this preserves - Save is blocked on a key name this
                                      app does not recognise, and Win+... can only be typed, not recorded. -->
                                 <Button HorizontalAlignment="Left" Click="ShowKeyNames_Click"
-                                        AutomationProperties.Name="Recognised key names"
-                                        ToolTipService.ToolTip="The key names a shortcut can be typed from.">
+                                        AutomationProperties.Name="支持的按键名称 / Recognised key names"
+                                        ToolTipService.ToolTip="手动输入快捷键时支持的按键名称。 / The key names a shortcut can be typed from.">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF11C;" FontSize="14"/>
-                                        <TextBlock Text="Key names" VerticalAlignment="Center"/>
+                                        <TextBlock Text="按键名称 / Key names" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
@@ -954,21 +1005,21 @@
 
                         <Border Style="{StaticResource CardBorderStyle}" Padding="16">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Backup" Style="{StaticResource SectionHeaderTextStyle}" FontSize="16"/>
+                                <TextBlock Text="备份 / Backup" Style="{StaticResource SectionHeaderTextStyle}" FontSize="16" TextWrapping="Wrap"/>
                                 <TextBlock TextWrapping="Wrap" FontSize="12"
                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                           Text="Saves or restores everything at once: every profile, the trigger, the ring appearance, and extracted icons."/>
+                                           Text="一次备份或恢复全部配置方案、触发方式、轮盘外观及提取的图标。 / Saves or restores everything at once: every profile, the trigger, the ring appearance, and extracted icons."/>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Click="BackupAll_Click" AutomationProperties.Name="Backup all">
+                                    <Button Click="BackupAll_Click" AutomationProperties.Name="完整备份 / Backup all">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF019;" FontSize="13"/>
-                                            <TextBlock Text="Backup all…" VerticalAlignment="Center"/>
+                                            <TextBlock Text="完整备份… / Backup all…" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Button>
-                                    <Button Click="RestoreAll_Click" AutomationProperties.Name="Restore backup">
+                                    <Button Click="RestoreAll_Click" AutomationProperties.Name="恢复备份 / Restore backup">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF0ED;" FontSize="13"/>
-                                            <TextBlock Text="Restore backup…" VerticalAlignment="Center"/>
+                                            <TextBlock Text="恢复备份… / Restore backup…" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
@@ -979,7 +1030,7 @@
             </Grid>
         </NavigationView>
 
-        <!-- Command bar - unchanged, reachable from every section. -->
+        <!-- Full-width config path and a scrollable command row keep both languages reachable. -->
         <Border Grid.Row="3"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -991,42 +1042,44 @@
                          Title="{Binding StatusTitle, Mode=OneWay}"
                          Message="{Binding StatusMessage, Mode=OneWay}"/>
 
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="Configuration file"
+                    <StackPanel Grid.Row="0" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="配置文件 / Configuration file"
                                    FontSize="11"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding ConfigPath, Mode=OneWay}"
                                    FontSize="12"
                                    TextTrimming="CharacterEllipsis"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <ScrollViewer Grid.Row="1" HorizontalAlignment="Right" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Width="40" Height="34" Padding="0"
                                 Command="{Binding UndoCommand}"
-                                AutomationProperties.Name="Undo"
-                                ToolTipService.ToolTip="Undo (unsaved changes)">
+                                AutomationProperties.Name="撤销 / Undo"
+                                ToolTipService.ToolTip="撤销尚未保存的更改 / Undo (unsaved changes)">
                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF0E2;" FontSize="14"/>
                         </Button>
                         <Button Width="40" Height="34" Padding="0"
                                 Command="{Binding RedoCommand}"
-                                AutomationProperties.Name="Redo"
-                                ToolTipService.ToolTip="Redo">
+                                AutomationProperties.Name="重做 / Redo"
+                                ToolTipService.ToolTip="重做 / Redo">
                             <FontIcon FontFamily="{StaticResource IconFontFamily}" Glyph="&#xF01E;" FontSize="14"/>
                         </Button>
-                        <Button Content="Restore defaults" Command="{Binding RestoreDefaultsCommand}"/>
-                        <Button Content="Open config file" Command="{Binding OpenConfigFileCommand}"/>
-                        <Button Content="Import XML" Click="ImportProfile_Click"/>
-                        <Button Content="Export XML" Click="ExportProfile_Click"/>
-                        <Button Content="Save" Style="{StaticResource AccentButtonStyle}"
+                        <Button Content="恢复默认 / Restore defaults" Command="{Binding RestoreDefaultsCommand}"/>
+                        <Button Content="打开配置 / Open config file" Command="{Binding OpenConfigFileCommand}"/>
+                        <Button Content="导入 XML / Import XML" Click="ImportProfile_Click"/>
+                        <Button Content="导出 XML / Export XML" Click="ExportProfile_Click"/>
+                        <Button Content="保存 / Save" Style="{StaticResource AccentButtonStyle}"
                                 Command="{Binding SaveCommand}"/>
                     </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </StackPanel>
         </Border>

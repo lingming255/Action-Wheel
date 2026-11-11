@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
@@ -1949,7 +1950,7 @@ namespace Action_Wheel.Overlay
             {
                 timer.Stop();
                 if (!_closed)
-                    CloseMenu();
+                    _ = FinishRefreshAsync();
             };
             _refreshTimer = timer;
 
@@ -1970,6 +1971,37 @@ namespace Action_Wheel.Overlay
                 _gpuRefreshPlayback?.Start(CloseMenu);
             };
             CompositionTarget.Rendering += _refreshOnRendering;
+        }
+
+        /// <summary>The outward deadline clears its layer while a longer inward opening finishes.</summary>
+        private async Task FinishRefreshAsync()
+        {
+            if (_closed) return;
+            try
+            {
+                var intro = _refreshReclaimIntro;
+                if (intro != null && !intro.AlreadyCompleted)
+                {
+                    // A configurable opening can outlast even the shortest outward effect.
+                    // Retire the completed scan now rather than leaving its last CPU/GPU frame
+                    // visible, and retain only the click-through owner until the intro finishes.
+                    _refreshPlayback?.Dispose();
+                    _refreshPlayback = null;
+                    _gpuRefreshPlayback?.Dispose();
+                    _gpuRefreshPlayback = null;
+                    _preparedRefreshFrame = null;
+                    RefreshLayer.Visibility = Visibility.Collapsed;
+                    await intro.Completion;
+                }
+            }
+            catch (Exception)
+            {
+                // Decoration teardown must always converge on closing the native owner.
+            }
+            finally
+            {
+                if (!_closed) CloseMenu();
+            }
         }
 
         private void AddRefreshImage(WriteableBitmap bitmap, double width, double height)

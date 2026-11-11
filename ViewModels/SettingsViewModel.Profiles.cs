@@ -13,8 +13,8 @@ namespace Action_Wheel.ViewModels
         private string _loadedProfileName = "Main configuration";
         private string _activeProfileName = "Main configuration";
 
-        public string ActiveProfileText => $"Active profile: {_activeProfileName}";
-        public string ProfileCountText => $"{Profiles.Count} saved profile(s)";
+        public string ActiveProfileText => $"当前配置 / Active profile: {_activeProfileName}";
+        public string ProfileCountText => $"已保存配置 / Saved profiles: {Profiles.Count}";
 
         public string ProfileName { get => _profileName; set => Set(ref _profileName, value); }
         public string? SelectedProfile
@@ -36,7 +36,7 @@ namespace Action_Wheel.ViewModels
                 foreach (string name in names) Profiles.Add(name);
             else
             {
-                ShowStatus(InfoBarSeverity.Error, "Profiles unavailable", error);
+                ShowStatus(InfoBarSeverity.Error, "无法读取配置列表 / Profiles unavailable", error);
             }
             Raise(nameof(ProfileCountText));
 
@@ -50,18 +50,18 @@ namespace Action_Wheel.ViewModels
             string name = ProfileLibrary.SafeName(ProfileName);
             if (string.IsNullOrWhiteSpace(name))
             {
-                ShowStatus(InfoBarSeverity.Warning, "Profile name required", "Enter a valid profile name first.");
+                ShowStatus(InfoBarSeverity.Warning, "请输入配置名称 / Profile name required", "请先输入有效的配置名称。/ Enter a valid profile name first.");
                 return;
             }
             var problems = Validate();
             if (problems.Count > 0)
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not save the profile", string.Join("  •  ", problems));
+                ShowStatus(InfoBarSeverity.Error, "无法保存配置 / Could not save the profile", string.Join("  •  ", problems));
                 return;
             }
             if (!_profileLibrary.TrySave(name, Snapshot(), out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not save the profile", error);
+                ShowStatus(InfoBarSeverity.Error, "无法保存配置 / Could not save the profile", error);
                 return;
             }
             RefreshProfiles();
@@ -74,7 +74,7 @@ namespace Action_Wheel.ViewModels
             string profileName = SelectedProfile;
             if (!_profileLibrary.TryLoad(profileName, out var actions, out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not load the profile", error);
+                ShowStatus(InfoBarSeverity.Error, "无法载入配置 / Could not load the profile", error);
                 return;
             }
 
@@ -83,14 +83,14 @@ namespace Action_Wheel.ViewModels
 
             if (!ActionConfig.Save(actions, out string configError))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not activate the profile", configError);
+                ShowStatus(InfoBarSeverity.Error, "无法启用配置 / Could not activate the profile", configError);
                 return;
             }
 
             if (!ActiveProfileSettings.Save(profileName, out string labelError))
             {
-                ShowStatus(InfoBarSeverity.Error, "Profile loaded with an error",
-                    $"The buttons were applied, but the active profile name could not be saved: {labelError}");
+                ShowStatus(InfoBarSeverity.Error, "配置已载入，但有错误 / Profile loaded with an error",
+                    $"按钮已应用，但当前配置名称无法保存。/ Buttons applied, but the active profile name could not be saved: {labelError}");
                 ActionsSaved?.Invoke(this, EventArgs.Empty);
                 return;
             }
@@ -99,8 +99,8 @@ namespace Action_Wheel.ViewModels
             SetActiveProfile(profileName);
             CaptureUndoPoint();
             ActionsSaved?.Invoke(this, EventArgs.Empty);
-            ShowStatus(InfoBarSeverity.Success, "Profile activated",
-                $"{profileName} is now active. Save will update this profile.");
+            ShowStatus(InfoBarSeverity.Success, "配置已启用 / Profile activated",
+                $"已启用“{profileName}”，保存将更新此配置。/ '{profileName}' is active. Save will update this profile.");
         }
 
         private void DeleteNamedProfile()
@@ -109,18 +109,18 @@ namespace Action_Wheel.ViewModels
             string name = SelectedProfile;
             if (string.Equals(name, _activeProfileName, StringComparison.OrdinalIgnoreCase))
             {
-                ShowStatus(InfoBarSeverity.Warning, "Active profile not deleted",
-                    "Load another profile before deleting this one.");
+                ShowStatus(InfoBarSeverity.Warning, "未删除当前配置 / Active profile not deleted",
+                    "请先载入其他配置，再删除此配置。/ Load another profile before deleting this one.");
                 return;
             }
             if (!_profileLibrary.TryDelete(name, out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Profile not deleted", error);
+                ShowStatus(InfoBarSeverity.Error, "配置未删除 / Profile not deleted", error);
                 return;
             }
             SelectedProfile = null;
             RefreshProfiles();
-            ShowStatus(InfoBarSeverity.Informational, "Profile deleted", "The active configuration was not changed.");
+            ShowStatus(InfoBarSeverity.Informational, "配置已删除 / Profile deleted", "当前配置未更改。/ The active configuration was not changed.");
         }
 
         private void RenameNamedProfile()
@@ -130,7 +130,7 @@ namespace Action_Wheel.ViewModels
             string newName = ProfileLibrary.SafeName(ProfileName);
             if (!_profileLibrary.TryRename(oldName, newName, out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Profile not renamed", error);
+                ShowStatus(InfoBarSeverity.Error, "配置未重命名 / Profile not renamed", error);
                 return;
             }
 
@@ -139,7 +139,7 @@ namespace Action_Wheel.ViewModels
             {
                 if (!ActiveProfileSettings.Save(newName, out string labelError))
                 {
-                    renameWarning = $"The active profile label could not be updated: {labelError}";
+                    renameWarning = $"当前配置名称无法更新 / The active profile label could not be updated: {labelError}";
                 }
                 else
                 {
@@ -150,9 +150,9 @@ namespace Action_Wheel.ViewModels
             RefreshProfiles();
             SelectedProfile = newName;
             if (renameWarning == null)
-                ShowStatus(InfoBarSeverity.Success, "Profile renamed", newName);
+                ShowStatus(InfoBarSeverity.Success, "配置已重命名 / Profile renamed", newName);
             else
-                ShowStatus(InfoBarSeverity.Warning, "Profile renamed with an error", renameWarning);
+                ShowStatus(InfoBarSeverity.Warning, "配置已重命名，但有错误 / Profile renamed with an error", renameWarning);
         }
 
         private void SetActiveProfile(string name)

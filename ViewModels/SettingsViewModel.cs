@@ -136,6 +136,7 @@ namespace Action_Wheel.ViewModels
             _movementThreshold = triggerPreferences.MovementThreshold;
             _appearance = (triggerPreferences.Appearance ?? RingAppearance.Default).Normalised();
             _refreshSettings = (triggerPreferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
+            _reclaimSettings = (triggerPreferences.Reclaim ?? ReclaimAnimationSettings.Default).Normalised();
             _activeProfileName = ActiveProfileSettings.Load();
             _loadedProfileName = _activeProfileName;
 
@@ -178,6 +179,7 @@ namespace Action_Wheel.ViewModels
             Raise(nameof(Appearance));
 
             RaiseRefreshSettings();
+            RaiseReclaimSettings();
 
             UndoCommand.RaiseCanExecuteChanged();
             RedoCommand.RaiseCanExecuteChanged();
@@ -241,12 +243,12 @@ namespace Action_Wheel.ViewModels
         public string TriggerDescription => (MouseTrigger)_triggerIndex switch
         {
             MouseTrigger.HoldRightPressLeft =>
-                "Hold the right mouse button, then press the left button. Move to choose; release the left button to run.",
+                "按住右键，再按左键；移动选择，松开左键执行。/ Hold right, press left; move to choose and release left to run.",
             MouseTrigger.HoldLeftPressRight =>
-                "Hold the left mouse button, then press the right button. Move to choose; release the right button to run.",
-            MouseTrigger.MouseButton4 => "Press Mouse Button 4 (usually Back). It is consumed only when configured as the trigger.",
-            MouseTrigger.MouseButton5 => "Press Mouse Button 5 (usually Forward). It is consumed only when configured as the trigger.",
-            _ => "Hold left and press right. You can also drag toward an action and release to run it; hold Ctrl+Alt+Space for Quick Info.",
+                "按住左键，再按右键；移动选择，松开右键执行。/ Hold left, press right; move to choose and release right to run.",
+            MouseTrigger.MouseButton4 => "按鼠标侧键4（通常为后退）；仅设为触发键时拦截。/ Press Mouse Button 4 (usually Back); consumed only when configured as the trigger.",
+            MouseTrigger.MouseButton5 => "按鼠标侧键5（通常为前进）；仅设为触发键时拦截。/ Press Mouse Button 5 (usually Forward); consumed only when configured as the trigger.",
+            _ => "按住左键再按右键，移向按钮后松手执行；按住 Ctrl+Alt+Space 查看速览。/ Hold left and press right; drag to an action and release. Hold Ctrl+Alt+Space for Quick Info.",
         };
 
         private double _chordTimeoutMs = 800;
@@ -341,7 +343,7 @@ namespace Action_Wheel.ViewModels
 
                     // The centre button cannot be a group (see ActionEditModel.CanBeGroup's
                     // remarks). A row dragged into position 0 while configured as one is demoted to
-                    // "Do nothing" here rather than left to fail validation only once Save is
+                    // "无操作 / Do nothing" here rather than left to fail validation only once Save is
                     // pressed - by then the reorder that caused it is long past and the message
                     // would have nothing on screen to point at.
                     if (index == 0 && Items[index].KindIndex == ActionValueCodec.GroupIndex)
@@ -459,8 +461,8 @@ namespace Action_Wheel.ViewModels
             RefreshDerivedState();
             CaptureUndoPoint();
 
-            ShowStatus(InfoBarSeverity.Informational, $"{model.PositionName} reset",
-                "Press Save to write it to the file.");
+            ShowStatus(InfoBarSeverity.Informational, $"已重置 / Reset: {model.PositionName}",
+                "点击保存后写入配置文件。/ Press Save to write it to the file.");
         }
 
         private void ClearIcon(ActionEditModel model) => model.IconPath = string.Empty;
@@ -481,10 +483,10 @@ namespace Action_Wheel.ViewModels
         {
             model.IconPath = path;
 
-            ShowStatus(InfoBarSeverity.Informational, "Icon updated",
+            ShowStatus(InfoBarSeverity.Informational, "图标已更新 / Icon updated",
                 model.CanTintIcon
-                    ? "Tint is on, so the icon follows the icon colour. Turn it off to keep the colours in the file."
-                    : "This icon is drawn with its own colours. Only an .svg can follow the icon colour.");
+                    ? "已开启着色，图标跟随设定颜色；关闭后保留文件原色。/ Tint is on; turn it off to keep the file's original colours."
+                    : "此图标使用原色；仅 SVG 支持跟随图标颜色。/ This icon uses its own colours. Only SVG can follow the icon colour.");
         }
 
         /// <summary>
@@ -522,15 +524,15 @@ namespace Action_Wheel.ViewModels
 
             if (!success)
             {
-                ShowStatus(InfoBarSeverity.Warning, "Could not use the app icon", error);
+                ShowStatus(InfoBarSeverity.Warning, "无法使用应用图标 / Could not use the app icon", error);
                 return;
             }
 
             model.IconPath = iconPath;
             CaptureUndoPoint();
 
-            ShowStatus(InfoBarSeverity.Success, "App icon applied",
-                $"{model.PositionName} now uses the icon of {System.IO.Path.GetFileName(target.Trim().Trim('"'))}.");
+            ShowStatus(InfoBarSeverity.Success, "已应用应用图标 / App icon applied",
+                $"{model.PositionName}：已应用图标 / Icon applied: {System.IO.Path.GetFileName(target.Trim().Trim('"'))}");
         }
 
         public void SetColor(ActionEditModel model, bool isForeground, string hex)
@@ -563,8 +565,8 @@ namespace Action_Wheel.ViewModels
             }
 
             CaptureUndoPoint();
-            ShowStatus(InfoBarSeverity.Informational, "Appearance preset applied",
-                "The preset was applied to all buttons. Press Save to keep it, or Undo to restore the previous style.");
+            ShowStatus(InfoBarSeverity.Informational, "已应用外观预设 / Appearance preset applied",
+                "预设已应用到所有按钮；保存以保留，撤销可恢复原样式。/ Applied to all buttons. Save to keep it, or Undo to restore the previous style.");
         }
 
         private void ApplyColorfulPreset()
@@ -578,14 +580,14 @@ namespace Action_Wheel.ViewModels
             }
 
             CaptureUndoPoint();
-            ShowStatus(InfoBarSeverity.Informational, "Colourful preset applied",
-                "The preset was applied to all buttons. Press Save to keep it, or Undo to restore it.");
+            ShowStatus(InfoBarSeverity.Informational, "已应用彩色预设 / Colourful preset applied",
+                "预设已应用到所有按钮；保存以保留，撤销可恢复。/ Applied to all buttons. Save to keep it, or Undo to restore it.");
         }
 
         public void ApplyRecordedShortcut(ActionEditModel model, string shortcut)
         {
             model.Value = shortcut;
-            ShowStatus(InfoBarSeverity.Success, "Shortcut recorded", shortcut);
+            ShowStatus(InfoBarSeverity.Success, "快捷键已录制 / Shortcut recorded", shortcut);
         }
 
         #endregion
@@ -615,6 +617,7 @@ namespace Action_Wheel.ViewModels
 
         private RingAppearance _savedAppearance = RingAppearance.Default;
         private RefreshAnimationSettings _savedRefreshSettings = RefreshAnimationSettings.Default;
+        private ReclaimAnimationSettings _savedReclaimSettings = ReclaimAnimationSettings.Default;
         private int _savedTriggerIndex;
         private double _savedChordTimeoutMs;
         private double _savedMovementThreshold;
@@ -623,6 +626,7 @@ namespace Action_Wheel.ViewModels
         public bool HasUnsavedChanges =>
             _appearance != _savedAppearance
             || _refreshSettings != _savedRefreshSettings
+            || _reclaimSettings != _savedReclaimSettings
             || _triggerIndex != _savedTriggerIndex
             || _chordTimeoutMs != _savedChordTimeoutMs
             || _movementThreshold != _savedMovementThreshold
@@ -636,6 +640,7 @@ namespace Action_Wheel.ViewModels
             _savedActions = Snapshot();
             _savedAppearance = _appearance;
             _savedRefreshSettings = _refreshSettings;
+            _savedReclaimSettings = _reclaimSettings;
             _savedTriggerIndex = _triggerIndex;
             _savedChordTimeoutMs = _chordTimeoutMs;
             _savedMovementThreshold = _movementThreshold;
@@ -734,7 +739,7 @@ namespace Action_Wheel.ViewModels
             var problems = Validate();
             if (problems.Count > 0)
             {
-                ShowStatus(InfoBarSeverity.Error, "Not saved", string.Join("  •  ", problems));
+                ShowStatus(InfoBarSeverity.Error, "未保存 / Not saved", string.Join("  •  ", problems));
                 return;
             }
 
@@ -749,12 +754,13 @@ namespace Action_Wheel.ViewModels
                     MovementThreshold = (int)_movementThreshold,
                     Appearance = _appearance,
                     Refresh = _refreshSettings,
+                    Reclaim = _reclaimSettings,
                 }, out triggerError))
             {
                 // preferences.json now carries the ring's size and animation as well as the trigger,
                 // so the heading can no longer name only the trigger.
-                ShowStatus(InfoBarSeverity.Error, "Could not save preferences",
-                    string.IsNullOrEmpty(triggerError) ? "The selected trigger is invalid." : triggerError);
+                ShowStatus(InfoBarSeverity.Error, "无法保存偏好设置 / Could not save preferences",
+                    string.IsNullOrEmpty(triggerError) ? "所选触发方式无效。/ The selected trigger is invalid." : triggerError);
                 return;
             }
 
@@ -763,13 +769,13 @@ namespace Action_Wheel.ViewModels
             if (hasActiveSavedProfile
                 && !_profileLibrary.TrySave(_activeProfileName, actions, out string profileError))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not update the active profile", profileError);
+                ShowStatus(InfoBarSeverity.Error, "无法更新当前配置 / Could not update the active profile", profileError);
                 return;
             }
 
             if (!ActionConfig.Save(actions, out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not write the configuration file", error);
+                ShowStatus(InfoBarSeverity.Error, "无法写入配置文件 / Could not write the configuration file", error);
                 return;
             }
 
@@ -788,18 +794,18 @@ namespace Action_Wheel.ViewModels
 
             var warnings = Warnings();
             if (!profileLabelSaved)
-                warnings.Add($"The profile label could not be saved: {profileLabelError}");
+                warnings.Add($"配置名称无法保存 / The profile label could not be saved: {profileLabelError}");
             if (warnings.Count > 0)
             {
-                ShowStatus(InfoBarSeverity.Warning, "Saved, with something worth checking",
+                ShowStatus(InfoBarSeverity.Warning, "已保存，请检查提示 / Saved, please review",
                     string.Join("  •  ", warnings));
                 return;
             }
 
-            ShowStatus(InfoBarSeverity.Success, "Saved",
+            ShowStatus(InfoBarSeverity.Success, "已保存 / Saved",
                 hasActiveSavedProfile
-                    ? $"The active profile '{_activeProfileName}' and the radial menu were updated."
-                    : "The main configuration and radial menu were updated.");
+                    ? $"当前配置“{_activeProfileName}”与轮盘已更新。/ Profile '{_activeProfileName}' and the radial menu were updated."
+                    : "主配置与轮盘已更新。/ The main configuration and radial menu were updated.");
         }
 
         /// <summary>
@@ -823,18 +829,18 @@ namespace Action_Wheel.ViewModels
                 .Distinct(StringComparer.OrdinalIgnoreCase);
 
             foreach (var shortcut in duplicates)
-                warnings.Add($"\"{shortcut}\" is bound to more than one button");
+                warnings.Add($"快捷键“{shortcut}”被多个按钮使用。/ \"{shortcut}\" is bound to more than one button.");
 
             foreach (var item in Items.Where(i => i.KindIndex == ActionValueCodec.LaunchIndex))
             {
                 if (LaunchTarget.Check(item.Value) == LaunchTargetStatus.Unresolved)
-                    warnings.Add($"{item.PositionName}: \"{item.Value}\" was not found on this machine");
+                    warnings.Add($"{item.PositionName}：本机未找到目标 / Not found on this machine: \"{item.Value}\"");
             }
 
             // Reported rather than blocked: a button with no picture still works, and refusing the
             // save would strand anyone whose configuration predates the current icon font.
             foreach (var item in Items.Where(i => !i.HasValidGlyph))
-                warnings.Add($"{item.PositionName}: icon code \"{item.Glyph}\" is not in the icon font, so that button shows no picture");
+                warnings.Add($"{item.PositionName}：字体中没有图标“{item.Glyph}”，按钮将不显示图片。/ Icon code \"{item.Glyph}\" is not in the font; no picture will appear.");
 
             return warnings;
         }
@@ -850,12 +856,13 @@ namespace Action_Wheel.ViewModels
             // that was still nothing like the default one.
             ApplyAppearance(RingAppearance.Default, nameof(Appearance));
             ApplyRefreshSettings(RefreshAnimationSettings.Default, nameof(RefreshSettings));
+            ApplyReclaimSettings(ReclaimAnimationSettings.Default, nameof(ReclaimSettings));
 
             // Undo is a stack of ActionItem snapshots and does not carry the appearance, so the
             // message must not promise that it does.
-            ShowStatus(InfoBarSeverity.Informational, "Defaults loaded",
-                "The rows, ring appearance and desktop refresh are back to their defaults. "
-                + "Press Save to overwrite the current file; Undo restores the rows only.");
+            ShowStatus(InfoBarSeverity.Informational, "已载入默认值 / Defaults loaded",
+                "按钮、轮盘外观和刷新效果均已恢复默认；保存后覆盖当前配置。撤销仅恢复按钮。/ "
+                + "Buttons, ring appearance and refresh are back to defaults. Save to overwrite the current file; Undo restores buttons only.");
         }
 
         /// <summary>
@@ -870,15 +877,15 @@ namespace Action_Wheel.ViewModels
 
             if (action.Kind == ActionKind.None)
             {
-                ShowStatus(InfoBarSeverity.Informational, "Nothing to test", "This button only closes the menu.");
+                ShowStatus(InfoBarSeverity.Informational, "无可测试操作 / Nothing to test", "此按钮仅关闭轮盘。/ This button only closes the menu.");
                 return;
             }
 
             if (action.Kind == ActionKind.Function
                 && action.Value.StartsWith("window.", StringComparison.OrdinalIgnoreCase))
             {
-                ShowStatus(InfoBarSeverity.Warning, "Window action not tested",
-                    "Open the radial menu over the target application so the command cannot affect Settings itself.");
+                ShowStatus(InfoBarSeverity.Warning, "未测试窗口操作 / Window action not tested",
+                    "请在目标应用上打开轮盘，避免命令作用于设置窗口。/ Open the wheel over the target app so the command cannot affect Settings itself.");
                 return;
             }
 
@@ -899,7 +906,7 @@ namespace Action_Wheel.ViewModels
                 }
             });
 
-            ShowStatus(InfoBarSeverity.Informational, "Test action started", action.Label);
+            ShowStatus(InfoBarSeverity.Informational, "已启动测试操作 / Test action started", action.Label);
         }
 
         private void OpenConfigFile()
@@ -908,7 +915,7 @@ namespace Action_Wheel.ViewModels
             ActionConfig.Load();
 
             if (!ShellCommands.OpenPath(ActionConfig.ActiveConfigPath, out string error))
-                ShowStatus(InfoBarSeverity.Error, "Could not open the configuration file", error);
+                ShowStatus(InfoBarSeverity.Error, "无法打开配置文件 / Could not open the configuration file", error);
         }
 
         /// <summary>Loads an XML profile into the editor without overwriting the active config.</summary>
@@ -918,7 +925,7 @@ namespace Action_Wheel.ViewModels
 
             if (!_profileLibrary.TryImport(path, out var actions, out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not import the profile", error);
+                ShowStatus(InfoBarSeverity.Error, "无法导入配置 / Could not import the profile", error);
                 return;
             }
 
@@ -930,8 +937,8 @@ namespace Action_Wheel.ViewModels
             LoadItems(actions);
             SetLoadedProfile(profileName);
             CaptureUndoPoint();
-            ShowStatus(InfoBarSeverity.Success, "Profile imported",
-                "Review the imported buttons, then press Save to apply them. You can also Undo this import.");
+            ShowStatus(InfoBarSeverity.Success, "配置已导入 / Profile imported",
+                "检查导入的按钮后保存以应用；也可撤销此次导入。/ Review the imported buttons, then Save to apply them or Undo the import.");
         }
 
         private void SetLoadedProfile(string name)
@@ -946,17 +953,17 @@ namespace Action_Wheel.ViewModels
             var problems = Validate();
             if (problems.Count > 0)
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not export the profile", string.Join("  •  ", problems));
+                ShowStatus(InfoBarSeverity.Error, "无法导出配置 / Could not export the profile", string.Join("  •  ", problems));
                 return false;
             }
 
             if (!_profileLibrary.TryExport(path, Snapshot(), out string error))
             {
-                ShowStatus(InfoBarSeverity.Error, "Could not export the profile", error);
+                ShowStatus(InfoBarSeverity.Error, "无法导出配置 / Could not export the profile", error);
                 return false;
             }
 
-            ShowStatus(InfoBarSeverity.Success, "Profile exported", path);
+            ShowStatus(InfoBarSeverity.Success, "配置已导出 / Profile exported", path);
             return true;
         }
 

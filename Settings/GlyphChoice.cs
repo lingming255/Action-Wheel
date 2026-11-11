@@ -41,53 +41,53 @@ namespace Action_Wheel.Settings
         public static IReadOnlyList<GlyphChoice> Common { get; } = Build(new (string Code, string Name)[]
         {
             // Editing
-            ("F0C5", "Copy"), ("F0EA", "Paste"), ("F0C4", "Cut"), ("F040", "Edit"),
-            ("F0C7", "Save"), ("F014", "Delete"), ("F055", "Add"), ("F056", "Remove"),
-            ("F0E2", "Undo"), ("F01E", "Redo"), ("F00C", "Tick"), ("F00D", "Close"),
-            ("F02F", "Print"), ("F046", "Task done"), ("F0C6", "Attach"),
+            ("F0C5", "复制 / Copy"), ("F0EA", "粘贴 / Paste"), ("F0C4", "剪切 / Cut"), ("F040", "编辑 / Edit"),
+            ("F0C7", "保存 / Save"), ("F014", "删除 / Delete"), ("F055", "添加 / Add"), ("F056", "移除 / Remove"),
+            ("F0E2", "撤销 / Undo"), ("F01E", "重做 / Redo"), ("F00C", "勾选 / Tick"), ("F00D", "关闭 / Close"),
+            ("F02F", "打印 / Print"), ("F046", "任务完成 / Task done"), ("F0C6", "附件 / Attach"),
 
             // Navigation
-            ("F0C9", "Menu"), ("F015", "Home"), ("F04F", "Back"),
-            ("F107", "Chevron down"), ("F106", "Chevron up"),
-            ("F104", "Chevron left"), ("F105", "Chevron right"),
-            ("F002", "Search"), ("F00E", "Zoom in"), ("F010", "Zoom out"),
-            ("F009", "Grid"), ("F00B", "List"), ("F013", "Settings"),
-            ("EAF1", "Filter"), ("EA7C", "More"), ("F047", "Move"),
+            ("F0C9", "菜单 / Menu"), ("F015", "主页 / Home"), ("F04F", "返回 / Back"),
+            ("F107", "向下 / Chevron down"), ("F106", "向上 / Chevron up"),
+            ("F104", "向左 / Chevron left"), ("F105", "向右 / Chevron right"),
+            ("F002", "搜索 / Search"), ("F00E", "放大 / Zoom in"), ("F010", "缩小 / Zoom out"),
+            ("F009", "网格 / Grid"), ("F00B", "列表 / List"), ("F013", "设置 / Settings"),
+            ("EAF1", "筛选 / Filter"), ("EA7C", "更多 / More"), ("F047", "移动 / Move"),
 
             // Files
-            ("F114", "Folder"), ("F115", "Folder open"), ("F016", "File"),
-            ("F0F6", "Document"), ("F02D", "Book"), ("F02E", "Bookmark"),
-            ("F019", "Download"), ("F0EE", "Upload"), ("F021", "Refresh"),
-            ("F0ED", "Cloud download"), ("F0C2", "Cloud"), ("EAEF", "Archive"),
+            ("F114", "文件夹 / Folder"), ("F115", "打开文件夹 / Folder open"), ("F016", "文件 / File"),
+            ("F0F6", "文档 / Document"), ("F02D", "书籍 / Book"), ("F02E", "书签 / Bookmark"),
+            ("F019", "下载 / Download"), ("F0EE", "上传 / Upload"), ("F021", "刷新 / Refresh"),
+            ("F0ED", "云端下载 / Cloud download"), ("F0C2", "云 / Cloud"), ("EAEF", "归档 / Archive"),
 
             // Media
-            ("F04B", "Play"), ("F04C", "Pause"), ("F04D", "Stop"),
-            ("F048", "Previous"), ("F051", "Next"), ("F04A", "Rewind"), ("F04E", "Fast forward"),
-            ("F028", "Volume"), ("F026", "Mute"), ("F025", "Headphones"),
-            ("F03D", "Video"), ("F030", "Camera"), ("F03E", "Image"), ("F001", "Music"),
+            ("F04B", "播放 / Play"), ("F04C", "暂停 / Pause"), ("F04D", "停止 / Stop"),
+            ("F048", "上一个 / Previous"), ("F051", "下一个 / Next"), ("F04A", "快退 / Rewind"), ("F04E", "快进 / Fast forward"),
+            ("F028", "音量 / Volume"), ("F026", "静音 / Mute"), ("F025", "耳机 / Headphones"),
+            ("F03D", "视频 / Video"), ("F030", "相机 / Camera"), ("F03E", "图片 / Image"), ("F001", "音乐 / Music"),
 
             // System and hardware
-            ("F023", "Lock"), ("F011", "Power"), ("F108", "Desktop"), ("F109", "Laptop"),
-            ("F10B", "Phone"), ("F11C", "Keyboard"), ("EA85", "Terminal"), ("EACE", "Database"),
-            ("F0E7", "Lightning"), ("EAAF", "Bug"), ("EB44", "Rocket"), ("EB53", "Shield"),
+            ("F023", "锁定 / Lock"), ("F011", "电源 / Power"), ("F108", "桌面 / Desktop"), ("F109", "笔记本 / Laptop"),
+            ("F10B", "手机 / Phone"), ("F11C", "键盘 / Keyboard"), ("EA85", "终端 / Terminal"), ("EACE", "数据库 / Database"),
+            ("F0E7", "闪电 / Lightning"), ("EAAF", "错误排查 / Bug"), ("EB44", "火箭 / Rocket"), ("EB53", "盾牌 / Shield"),
 
             // People, places and messages
-            ("F0E0", "Mail"), ("F007", "Person"), ("F0C0", "People"),
-            ("F041", "Location"), ("EB01", "Globe"), ("F0C1", "Link"), ("F045", "Share"),
-            ("F0F3", "Bell"), ("F017", "Clock"), ("EAB0", "Calendar"), ("F0E5", "Comment"),
-            ("F005", "Star"), ("F006", "Star outline"), ("F004", "Heart"), ("F024", "Flag"),
-            ("F059", "Help"), ("F05A", "Info"), ("EA6C", "Warning"), ("EA87", "Error"),
+            ("F0E0", "邮件 / Mail"), ("F007", "个人 / Person"), ("F0C0", "用户群 / People"),
+            ("F041", "位置 / Location"), ("EB01", "地球 / Globe"), ("F0C1", "链接 / Link"), ("F045", "分享 / Share"),
+            ("F0F3", "铃铛 / Bell"), ("F017", "时钟 / Clock"), ("EAB0", "日历 / Calendar"), ("F0E5", "评论 / Comment"),
+            ("F005", "星标 / Star"), ("F006", "空心星标 / Star outline"), ("F004", "爱心 / Heart"), ("F024", "旗帜 / Flag"),
+            ("F059", "帮助 / Help"), ("F05A", "信息 / Info"), ("EA6C", "警告 / Warning"), ("EA87", "错误 / Error"),
 
             // Logos, which is most of why this font replaced the system's
-            ("E70F", "Windows"), ("E711", "Apple"), ("E712", "Linux"), ("E70E", "Android"),
+            ("E70F", "视窗 / Windows"), ("E711", "苹果 / Apple"), ("E712", "Linux"), ("E70E", "安卓 / Android"),
             ("E743", "Chrome"), ("E745", "Firefox"), ("E744", "Edge"), ("E746", "Opera"),
             ("E70C", "Visual Studio Code"), ("E709", "GitHub"), ("E702", "Git"),
             ("E73C", "Python"), ("E738", "Java"), ("E74E", "JavaScript"), ("E739", "Ruby"),
             ("E73D", "PHP"), ("E736", "HTML"), ("E749", "CSS"), ("E73A", "Ubuntu"),
             ("E718", "Node.js"), ("E71E", "npm"), ("E753", "Angular"), ("E755", "Swift"),
-            ("E71D", "Django"), ("E70B", "WordPress"), ("E721", "Unity"), ("E722", "Raspberry Pi"),
-            ("E76E", "PostgreSQL"), ("E704", "MySQL"), ("E705", "Database"),
-            ("E731", "Google Drive"), ("E707", "Dropbox"),
+            ("E71D", "Django"), ("E70B", "WordPress"), ("E721", "Unity"), ("E722", "树莓派 / Raspberry Pi"),
+            ("E76E", "PostgreSQL"), ("E704", "MySQL"), ("E705", "数据库 / Database"),
+            ("E731", "谷歌云端硬盘 / Google Drive"), ("E707", "Dropbox"),
         });
 
         /// <summary>

@@ -57,7 +57,7 @@ namespace Action_Wheel.Settings
 
             _recordKeyHandler = OnRecordKeyDown;
 
-            Title = "Action Wheel — Settings";
+            Title = "Action Wheel — 设置 / Settings";
             AppIcon.ApplyTo(this);
 
             // Extend Mica into the caption and designate the transparent strip as the drag region.
@@ -164,13 +164,13 @@ namespace Action_Wheel.Settings
                     item, 20, new Microsoft.UI.Xaml.Media.SolidColorBrush(model.ForegroundColor));
 
                 sourceNote.Text = model.HasIconFile
-                    ? $"Using the file {System.IO.Path.GetFileName(model.IconPath)} - it replaces the glyph."
-                    : "Using a glyph from the icon font.";
+                    ? $"当前使用图片：{System.IO.Path.GetFileName(model.IconPath)} / Using this file instead of a font glyph."
+                    : "当前使用字体图标。/ Using a glyph from the icon font.";
             }
 
             var codeBox = new TextBox
             {
-                Header = "Icon code (hex)",
+                Header = "图标代码（十六进制）/ Icon code (hex)",
                 Text = model.Glyph,
                 PlaceholderText = "F0C5",
             };
@@ -182,13 +182,13 @@ namespace Action_Wheel.Settings
 
             var searchBox = new TextBox
             {
-                PlaceholderText = "Search by name or code",
+                PlaceholderText = "按名称或代码搜索 / Search by name or code",
                 Margin = new Thickness(0, 12, 0, 0),
             };
 
             var showAll = new CheckBox
             {
-                Content = $"Show every glyph in the font ({GlyphChoice.All.Count})",
+                Content = $"显示全部图标 / Show all glyphs ({GlyphChoice.All.Count})",
                 Margin = new Thickness(0, 4, 0, 0),
             };
 
@@ -224,7 +224,7 @@ namespace Action_Wheel.Settings
 
             var chooseFile = new Button
             {
-                Content = "Use an image file…",
+                Content = "使用图片文件… / Use an image file…",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             chooseFile.Click += async (s, _) =>
@@ -239,7 +239,7 @@ namespace Action_Wheel.Settings
 
             var useAppIcon = new Button
             {
-                Content = "Use the app's icon",
+                Content = "使用应用图标 / Use the app's icon",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Margin = new Thickness(0, 6, 0, 0),
                 // Only a launch target has an application behind it to take an icon from.
@@ -253,7 +253,7 @@ namespace Action_Wheel.Settings
 
             var clearFile = new Button
             {
-                Content = "Back to the glyph",
+                Content = "恢复字体图标 / Back to the glyph",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Margin = new Thickness(0, 6, 0, 0),
             };
@@ -333,14 +333,14 @@ namespace Action_Wheel.Settings
 
             var sections = new (string Heading, string Names)[]
             {
-                ("Modifiers", "Ctrl (Control), Alt, Shift, Win (Windows, LWin)"),
-                ("Letters and digits", "A–Z, 0–9"),
-                ("Function keys", "F1–F24"),
-                ("Editing and navigation",
+                ("修饰键 / Modifiers", "Ctrl (Control), Alt, Shift, Win (Windows, LWin)"),
+                ("字母和数字 / Letters and digits", "A–Z, 0–9"),
+                ("功能键 / Function keys", "F1–F24"),
+                ("编辑与导航 / Editing and navigation",
                     "Esc (Escape), Tab, Enter (Return), Space, Backspace, Delete (Del), "
                     + "Insert (Ins), Home, End, PageUp (PgUp), PageDown (PgDn), Left, Up, Right, "
                     + "Down, PrintScreen (PrtSc)"),
-                ("Media and volume",
+                ("媒体与音量 / Media and volume",
                     "PlayPause (MediaPlayPause), MediaNext, MediaPrev (MediaPrevious), MediaStop, "
                     + "VolumeUp, VolumeDown, Mute (VolumeMute)"),
             };
@@ -364,10 +364,9 @@ namespace Action_Wheel.Settings
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 0),
                 Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Text = "Join keys with +, for example Ctrl+Shift+S. Names are not case sensitive. "
-                    + "Recording captures Ctrl, Alt and Shift combinations; the Windows key is taken "
-                    + "by the shell before it reaches the app, so type Win+… by hand. Press Esc to "
-                    + "cancel recording.",
+                Text = "用 + 连接按键，例如 Ctrl+Shift+S；名称不区分大小写。可录制 Ctrl、Alt、Shift 组合，Win 组合请手动输入；Esc 取消。\n"
+                    + "Join keys with +, e.g. Ctrl+Shift+S; names are not case sensitive. "
+                    + "Record Ctrl, Alt or Shift combinations; type Win+… manually because Windows handles it first. Esc cancels recording.",
             });
 
             var dialog = new ContentDialog
@@ -376,8 +375,8 @@ namespace Action_Wheel.Settings
                 // tree to open in, and without the theme it ignores the one this window is using.
                 XamlRoot = root.XamlRoot,
                 RequestedTheme = root.RequestedTheme,
-                Title = "Recognised key names",
-                CloseButtonText = "Close",
+                Title = "支持的按键名称 / Recognised key names",
+                CloseButtonText = "关闭 / Close",
                 DefaultButton = ContentDialogButton.Close,
                 Content = new ScrollViewer
                 {
@@ -397,7 +396,7 @@ namespace Action_Wheel.Settings
                 // A reference list that will not open is not worth taking the window down for,
                 // which is what an exception leaving a Click handler does.
                 ViewModel.ShowStatus(InfoBarSeverity.Error,
-                    "Could not open the key-name list", ex.Message);
+                    "无法打开按键列表 / Could not open the key-name list", ex.Message);
             }
             finally
             {
@@ -406,7 +405,7 @@ namespace Action_Wheel.Settings
         }
 
         /// <summary>
-        /// Builds and shows the "Group buttons" dialog for one row, letting the user pick up to
+        /// Builds and shows the "分组按钮 / Group buttons" dialog for one row, letting the user pick up to
         /// <see cref="ActionItem.MaxGroupChildren"/> children.
         /// </summary>
         /// <remarks>
@@ -449,7 +448,7 @@ namespace Action_Wheel.Settings
                     CornerRadius = new CornerRadius(24),
                     Tag = rowModel,
                 };
-                ToolTipService.SetToolTip(iconButton, "Choose an icon");
+                ToolTipService.SetToolTip(iconButton, "选择图标 / Choose an icon");
 
                 // The parent Group button's own colours, not rowModel's - every child renders in
                 // them on the real ring (see RadialMenu.BuildGroupButtons), so the preview here has
@@ -472,8 +471,8 @@ namespace Action_Wheel.Settings
 
                 var label = new TextBox
                 {
-                    PlaceholderText = "Name",
-                    Width = 150,
+                    PlaceholderText = "名称 / Name",
+                    Width = 110,
                     VerticalAlignment = VerticalAlignment.Center,
                     Text = rowModel.Label,
                 };
@@ -481,10 +480,10 @@ namespace Action_Wheel.Settings
 
                 var kind = new ComboBox
                 {
-                    Width = 140,
+                    Width = 220,
                     VerticalAlignment = VerticalAlignment.Center,
                     // Groups cannot nest; copy occupies the fifth visible choice instead.
-                    ItemsSource = new[] { "Do nothing", "Send shortcut", "Open app / file", "Windows function", "Copy text" },
+                    ItemsSource = new[] { "无操作 / Do nothing", "发送快捷键 / Send shortcut", "打开应用或文件 / Open app / file", "Windows 功能 / Windows function", "复制文本 / Copy text" },
                     SelectedIndex = rowModel.KindIndex == ActionValueCodec.CopyTextIndex ? 4 : rowModel.KindIndex,
                 };
 
@@ -503,7 +502,7 @@ namespace Action_Wheel.Settings
                         FontSize = 12,
                     },
                 };
-                ToolTipService.SetToolTip(remove, "Remove this button");
+                ToolTipService.SetToolTip(remove, "移除此按钮 / Remove this button");
 
                 var header = new Grid { ColumnSpacing = 8 };
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -547,7 +546,7 @@ namespace Action_Wheel.Settings
                         FontSize = 14,
                     },
                 };
-                ToolTipService.SetToolTip(record, "Record a key press");
+                ToolTipService.SetToolTip(record, "录制按键 / Record a key press");
                 record.Checked += Record_Checked;
                 record.Unchecked += Record_Unchecked;
 
@@ -564,14 +563,14 @@ namespace Action_Wheel.Settings
                         FontSize = 14,
                     },
                 };
-                ToolTipService.SetToolTip(browse, "Browse for a file");
+                ToolTipService.SetToolTip(browse, "浏览文件 / Browse for a file");
                 browse.Click += Browse_Click;
 
                 var functionBox = new AutoSuggestBox
                 {
                     Width = 200,
                     VerticalAlignment = VerticalAlignment.Center,
-                    PlaceholderText = "Search Windows functions…",
+                    PlaceholderText = "搜索 Windows 功能… / Search Windows functions…",
                     DataContext = rowModel,
                     ItemsSource = rowModel.FunctionSuggestions,
                     ItemTemplate = (DataTemplate)RootGrid.Resources["FunctionSuggestionTemplate"],
@@ -646,7 +645,7 @@ namespace Action_Wheel.Settings
             foreach (var child in model.GroupChildren)
                 AddRow(child);
 
-            addButton = new Button { Content = "Add a button" };
+            addButton = new Button { Content = "添加按钮 / Add a button" };
             UpdateAddButtonState();
             addButton.Click += (s2, e2) =>
             {
@@ -664,9 +663,8 @@ namespace Action_Wheel.Settings
             {
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Text = "These appear on a second ring around the main one when this button is selected, "
-                    + "at the same size and following the same colours as the main ring. Pick an icon, "
-                    + "a name and a type for each, just like the buttons above.",
+                Text = "选中此按钮时，子按钮会在第二圈出现，沿用主轮盘的大小和颜色。为每个子按钮设置图标、名称与类型。\n"
+                    + "Children appear on a second ring, using the main ring's size and colours. Choose an icon, name and type for each.",
             });
             content.Children.Add(rowsPanel);
             content.Children.Add(addButton);
@@ -675,9 +673,9 @@ namespace Action_Wheel.Settings
             {
                 XamlRoot = root.XamlRoot,
                 RequestedTheme = root.RequestedTheme,
-                Title = "Group buttons",
-                PrimaryButtonText = "Save",
-                CloseButtonText = "Cancel",
+                Title = "分组按钮 / Group buttons",
+                PrimaryButtonText = "保存 / Save",
+                CloseButtonText = "取消 / Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Content = new ScrollViewer
                 {
@@ -701,7 +699,7 @@ namespace Action_Wheel.Settings
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not open the group editor", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法打开分组编辑器 / Could not open the group editor", ex.Message);
             }
             finally
             {
@@ -757,12 +755,12 @@ namespace Action_Wheel.Settings
                 {
                     XamlRoot = root.XamlRoot,
                     RequestedTheme = root.RequestedTheme,
-                    Title = "Save your changes?",
-                    Content = "The buttons, the ring size and the trigger settings have all been "
-                        + "edited since the last save. Closing now discards those edits.",
-                    PrimaryButtonText = "Save and close",
-                    SecondaryButtonText = "Discard",
-                    CloseButtonText = "Keep editing",
+                    Title = "保存更改？/ Save your changes?",
+                    Content = "存在未保存的按钮或设置更改，直接关闭将丢弃这些更改。\n"
+                        + "There are unsaved button or settings changes. Closing now discards them.",
+                    PrimaryButtonText = "保存并关闭 / Save and close",
+                    SecondaryButtonText = "放弃更改 / Discard",
+                    CloseButtonText = "继续编辑 / Keep editing",
                     DefaultButton = ContentDialogButton.Primary,
                 };
 
@@ -782,7 +780,7 @@ namespace Action_Wheel.Settings
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not confirm closing", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法确认关闭 / Could not confirm closing", ex.Message);
                 return;
             }
             finally
@@ -836,7 +834,7 @@ namespace Action_Wheel.Settings
 
             var reset = new Button
             {
-                Content = "Use the default colour",
+                Content = "使用默认颜色 / Use the default colour",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Margin = new Thickness(0, 12, 0, 0),
             };
@@ -858,9 +856,9 @@ namespace Action_Wheel.Settings
                     {
                         Text = colorTarget switch
                         {
-                            0 => "Icon colour",
-                            1 => "Button colour",
-                            _ => "Shadow colour",
+                            0 => "图标颜色 / Icon colour",
+                            1 => "按钮颜色 / Button colour",
+                            _ => "阴影颜色 / Shadow colour",
                         },
                         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                         Margin = new Thickness(0, 0, 0, 8),
@@ -897,8 +895,8 @@ namespace Action_Wheel.Settings
             toggle.LostFocus += Record_LostFocus;
             toggle.Focus(FocusState.Programmatic);
 
-            ViewModel.ShowStatus(InfoBarSeverity.Informational, "Recording",
-                "Press the shortcut you want. Esc cancels.");
+            ViewModel.ShowStatus(InfoBarSeverity.Informational, "录制中 / Recording",
+                "请按下所需快捷键，Esc 取消。/ Press the shortcut you want. Esc cancels.");
         }
 
         private void Record_Unchecked(object sender, RoutedEventArgs e) => StopRecording();
@@ -931,8 +929,8 @@ namespace Action_Wheel.Settings
             if (e.Key == Windows.System.VirtualKey.Escape)
             {
                 StopRecording();
-                ViewModel.ShowStatus(InfoBarSeverity.Informational, "Cancelled",
-                    "The shortcut was left unchanged.");
+                ViewModel.ShowStatus(InfoBarSeverity.Informational, "已取消 / Cancelled",
+                    "快捷键未更改。/ The shortcut was left unchanged.");
                 return;
             }
 
@@ -943,8 +941,8 @@ namespace Action_Wheel.Settings
             var shortcut = ShortcutRecorder.Capture(e.Key);
             if (shortcut == null)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Warning, "Key not supported",
-                    $"\"{e.Key}\" cannot be sent by this app. Try another key.");
+                ViewModel.ShowStatus(InfoBarSeverity.Warning, "不支持此按键 / Key not supported",
+                    $"此应用无法发送“{e.Key}”，请换一个按键。/ This app cannot send \"{e.Key}\". Try another key.");
                 return;
             }
 
@@ -992,7 +990,7 @@ namespace Action_Wheel.Settings
                     SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
                     SuggestedFileName = "ActionWheel-profile",
                 };
-                picker.FileTypeChoices.Add("Action Wheel XML profile", new List<string> { ".xml" });
+                picker.FileTypeChoices.Add("Action Wheel XML 配置 / Action Wheel XML profile", new List<string> { ".xml" });
 
                 WinRT.Interop.InitializeWithWindow.Initialize(
                     picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -1003,7 +1001,7 @@ namespace Action_Wheel.Settings
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not open the file picker", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法打开文件选择器 / Could not open the file picker", ex.Message);
             }
         }
 
@@ -1016,7 +1014,7 @@ namespace Action_Wheel.Settings
                     SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
                     SuggestedFileName = $"ActionWheel-backup-{DateTime.Now:yyyy-MM-dd}",
                 };
-                picker.FileTypeChoices.Add("Action Wheel backup", new List<string> { ".zip" });
+                picker.FileTypeChoices.Add("Action Wheel 备份 / Action Wheel backup", new List<string> { ".zip" });
 
                 WinRT.Interop.InitializeWithWindow.Initialize(
                     picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -1029,13 +1027,13 @@ namespace Action_Wheel.Settings
                     ?? string.Empty;
 
                 if (ConfigBackup.TryExport(file.Path, appVersion, out string error))
-                    ViewModel.ShowStatus(InfoBarSeverity.Success, "Backup saved", file.Path);
+                    ViewModel.ShowStatus(InfoBarSeverity.Success, "备份已保存 / Backup saved", file.Path);
                 else
-                    ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not create the backup", error);
+                    ViewModel.ShowStatus(InfoBarSeverity.Error, "无法创建备份 / Could not create the backup", error);
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not create the backup", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法创建备份 / Could not create the backup", ex.Message);
             }
         }
 
@@ -1055,7 +1053,7 @@ namespace Action_Wheel.Settings
 
             if (!ConfigBackup.TryPreview(path, out var preview, out string previewError) || preview == null)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not read the backup", previewError);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法读取备份 / Could not read the backup", previewError);
                 return;
             }
 
@@ -1063,23 +1061,23 @@ namespace Action_Wheel.Settings
             void AddLine(string text) => summary.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
 
             AddLine(preview.ExportedAtUtc == DateTime.MinValue
-                ? "Made: unknown date"
-                : $"Made: {preview.ExportedAtUtc.ToLocalTime():g}"
+                ? "创建时间未知 / Made: unknown date"
+                : $"创建时间 / Made: {preview.ExportedAtUtc.ToLocalTime():g}"
                     + (string.IsNullOrWhiteSpace(preview.AppVersion) ? string.Empty : $" (Action Wheel {preview.AppVersion})"));
-            AddLine(preview.HasActions ? "Includes the active button configuration" : "Does not include a button configuration");
-            AddLine(preview.HasPreferences ? "Includes the trigger and ring appearance settings" : "Does not include trigger/appearance settings");
-            AddLine($"{preview.ProfileCount} saved profile(s)");
-            AddLine($"{preview.IconCount} extracted icon(s)");
-            AddLine("Restoring replaces the matching files on this machine.");
+            AddLine(preview.HasActions ? "包含当前按钮配置 / Includes the active button configuration" : "不含按钮配置 / Does not include a button configuration");
+            AddLine(preview.HasPreferences ? "包含触发与轮盘外观设置 / Includes the trigger and ring appearance settings" : "不含触发与外观设置 / Does not include trigger/appearance settings");
+            AddLine($"已保存配置 / Saved profiles: {preview.ProfileCount}");
+            AddLine($"已提取图标 / Extracted icons: {preview.IconCount}");
+            AddLine("恢复会替换本机对应文件。/ Restoring replaces the matching files on this machine.");
 
             var dialog = new ContentDialog
             {
                 XamlRoot = root.XamlRoot,
                 RequestedTheme = root.RequestedTheme,
-                Title = "Restore this backup?",
+                Title = "恢复此备份？/ Restore this backup?",
                 Content = summary,
-                PrimaryButtonText = "Restore",
-                CloseButtonText = "Cancel",
+                PrimaryButtonText = "恢复 / Restore",
+                CloseButtonText = "取消 / Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
 
@@ -1092,17 +1090,17 @@ namespace Action_Wheel.Settings
                 if (ConfigBackup.TryImport(path, out string importError))
                 {
                     ViewModel.ReloadFromDisk();
-                    ViewModel.ShowStatus(InfoBarSeverity.Success, "Backup restored",
-                        "Every row, profile and appearance setting below now reflects the backup.");
+                    ViewModel.ShowStatus(InfoBarSeverity.Success, "备份已恢复 / Backup restored",
+                        "下方按钮、配置和外观设置均已从备份恢复。/ Every row, profile and appearance setting below now reflects the backup.");
                 }
                 else
                 {
-                    ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not restore the backup", importError);
+                    ViewModel.ShowStatus(InfoBarSeverity.Error, "无法恢复备份 / Could not restore the backup", importError);
                 }
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not restore the backup", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法恢复备份 / Could not restore the backup", ex.Message);
             }
             finally
             {
@@ -1128,7 +1126,7 @@ namespace Action_Wheel.Settings
             }
             catch (Exception ex)
             {
-                ViewModel.ShowStatus(InfoBarSeverity.Error, "Could not open the file picker", ex.Message);
+                ViewModel.ShowStatus(InfoBarSeverity.Error, "无法打开文件选择器 / Could not open the file picker", ex.Message);
                 return null;
             }
         }

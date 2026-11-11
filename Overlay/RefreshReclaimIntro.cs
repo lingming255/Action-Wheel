@@ -26,10 +26,13 @@ namespace Action_Wheel.Overlay
     /// </summary>
     internal sealed class RefreshReclaimIntro : IDisposable
     {
-        internal const double DurationMs = 240;
+        internal const double DurationMs = ReclaimAnimationSettings.DefaultDurationMs;
         private const int MaximumBlocks = 600;
         private const int TimingBands = 40;
-        private const double PulseMs = DurationMs / 4;
+        private readonly double _durationMs, _pulseMs;
+        private readonly double _densityScale;
+        private readonly int _maximumBlocks;
+        private readonly float _glowOpacity;
         private readonly Window _window;
         private readonly Grid _host;
         private readonly RectInt32 _bounds;
@@ -54,7 +57,7 @@ namespace Action_Wheel.Overlay
         internal Task Completion => _completion.Task;
         internal bool AlreadyCompleted => _disposed || _completion.Task.IsCompleted;
         internal double ElapsedMs => _clock.Elapsed.TotalMilliseconds;
-        internal double RemainingMs => _disposed ? 0 : Math.Max(0, DurationMs - ElapsedMs);
+        internal double RemainingMs => _disposed ? 0 : Math.Max(0, _durationMs - ElapsedMs);
 
         /// <summary>
         /// Keeps an unfinished inward pulse visible above the outward playback's opaque cover.
@@ -81,7 +84,8 @@ namespace Action_Wheel.Overlay
             }
         }
 
-        internal static RefreshReclaimIntro? TryStart(PointInt32 origin, nint menuHwnd)
+        internal static RefreshReclaimIntro? TryStart(PointInt32 origin, nint menuHwnd,
+            ReclaimAnimationSettings? settings = null)
         {
             RefreshReclaimIntro? intro = null;
             try
@@ -90,7 +94,7 @@ namespace Action_Wheel.Overlay
                 var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
                 if (!GetMonitorInfo(monitor, ref info)) return null;
                 intro = new RefreshReclaimIntro(new RectInt32(info.Monitor.Left, info.Monitor.Top,
-                    info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top), origin, menuHwnd, false);
+                    info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top), origin, menuHwnd, false, settings);
                 return intro;
             }
             catch
@@ -101,11 +105,19 @@ namespace Action_Wheel.Overlay
         }
 
         /// <summary>Creates only a never-shown synthetic decoration for integration diagnostics.</summary>
-        internal static RefreshReclaimIntro CreateHiddenForProbe(RectInt32 bounds, PointInt32 origin, nint menuHwnd)
-            => new(bounds, origin, menuHwnd, hidden: true);
+        internal static RefreshReclaimIntro CreateHiddenForProbe(RectInt32 bounds, PointInt32 origin, nint menuHwnd,
+            ReclaimAnimationSettings? settings = null)
+            => new(bounds, origin, menuHwnd, hidden: true, settings: settings);
 
-        private RefreshReclaimIntro(RectInt32 bounds, PointInt32 origin, nint menuHwnd, bool hidden)
+        private RefreshReclaimIntro(RectInt32 bounds, PointInt32 origin, nint menuHwnd, bool hidden,
+            ReclaimAnimationSettings? settings = null)
         {
+            var profile = (settings ?? ReclaimAnimationSettings.Default).Normalised();
+            _durationMs = profile.DurationMs;
+            _pulseMs = profile.PixelDurationMs;
+            _maximumBlocks = (int)Math.Round(MaximumBlocks * profile.DensityPercent / 100);
+            _densityScale = Math.Sqrt(profile.DensityPercent / 100);
+            _glowOpacity = (float)(.48 * profile.GlowPercent / 100);
             _bounds = bounds; _origin = origin; _menuHwnd = menuHwnd; _hidden = hidden;
             _host = new Grid { Background = new SolidColorBrush(Colors.Transparent), IsHitTestVisible = false };
             _backgroundSubclass = ClearNativeBackground;
@@ -119,7 +131,7 @@ namespace Action_Wheel.Overlay
                 _hwnd = WindowNative.GetWindowHandle(_window);
                 _finishTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
                 _finishTimer.IsRepeating = false;
-                _finishTimer.Interval = TimeSpan.FromMilliseconds(DurationMs);
+                _finishTimer.Interval = TimeSpan.FromMilliseconds(_durationMs);
                 _finishTimer.Tick += Finish;
                 _window.Closed += OnClosed;
                 _host.Loaded += OnLoaded;
@@ -206,7 +218,8 @@ namespace Action_Wheel.Overlay
 
             int shorter = Math.Min(_bounds.Width, _bounds.Height);
             int cell = Math.Max(6, 2 * (int)Math.Floor(.0181 * shorter / 2));
-            double step = Math.Max(cell * 3.0, Math.Sqrt((double)_bounds.Width * _bounds.Height / MaximumBlocks));
+            double step = Math.Max(cell * 3.0 / _densityScale,
+                Math.Sqrt((double)_bounds.Width * _bounds.Height / _maximumBlocks));
             int columns = Math.Max(1, (int)Math.Floor(_bounds.Width / step));
             int rows = Math.Max(1, (int)Math.Floor(_bounds.Height / step));
             double dx = Math.Max(_origin.X - _bounds.X, _bounds.X + _bounds.Width - 1 - _origin.X);
@@ -220,7 +233,7 @@ namespace Action_Wheel.Overlay
                 int y = (int)Math.Round((row + .5) * _bounds.Height / rows);
                 double ox = x - (_origin.X - _bounds.X), oy = y - (_origin.Y - _bounds.Y);
                 double distance = Math.Sqrt(ox * ox + oy * oy);
-                if (distance < clearRadius || _blocks.Count >= MaximumBlocks) continue;
+                if (distance < clearRadius || _blocks.Count >= _maximumBlocks) continue;
                 int band = Math.Clamp((int)Math.Floor((1 - Math.Min(1, distance / farthest)) * (TimingBands - 1)), 0, TimingBands - 1);
                 // Tint is an immediate placeholder. The raw capture can replace pigment later
                 // without touching either this fixed position or the already-running scan.
@@ -229,7 +242,7 @@ namespace Action_Wheel.Overlay
                 var shadow = compositor.CreateDropShadow();
                 shadow.Color = colour;
                 shadow.BlurRadius = cell * .65f;
-                shadow.Opacity = .48f;
+                shadow.Opacity = _glowOpacity;
                 shadow.Offset = Vector3.Zero;
                 var block = compositor.CreateSpriteVisual();
                 block.Size = new Vector2(cell * .72f);
@@ -250,8 +263,8 @@ namespace Action_Wheel.Overlay
                 pulse.InsertKeyFrame(.22f, .68f);
                 pulse.InsertKeyFrame(.5f, .4f);
                 pulse.InsertKeyFrame(1, 0);
-                pulse.Duration = TimeSpan.FromMilliseconds(PulseMs);
-                pulse.DelayTime = TimeSpan.FromMilliseconds(band / (double)(TimingBands - 1) * (DurationMs - PulseMs));
+                pulse.Duration = TimeSpan.FromMilliseconds(_pulseMs);
+                pulse.DelayTime = TimeSpan.FromMilliseconds(band / (double)(TimingBands - 1) * (_durationMs - _pulseMs));
                 pulse.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
                 bands[band].StartAnimation("Opacity", pulse);
                 _resources.Add(pulse);
@@ -469,6 +482,62 @@ namespace Action_Wheel.Overlay
                 throw new InvalidOperationException("The offscreen first-show check could not suppress its pixels.");
             }
             // Windows owns the empty region after SetWindowRgn succeeds.
+        }
+
+        /// <summary>Verifies configurable native animations with synthetic, never-shown windows.</summary>
+        internal static async Task<object> RunSettingsProbeAsync()
+        {
+            var bounds = new RectInt32(-20000, -20000, 1280, 720);
+            var origin = new PointInt32(-19360, -19640);
+            int sparseCount;
+            using (var sparse = CreateHiddenForProbe(bounds, origin, 0, new ReclaimAnimationSettings
+            {
+                DurationMs = 100, PixelDurationMs = 500, DensityPercent = 10, GlowPercent = 0,
+            }))
+            {
+                sparseCount = sparse._blocks.Count;
+                Require(sparse._durationMs == 100 && sparse._pulseMs == 100
+                    && sparse._maximumBlocks == 60 && sparseCount is > 0 and <= 60,
+                    "Sparse opening did not apply its bounded timing/density snapshot.");
+                foreach (var block in sparse._blocks)
+                    Require(block.Shadow.Opacity == 0, "Zero glow did not disable the soft halo.");
+                int animations = 0;
+                foreach (IDisposable resource in sparse._resources)
+                    if (resource is ScalarKeyFrameAnimation animation)
+                    {
+                        animations++;
+                        Require(animation.Duration.TotalMilliseconds == 100 && animation.DelayTime == TimeSpan.Zero,
+                            "A pulse longer than total produced an invalid native scan delay.");
+                    }
+                Require(animations == TimingBands && !IsWindowVisible(sparse._hwnd),
+                    "Configurable opening lost its native clocks or became visible.");
+                Require(await Task.WhenAny(sparse.Completion, Task.Delay(1200)) == sparse.Completion,
+                    "The custom total duration did not complete naturally.");
+            }
+            using var dense = CreateHiddenForProbe(bounds, origin, 0, new ReclaimAnimationSettings
+            {
+                DurationMs = 1500, PixelDurationMs = 400, DensityPercent = 200, GlowPercent = 200,
+            });
+            Require(dense._blocks.Count > sparseCount && dense._blocks.Count <= 1200
+                && dense._maximumBlocks == 1200 && dense._durationMs == 1500 && dense._pulseMs == 400,
+                "The dense opening ignored its bounded block budget or custom timings.");
+            foreach (var block in dense._blocks)
+                Require(Math.Abs(block.Shadow.Opacity - .96f) < .00001,
+                    "Custom glow strength did not reach the native shadows.");
+            foreach (IDisposable resource in dense._resources)
+                if (resource is ScalarKeyFrameAnimation animation)
+                    Require(animation.Duration.TotalMilliseconds == 400
+                        && animation.DelayTime.TotalMilliseconds >= 0
+                        && animation.DelayTime.TotalMilliseconds + 400 <= 1500.01,
+                        "The configurable scan outlasts its native window lifetime.");
+            int denseCount = dense._blocks.Count;
+            dense.Dispose();
+            Require(dense.Completion.IsCompletedSuccessfully && dense._resources.Count == 0,
+                "Custom opening resources survived cancellation.");
+            return new { Passed = true, SparseBlocks = sparseCount, DenseBlocks = denseCount,
+                CustomNativeTimingsVerified = true, PulseClampedToTotal = true,
+                ZeroAndDoubleGlowVerified = true, NaturalEndAndCancellation = true,
+                UsedDesktopCapture = false, DisplayedEffect = false };
         }
 
         private static bool IsAboveInZOrder(nint upper, nint lower)

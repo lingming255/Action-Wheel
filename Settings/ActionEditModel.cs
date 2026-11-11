@@ -157,19 +157,19 @@ namespace Action_Wheel.Settings
         /// <summary>Where this button sits on the ring, in the user's terms.</summary>
         public string PositionName => _tag switch
         {
-            0 => "Centre",
-            1 => "Top",
-            2 => "Top right",
-            3 => "Right",
-            4 => "Bottom right",
-            5 => "Bottom",
-            6 => "Bottom left",
-            7 => "Left",
-            8 => "Top left",
-            _ => $"Button {_tag}",
+            0 => "中心 / Centre",
+            1 => "上方 / Top",
+            2 => "右上 / Top right",
+            3 => "右侧 / Right",
+            4 => "右下 / Bottom right",
+            5 => "下方 / Bottom",
+            6 => "左下 / Bottom left",
+            7 => "左侧 / Left",
+            8 => "左上 / Top left",
+            _ => $"按钮 / Button {_tag}",
         };
 
-        public string TagCaption => $"tag {_tag}";
+        public string TagCaption => $"位置编号 / tag {_tag}";
 
         public string Label
         {
@@ -459,7 +459,7 @@ namespace Action_Wheel.Settings
             }
         }
 
-        public string EditGroupText => $"Edit group ({_groupChildren.Count}/{ActionItem.MaxGroupChildren})…";
+        public string EditGroupText => $"编辑分组 / Edit group ({_groupChildren.Count}/{ActionItem.MaxGroupChildren})…";
 
         /// <summary>Index into the hold-action combo box. 0 (no hold action) is the default.</summary>
         public int HoldKindIndex
@@ -483,11 +483,11 @@ namespace Action_Wheel.Settings
 
         public string HoldValuePlaceholder => _holdKindIndex switch
         {
-            1 => "For example: Ctrl+Shift+S",
-            2 => "For example: notepad.exe or https://…",
-            3 => "Choose a built-in function",
-            5 => "Text to copy to the clipboard",
-            _ => "No hold action",
+            1 => "例如 / For example: Ctrl+Shift+S",
+            2 => "例如 / For example: notepad.exe or https://…",
+            3 => "选择内置功能 / Choose a built-in function",
+            5 => "复制到剪贴板的文字 / Text to copy to the clipboard",
+            _ => "无长按操作 / No hold action",
         };
 
         public string HoldValue { get => _holdValue; set => Set(ref _holdValue, value); }
@@ -525,12 +525,12 @@ namespace Action_Wheel.Settings
 
         public string ValuePlaceholder => _kindIndex switch
         {
-            1 => "For example: Ctrl+Shift+S",
-            2 => "For example: notepad.exe or https://…",
-            3 => "Choose a built-in function",
-            4 => "Use \"Edit group\" below to configure",
-            5 => "Text to copy to the clipboard",
-            _ => "This button only closes the menu",
+            1 => "例如 / For example: Ctrl+Shift+S",
+            2 => "例如 / For example: notepad.exe or https://…",
+            3 => "选择内置功能 / Choose a built-in function",
+            4 => "使用下方“编辑分组”配置 / Use \"Edit group\" below to configure",
+            5 => "复制到剪贴板的文字 / Text to copy to the clipboard",
+            _ => "此按钮仅关闭菜单 / This button only closes the menu",
         };
 
         /// <summary>Set by the window when another row uses the same shortcut.</summary>
@@ -569,10 +569,10 @@ namespace Action_Wheel.Settings
 
         public string StatusTooltip => _status switch
         {
-            LaunchTargetStatus.Resolved => "This target was found.",
-            LaunchTargetStatus.Unresolved => "Nothing found at this path, and it is not a URL or a program on PATH.",
-            LaunchTargetStatus.Duplicate => "Another button is bound to this same shortcut.",
-            LaunchTargetStatus.Invalid => "This shortcut contains a key name the app cannot send.",
+            LaunchTargetStatus.Resolved => "已找到目标 / This target was found.",
+            LaunchTargetStatus.Unresolved => "未找到此路径，且不是网址或 PATH 中的程序 / Nothing found at this path, and it is not a URL or a program on PATH.",
+            LaunchTargetStatus.Duplicate => "另一个按钮使用了相同快捷键 / Another button is bound to this same shortcut.",
+            LaunchTargetStatus.Invalid => "快捷键包含不支持的按键名称 / This shortcut contains a key name the app cannot send.",
             _ => string.Empty,
         };
 

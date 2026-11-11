@@ -387,12 +387,56 @@ namespace Action_Wheel.Overlay
                     frame?.Dispose();
                 }
             }
+            // The longest configurable intro can outlast the shortest outward scan. Its owner
+            // must retire that scan at the original deadline and retain only the inward pulse.
+            RadialMenu? longIntroMenu = null;
+            RefreshFrame? shortFrame = null;
+            RefreshReclaimIntro? longIntro = null;
+            try
+            {
+                longIntroMenu = new RadialMenu();
+                longIntroMenu.AppWindow.Hide();
+                longIntroMenu.AppWindow.Move(new PointInt32(-20000, -20000));
+                longIntroMenu._screenOrigin = new PointInt32(-20000, -20000);
+                await Task.Delay(120);
+                shortFrame = CreateReleaseProbeFrame(600);
+                longIntroMenu.PrepareRefreshPresentation(shortFrame);
+                var release = new PointInt32(-19680, -19820);
+                shortFrame.PrepareRelease(release);
+                longIntro = RefreshReclaimIntro.CreateHiddenForProbe(shortFrame.Bounds, release,
+                    longIntroMenu._windowHandle, new ReclaimAnimationSettings { DurationMs = 1500 });
+                longIntroMenu.AdoptRefreshReclaimIntro(longIntro);
+                var readyFrame = shortFrame;
+                longIntroMenu.PlayRefresh(readyFrame, readyFrame.Dispose);
+                for (int callback = 0; callback < 3; callback++)
+                    longIntroMenu._refreshOnRendering?.Invoke(null, null!);
+                await Task.Delay(820);
+                RequireReleaseProbe(!longIntroMenu._closed && !longIntro.AlreadyCompleted
+                    && longIntroMenu._gpuRefreshPlayback == null && longIntroMenu._refreshPlayback == null
+                    && longIntroMenu.RefreshLayer.Visibility == Visibility.Collapsed,
+                    "A short outward scan clipped the long intro or retained its final image.");
+                RequireReleaseProbe(await Task.WhenAny(longIntro.Completion, Task.Delay(1800)) == longIntro.Completion,
+                    "The long configurable intro never completed.");
+                await Task.Delay(80);
+                RequireReleaseProbe(longIntroMenu._closed && longIntroMenu._refreshReclaimIntro == null
+                    && longIntroMenu._refreshTimer == null,
+                    "The parallel owner survived the end of both independent animations.");
+                rounds.Add(new { IntroDurationMs = 1500, OutwardDurationMs = 600,
+                    IntroSurvivedOutwardEnd = true, OutwardLayerRetiredAtItsDeadline = true,
+                    ClosedAfterBothAnimations = true });
+            }
+            finally
+            {
+                if (longIntroMenu is { _closed: false }) longIntroMenu.CloseMenu();
+                longIntro?.Dispose();
+                shortFrame?.Dispose();
+            }
             return new { Passed = true, Rounds = rounds, UsedDesktopCapture = false, UsedModel = false,
                 DisplayedEffect = false, UsedScreenGrade = false,
                 TimingBoundary = "Prepared synthetic frames and manually committed hidden covers; this verifies independent lifetimes, not real input-to-visible latency." };
         }
 
-        private static RefreshFrame CreateReleaseProbeFrame()
+        private static RefreshFrame CreateReleaseProbeFrame(double durationMs = 1400)
         {
             const int width = 640, height = 360;
             byte[] capture = new byte[width * height * 4];
@@ -409,7 +453,7 @@ namespace Action_Wheel.Overlay
             }
             return RefreshFrame.CreatePrepared(capture, new RefreshDepthMap(width, height, depth),
                 new RectInt32(-20000, -20000, width, height), width / 2, height / 2,
-                new RefreshTimingProfile(new RefreshAnimationSettings { DurationMs = 1400 }, instantStart: true),
+                new RefreshTimingProfile(new RefreshAnimationSettings { DurationMs = durationMs }, instantStart: true),
                 CancellationToken.None);
         }
 

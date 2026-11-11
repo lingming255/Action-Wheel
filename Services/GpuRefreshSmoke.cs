@@ -5,6 +5,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Text.Json;
 using Action_Wheel.Overlay;
+using Action_Wheel.Settings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
@@ -115,8 +116,10 @@ namespace Action_Wheel.Services
                 }
                 object releasePreparation = await RadialMenu.RunReleasePreparationProbeAsync();
                 object reclaimOpening = await RefreshReclaimIntro.RunHiddenProbeAsync(verifyOffscreenShow: true);
+                object reclaimSettings = await RefreshReclaimIntro.RunSettingsProbeAsync();
                 object parallelIntro = await RadialMenu.RunParallelIntroProbeAsync();
                 object gradeTransition = await ScreenGrade.RunTransitionProbeAsync();
+                object bilingualSettings = await SettingsWindow.RunBilingualSettingsProbeAsync();
                 object presentation = await GpuRefreshPresentationProbe.RunAsync();
                 JsonElement presentationResult = JsonSerializer.SerializeToElement(presentation);
                 bool pixelCaptureAvailable = presentationResult.TryGetProperty("PixelCaptureAvailable", out var available)
@@ -135,8 +138,10 @@ namespace Action_Wheel.Services
                     Presentation = presentation,
                     ReleasePreparation = releasePreparation,
                     ReclaimOpening = reclaimOpening,
+                    ReclaimSettings = reclaimSettings,
                     ParallelIntro = parallelIntro,
                     GradeTransition = gradeTransition,
+                    BilingualSettings = bilingualSettings,
                     SyntheticDepthWarmupMs = depthWarmupMs,
                     UsedDesktopCapture = false, DisplayedEffect = false }, new JsonSerializerOptions { WriteIndented = true }));
             }

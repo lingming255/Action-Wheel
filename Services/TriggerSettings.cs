@@ -47,6 +47,7 @@ namespace Action_Wheel.Services
                         AnimationDurationMs = ReadAnimationDurationMs(root),
                     }.Normalised(),
                     Refresh = ReadRefreshSettings(root),
+                    Reclaim = ReadReclaimSettings(root),
                 };
             }
             catch (Exception)
@@ -63,6 +64,7 @@ namespace Action_Wheel.Services
             {
                 var appearance = (preferences.Appearance ?? RingAppearance.Default).Normalised();
                 var refresh = (preferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
+                var reclaim = (preferences.Reclaim ?? ReclaimAnimationSettings.Default).Normalised();
 
                 using var stream = new MemoryStream();
                 using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -79,6 +81,12 @@ namespace Action_Wheel.Services
                     writer.WriteNumber("durationMs", refresh.DurationMs);
                     writer.WriteNumber("distanceDelayPercent", refresh.DistanceDelayPercent);
                     writer.WriteNumber("pixelDurationPercent", refresh.PixelDurationPercent);
+                    writer.WriteEndObject();
+                    writer.WriteStartObject("reclaim");
+                    writer.WriteNumber("durationMs", reclaim.DurationMs);
+                    writer.WriteNumber("pixelDurationMs", reclaim.PixelDurationMs);
+                    writer.WriteNumber("densityPercent", reclaim.DensityPercent);
+                    writer.WriteNumber("glowPercent", reclaim.GlowPercent);
                     writer.WriteEndObject();
                     writer.WriteEndObject();
                 }
@@ -109,6 +117,20 @@ namespace Action_Wheel.Services
         private static double ReadDouble(JsonElement root, string name, double fallback)
             => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
                 && value.TryGetDouble(out double result) ? result : fallback;
+
+        private static ReclaimAnimationSettings ReadReclaimSettings(JsonElement root)
+        {
+            if (!root.TryGetProperty("reclaim", out var value) || value.ValueKind != JsonValueKind.Object)
+                return ReclaimAnimationSettings.Default;
+            var defaults = ReclaimAnimationSettings.Default;
+            return new ReclaimAnimationSettings
+            {
+                DurationMs = ReadDouble(value, "durationMs", defaults.DurationMs),
+                PixelDurationMs = ReadDouble(value, "pixelDurationMs", defaults.PixelDurationMs),
+                DensityPercent = ReadDouble(value, "densityPercent", defaults.DensityPercent),
+                GlowPercent = ReadDouble(value, "glowPercent", defaults.GlowPercent),
+            }.Normalised();
+        }
 
         private static int ReadInt(JsonElement root, string name, int fallback)
         {
@@ -151,5 +173,7 @@ namespace Action_Wheel.Services
 
         /// <summary>The desktop refresh effect, saved independently from the ring's opening animation.</summary>
         public RefreshAnimationSettings Refresh { get; init; } = RefreshAnimationSettings.Default;
+
+        public ReclaimAnimationSettings Reclaim { get; init; } = ReclaimAnimationSettings.Default;
     }
 }
