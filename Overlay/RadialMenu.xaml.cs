@@ -11,6 +11,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -242,6 +243,10 @@ namespace Action_Wheel.Overlay
         private DispatcherQueueTimer? _refreshTimer;
         private RefreshPlayback? _refreshPlayback;
         private GpuRefreshPlayback? _gpuRefreshPlayback;
+        private RefreshFrame? _preparedRefreshFrame;
+        private bool _fullRefreshStarted;
+        private ContainerVisual? _refreshFeedbackVisual;
+        private readonly List<IDisposable> _refreshFeedbackResources = new();
         internal bool IsRefreshPlaying { get; private set; }
 
         /// <summary>
@@ -286,6 +291,8 @@ namespace Action_Wheel.Overlay
             _refreshPlayback = null;
             _gpuRefreshPlayback?.Dispose();
             _gpuRefreshPlayback = null;
+            _preparedRefreshFrame = null;
+            ClearRefreshFeedback();
             _refreshTimer?.Stop();
             _refreshTimer = null;
 
@@ -1677,20 +1684,159 @@ namespace Action_Wheel.Overlay
         }
 
         /// <summary>
-        /// Presents the hold's grey cover, restores live colour beneath it, then plays the
-        /// uniform blocks and bloom following two depth fronts in a topmost, click-through image.
+        /// Creates the native presentation surface while the gesture is held. The frame keeps
+        /// renderer ownership until release so its final click-relative timings can still upload.
         /// </summary>
-        /// <remarks>
-        /// One bounded worker uploads the latest finished capture-relative correction. The
-        /// close timer shares the renderer's duration; late frames never extend playback.
-        ///
-        /// <paramref name="restoreColour"/> is only called once the cover has been rendered, so the
-        /// matrix restoration is hidden during the handoff. If the menu closes first,
-        /// LauncherService restores colour from its Closed handler.
-        /// </remarks>
+        internal void PrepareRefreshPresentation(RefreshFrame frame)
+        {
+            if (_closed || _fullRefreshStarted || ReferenceEquals(_preparedRefreshFrame, frame)) return;
+            if (_preparedRefreshFrame != null) return;
+            _preparedRefreshFrame = frame;
+            var gpu = frame.BorrowGpuRenderer();
+            if (gpu == null) return;
+            try
+            {
+                _gpuRefreshPlayback = new GpuRefreshPlayback(gpu, RefreshLayer, ownsRenderer: false);
+            }
+            catch (Exception)
+            {
+                // A failed native surface may have created the frame's one swapchain already.
+                // Keep the CPU reference usable, and dispose the unused GPU at release/close.
+                _gpuRefreshPlayback = null;
+            }
+        }
+
+        internal void DetachBorrowedRefreshPresentation()
+        {
+            // EndGrade can also run from preparation's exception path before Window.Closed.
+            // Detach on UI before a worker is allowed to dispose the frame-owned device.
+            if (_gpuRefreshPlayback is { OwnsRenderer: false } borrowed)
+            {
+                _gpuRefreshPlayback = null;
+                borrowed.Dispose();
+            }
+            _preparedRefreshFrame = null;
+        }
+
+        /// <summary>Gives a release immediate local feedback while exact depth preparation finishes.</summary>
+        internal void BeginRefreshFeedback(PointInt32 release)
+        {
+            if (_closed || IsRefreshPlaying) return;
+            IsRefreshPlaying = true;
+            DisarmHold();
+            RefreshInputTransparency.Enable(_windowHandle);
+            RootGrid.IsHitTestVisible = false;
+            MenuContainer.Visibility = Visibility.Collapsed;
+            RefreshFeedbackLayer.Width = MenuSize;
+            RefreshFeedbackLayer.Height = MenuSize;
+            RefreshFeedbackLayer.Visibility = Visibility.Visible;
+            double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
+            double centreX = (release.X - _screenOrigin.X) / scale;
+            double centreY = (release.Y - _screenOrigin.Y) / scale;
+            double size = _preparedRefreshFrame == null ? 14
+                : _preparedRefreshFrame.Renderer.BlocksRenderer.CellSize / scale;
+            size = Math.Clamp(size, 6, 28);
+            var compositor = ElementCompositionPreview.GetElementVisual(RefreshFeedbackLayer).Compositor;
+            var container = compositor.CreateContainerVisual();
+            _refreshFeedbackVisual = container;
+            _refreshFeedbackResources.Add(container);
+            foreach ((double dx, double dy) in new (double, double)[]
+                { (0, 0), (-1.12, 0), (1.12, 0), (0, -1.12), (0, 1.12) })
+            {
+                Color colour = FeedbackColour(release, dx * size * scale, dy * size * scale);
+                int maximum = Math.Max(colour.R, Math.Max(colour.G, colour.B));
+                if (maximum > 0 && maximum < 160)
+                {
+                    // Lift a dark pigment proportionally, retaining its hue rather than adding
+                    // a white centre. This also makes the existing dark centre-button colour visible.
+                    double gain = 160.0 / maximum;
+                    colour = Color.FromArgb(255, (byte)(colour.R * gain),
+                        (byte)(colour.G * gain), (byte)(colour.B * gain));
+                }
+                var brush = compositor.CreateColorBrush(colour);
+                var shadow = compositor.CreateDropShadow();
+                shadow.Color = colour;
+                shadow.BlurRadius = (float)(size * .6);
+                shadow.Opacity = .35f;
+                var block = compositor.CreateSpriteVisual();
+                block.Size = new System.Numerics.Vector2((float)size);
+                block.Offset = new System.Numerics.Vector3(
+                    (float)(centreX + dx * size - size / 2), (float)(centreY + dy * size - size / 2), 0);
+                block.Brush = brush;
+                block.Shadow = shadow;
+                container.Children.InsertAtTop(block);
+                _refreshFeedbackResources.Add(brush);
+                _refreshFeedbackResources.Add(shadow);
+                _refreshFeedbackResources.Add(block);
+            }
+            container.Opacity = .75f;
+            var pulse = compositor.CreateScalarKeyFrameAnimation();
+            pulse.InsertKeyFrame(0, .75f);
+            pulse.InsertKeyFrame(.65f, .15f);
+            pulse.InsertKeyFrame(1, .75f);
+            pulse.Duration = TimeSpan.FromMilliseconds(600);
+            pulse.IterationBehavior = AnimationIterationBehavior.Forever;
+            container.StartAnimation("Opacity", pulse);
+            _refreshFeedbackResources.Add(pulse);
+            ElementCompositionPreview.SetElementChildVisual(RefreshFeedbackLayer, container);
+        }
+
+        private Color FeedbackColour(PointInt32 release, double offsetX, double offsetY)
+        {
+            if (_preparedRefreshFrame is { } frame)
+            {
+                int x = (int)Math.Clamp(release.X - frame.Bounds.X + offsetX, 0, frame.Bounds.Width - 1);
+                int y = (int)Math.Clamp(release.Y - frame.Bounds.Y + offsetY, 0, frame.Bounds.Height - 1);
+                byte[] pixels = frame.Renderer.CapturePixels;
+                int index = (y * frame.Bounds.Width + x) * 4;
+                return Color.FromArgb(255, pixels[index + 2], pixels[index + 1], pixels[index]);
+            }
+            Color fallback = (CenterBtn.Background as SolidColorBrush)?.Color
+                ?? IconFactory.ColorOr(ActionsByTag[0]?.Background ?? string.Empty, IconFactory.DefaultBackground(0));
+            return Color.FromArgb(255, fallback.R, fallback.G, fallback.B);
+        }
+
+        internal async System.Threading.Tasks.Task WaitForRefreshFeedbackAsync()
+        {
+            if (_closed || _refreshFeedbackVisual == null) return;
+            var committed = new System.Threading.Tasks.TaskCompletionSource(
+                System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            int frames = 0;
+            EventHandler<object> rendering = (_, _) =>
+            {
+                if (++frames >= 2 || _closed) committed.TrySetResult();
+            };
+            CompositionTarget.Rendering += rendering;
+            try
+            {
+                // Two callbacks give the first native composition batch a frame to commit.
+                // Hidden/occluded windows may not render; never hold a real release forever.
+                await System.Threading.Tasks.Task.WhenAny(committed.Task,
+                    System.Threading.Tasks.Task.Delay(80));
+            }
+            finally { CompositionTarget.Rendering -= rendering; }
+        }
+
+        private void ClearRefreshFeedback()
+        {
+            try { ElementCompositionPreview.SetElementChildVisual(RefreshFeedbackLayer, null); } catch (Exception) { }
+            for (int i = _refreshFeedbackResources.Count - 1; i >= 0; i--)
+            {
+                try { _refreshFeedbackResources[i].Dispose(); } catch (Exception) { }
+            }
+            _refreshFeedbackResources.Clear();
+            _refreshFeedbackVisual = null;
+            try { RefreshFeedbackLayer.Visibility = Visibility.Collapsed; } catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Presents the prepared grey cover, restores live colour beneath it, then plays the
+        /// uniform blocks and bloom. The cover handoff prevents a colour-restoration flash;
+        /// local feedback has already acknowledged release while the exact scene prepared.
+        /// </summary>
         internal void PlayRefresh(RefreshFrame? frame, Action restoreColour)
         {
-            if (_refreshPlayback != null || _gpuRefreshPlayback != null)
+            if (_fullRefreshStarted)
                 return;
             if (_closed || _appWindow == null)
             {
@@ -1706,6 +1852,9 @@ namespace Action_Wheel.Overlay
                 return;
             }
 
+            PrepareRefreshPresentation(frame);
+            _fullRefreshStarted = true;
+
             var bounds = frame.Bounds;
             IsRefreshPlaying = true;
             double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
@@ -1717,6 +1866,10 @@ namespace Action_Wheel.Overlay
             RefreshLayer.Height = layerH;
             RefreshLayer.Visibility = Visibility.Visible;
 
+            if (_refreshFeedbackVisual != null)
+                _refreshFeedbackVisual.Offset = new System.Numerics.Vector3(
+                    (float)((_screenOrigin.X - bounds.X) / scale),
+                    (float)((_screenOrigin.Y - bounds.Y) / scale), 0);
             _screenOrigin = new PointInt32(bounds.X, bounds.Y);
             _appWindow.Move(_screenOrigin);
             _appWindow.Resize(new SizeInt32(bounds.Width, bounds.Height));
@@ -1732,10 +1885,27 @@ namespace Action_Wheel.Overlay
             // Hardware frames stay on GPU from shading through the Composition surface.
             // A device/interop failure before handoff retains the existing CPU image path.
             var gpu = frame.TakeGpuRenderer();
-            if (gpu != null)
+            if (_gpuRefreshPlayback != null && gpu != null
+                && ReferenceEquals(_gpuRefreshPlayback.Renderer, gpu))
             {
-                try { _gpuRefreshPlayback = new GpuRefreshPlayback(gpu, RefreshLayer); }
-                catch (Exception) { gpu.Dispose(); }
+                try
+                {
+                    _gpuRefreshPlayback.AdoptRendererOwnership();
+                    // Requeue the grey cover after the final click-relative timing upload.
+                    _gpuRefreshPlayback.RenderFrame(0);
+                }
+                catch (Exception)
+                {
+                    _gpuRefreshPlayback.Dispose();
+                    _gpuRefreshPlayback = null;
+                    gpu.Dispose();
+                }
+            }
+            else
+            {
+                _gpuRefreshPlayback?.Dispose();
+                _gpuRefreshPlayback = null;
+                gpu?.Dispose();
             }
             if (_gpuRefreshPlayback == null)
             {
@@ -1769,6 +1939,7 @@ namespace Action_Wheel.Overlay
                 _refreshOnRendering = null;
                 if (_closed)
                     return;
+                ClearRefreshFeedback();
                 restoreColour();
                 timer.Start();
                 _refreshPlayback?.Start();

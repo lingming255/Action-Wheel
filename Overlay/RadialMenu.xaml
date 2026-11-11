@@ -229,5 +229,7 @@
              current coloured bloom. Two images present reusable buffers; no macro-tile fades. -->
         <Canvas x:Name="RefreshLayer" Visibility="Collapsed" IsHitTestVisible="False"
                 HorizontalAlignment="Left" VerticalAlignment="Top"/>
+        <Canvas x:Name="RefreshFeedbackLayer" Visibility="Collapsed" IsHitTestVisible="False"
+                HorizontalAlignment="Left" VerticalAlignment="Top"/>
     </Grid>
 </Window>

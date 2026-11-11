@@ -21,6 +21,7 @@ namespace Action_Wheel.Services
         // Assigned once by App before startup. Keeping this optional also lets the CPU reference
         // checks run without loading any graphics APIs.
         internal static Func<SpectrumOverlayRefreshRenderer, CancellationToken, bool>? TryGpuWarmup { get; set; }
+        internal static Action<CancellationToken>? TryDepthWarmup { get; set; }
 
         /// <summary>Starts or joins the same best-effort background warmup.</summary>
         public static Task EnsureAsync()
@@ -36,6 +37,9 @@ namespace Action_Wheel.Services
         {
             try
             {
+                try { TryDepthWarmup?.Invoke(Lifetime.Token); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) { /* Real capture retries missing/unavailable model dependencies. */ }
                 await RenderAsync(Lifetime.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

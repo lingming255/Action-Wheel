@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Threading;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -30,6 +31,26 @@ namespace Action_Wheel.Services
         internal static string ModelPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ActionWheel", "Models", ModelFileName);
+
+        /// <summary>Prime session loading and the usual 392x224 inference shape without screen data.</summary>
+        internal static void Warmup(CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            const int width = 640, height = 360;
+            var pixels = new byte[width * height * 4];
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                int p = (y * width + x) * 4;
+                pixels[p] = (byte)(x * 255 / (width - 1));
+                pixels[p + 1] = (byte)(y * 255 / (height - 1));
+                pixels[p + 2] = (byte)((x / 13 + y / 11) % 2 == 0 ? 60 : 180);
+                pixels[p + 3] = 255;
+            }
+            cancellation.ThrowIfCancellationRequested();
+            _ = Estimate(pixels, width, height);
+            cancellation.ThrowIfCancellationRequested();
+        }
 
         public static RefreshDepthMap Estimate(byte[] bgra, int width, int height)
         {

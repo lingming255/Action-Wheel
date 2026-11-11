@@ -669,12 +669,34 @@ namespace Action_Wheel.Services
                 if (ReferenceEquals(_gradedMenu, menu))
                     ScreenGrade.Lower();
             }), cancellation.Token, settings: _refreshSettings);
+            _ = PrepareRefreshPresentationAsync(menu, _refreshFrame);
+        }
+
+        private async Task PrepareRefreshPresentationAsync(RadialMenu menu, Task<RefreshFrame?> pending)
+        {
+            try
+            {
+                // Resume on the UI thread: the D3D scene is ready on its worker, but WinUI's
+                // Composition interop belongs here. Keep the frame's renderer ownership until
+                // release so cancellation and release-position retiming remain safe.
+                RefreshFrame? frame = await pending;
+                if (_stopped || frame == null || !ReferenceEquals(_currentMenu, menu)
+                    || !ReferenceEquals(_gradedMenu, menu) || !ReferenceEquals(_refreshFrame, pending))
+                    return;
+                menu.PrepareRefreshPresentation(frame);
+            }
+            catch (Exception)
+            {
+                // Preparation is optional: release still tries the ordinary presentation path.
+                // Neither this observer nor a stale completion owns the gesture's shared frame.
+            }
         }
 
         /// <summary>Restores colour and hands back the gesture's mosaic. UI thread.</summary>
         private Task<RefreshFrame?>? EndGrade()
         {
             var frame = _refreshFrame;
+            _gradedMenu?.DetachBorrowedRefreshPresentation();
             _gradedMenu = null;
             _refreshFrame = null;
             CancelRefreshCapture();
@@ -712,6 +734,12 @@ namespace Action_Wheel.Services
 
             try
             {
+                // Show local release feedback before model/scene preparation can suspend this
+                // method. It also turns the finished gesture into a click-through decoration.
+                menu.BeginRefreshFeedback(release);
+                // A completed capture would otherwise run all retiming synchronously here,
+                // before Composition can commit the local feedback's first displayed frame.
+                await menu.WaitForRefreshFeedbackAsync();
                 var pending = ReferenceEquals(_gradedMenu, menu) ? _refreshFrame : null;
                 RefreshFrame? frame = pending == null ? null : await pending;
                 // A canceled/replaced gesture must never retime or start the old menu after

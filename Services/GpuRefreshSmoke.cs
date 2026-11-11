@@ -26,6 +26,9 @@ namespace Action_Wheel.Services
                 // owner alive while individual playback windows exercise repeated teardown.
                 lifetimeWindow = new Window();
                 lifetimeWindow.AppWindow.Hide();
+                var depthClock = Stopwatch.StartNew();
+                await Task.Run(() => RefreshDepthEstimator.Warmup(System.Threading.CancellationToken.None));
+                double depthWarmupMs = depthClock.Elapsed.TotalMilliseconds;
                 for (int round = 0; round < 3; round++)
                 {
                     int width = round == 0 ? 1920 : round == 1 ? 3840 : 640;
@@ -109,6 +112,7 @@ namespace Action_Wheel.Services
                         window.Close();
                     }
                 }
+                object releasePreparation = await RadialMenu.RunReleasePreparationProbeAsync();
                 object presentation = await GpuRefreshPresentationProbe.RunAsync();
                 JsonElement presentationResult = JsonSerializer.SerializeToElement(presentation);
                 bool pixelCaptureAvailable = presentationResult.TryGetProperty("PixelCaptureAvailable", out var available)
@@ -125,6 +129,8 @@ namespace Action_Wheel.Services
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(new { Passed = true, Rounds = rounds,
                     PixelMappingVerified = pixelMappingVerified,
                     Presentation = presentation,
+                    ReleasePreparation = releasePreparation,
+                    SyntheticDepthWarmupMs = depthWarmupMs,
                     UsedDesktopCapture = false, DisplayedEffect = false }, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch (Exception error)

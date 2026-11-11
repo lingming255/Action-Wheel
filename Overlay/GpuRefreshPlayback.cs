@@ -27,6 +27,9 @@ namespace Action_Wheel.Overlay
         private long _lastFrameSlot = -1;
         private bool _disposed, _started, _subscribed, _attached, _hostEventsSubscribed;
         private bool _geometryPresentPending;
+        private bool _ownsRenderer;
+        internal bool OwnsRenderer => _ownsRenderer;
+        internal GpuRefreshRenderer Renderer => _renderer;
         internal int PresentedFrames { get; private set; }
         internal string AdapterName => _renderer.Device.AdapterName;
         internal object GetMappingDiagnostic()
@@ -49,9 +52,10 @@ namespace Action_Wheel.Overlay
             };
         }
 
-        public GpuRefreshPlayback(GpuRefreshRenderer renderer, FrameworkElement host)
+        public GpuRefreshPlayback(GpuRefreshRenderer renderer, FrameworkElement host, bool ownsRenderer = true)
         {
             _renderer = renderer; _host = host;
+            _ownsRenderer = ownsRenderer;
             try
             {
                 renderer.Device.CreateSwapChain(renderer.Width, renderer.Height);
@@ -91,6 +95,13 @@ namespace Action_Wheel.Overlay
                 try { DetachSurface(); } catch { }
                 throw;
             }
+        }
+
+        /// <summary>The release path transfers the already prepared frame before disposing it.</summary>
+        internal void AdoptRendererOwnership()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _ownsRenderer = true;
         }
 
         public void Start(Action failed)
@@ -236,7 +247,7 @@ namespace Action_Wheel.Overlay
             StopWatchingGeometry();
             _clock.Stop();
             try { DetachSurface(); }
-            finally { _renderer.Dispose(); }
+            finally { if (_ownsRenderer) _renderer.Dispose(); }
         }
     }
 }

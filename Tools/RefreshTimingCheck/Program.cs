@@ -60,37 +60,50 @@ var untrusted = new RefreshTimingProfile(new RefreshAnimationSettings
 Require(untrusted.Settings.DurationMs == 2500 && untrusted.Settings.DistanceDelayPercent == 0
     && untrusted.Settings.PixelDurationPercent == 200, "Profile always normalizes its input snapshot");
 
-var profiles = new List<RefreshTimingProfile> { defaults };
+var instantDefault = new RefreshTimingProfile(RefreshAnimationSettings.Default, instantStart: true);
+Near(instantDefault.StartDelayMs, 0, "Instant scan has no initial lead-in");
+Near(instantDefault.StartAt(.5f, .5f, 0), 0, "The clicked depth begins at time zero");
+Near(instantDefault.ReferenceDurationMs, 2881, "Instant scan removes only the 119ms reference lead-in");
+Near(instantDefault.PlaybackDurationMs, defaults.PlaybackDurationMs, "Instant scan preserves requested wall duration");
+var profiles = new List<RefreshTimingProfile> { defaults, instantDefault };
 foreach (double duration in new[] { 600d, 6000d })
 foreach (double distance in new[] { 0d, 200d })
 foreach (double pulse in new[] { 25d, 200d })
+foreach (bool instantStart in new[] { false, true })
     profiles.Add(new(new RefreshAnimationSettings
     {
         DurationMs = duration,
         DistanceDelayPercent = distance,
         PixelDurationPercent = pulse,
-    }));
-profiles.Add(new(new RefreshAnimationSettings
+    }, instantStart));
+foreach (bool instantStart in new[] { false, true })
+    profiles.Add(new(new RefreshAnimationSettings
 {
     DurationMs = 1873,
     DistanceDelayPercent = 37,
     PixelDurationPercent = 63,
-}));
+}, instantStart));
 
 int arrivals = 0;
 double smallestWallTail = double.PositiveInfinity;
 foreach (var profile in profiles)
 {
     double ratio = profile.ReferenceTimeRatio;
+    var archived = new RefreshTimingProfile(profile.Settings);
     Require(ratio > 0 && double.IsFinite(ratio), "All legal controls produce a positive finite clock");
     Near(profile.ReferenceDurationMs / ratio, profile.Settings.DurationMs, "Wall duration stays fixed");
+    Near(archived.ReferenceDurationMs - profile.ReferenceDurationMs, 119 - profile.StartDelayMs,
+        "Instant start changes the reference lead-in without trimming propagation or pulse duration");
+    Near(profile.LifetimeMs, archived.LifetimeMs, "Instant start retains the selected full pixel lifetime");
     foreach (float origin in new[] { 0f, .1f, .3f, .5f, .9f, 1f })
     {
-        Near(profile.StartAt(origin, origin, 0), 119, "Every depth origin begins at the click");
+        Near(profile.StartAt(origin, origin, 0), profile.StartDelayMs, "Every depth origin begins at the click");
         foreach (float depth in new[] { 0f, .1f, .3f, .5f, .9f, 1f })
         foreach (double distance in new[] { 0d, .01d, .25d, .5d, 1d })
         {
             double start = profile.StartAt(depth, origin, distance);
+            Near(archived.StartAt(depth, origin, distance) - start, 119 - profile.StartDelayMs,
+                "Removing the lead-in preserves every depth and distance arrival offset", 1e-8);
             double endWall = (start + profile.LifetimeMs) / ratio;
             Require(endWall < profile.PlaybackDurationMs, "Every allowed pulse completes before wall deadline");
             Require((start + profile.BackgroundRestoreMs) / ratio < profile.PlaybackDurationMs,
@@ -117,6 +130,16 @@ foreach (var profile in profiles)
 
     var block = new UniformBlockRefreshRenderer.Block(0, 0, 4, 4, 0, 0, 4, 4,
         new Vector3(.7f, .3f, .1f), .5f, 100);
+    if (profile.StartDelayMs == 0)
+    {
+        var clickedBlock = block with { StartMs = profile.StartAt(.5f, .5f, 0) };
+        double earlyReferenceMs = profile.RiseMs / 4;
+        Require(earlyReferenceMs / ratio < 119 / ratio,
+            "An instant pixel reaches visible rise inside the archived lead-in");
+        Require(UniformBlockRefreshRenderer.OpacityAt(earlyReferenceMs, profile) > 0
+            && UniformBlockRefreshRenderer.CoreAt(clickedBlock, earlyReferenceMs, profile) != 0,
+            "The clicked instant pixel emits during the first rise without waiting for the old lead-in");
+    }
     foreach (double invalidAge in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, -1d, 0d,
         profile.LifetimeMs, profile.LifetimeMs + 1 })
         Near(UniformBlockRefreshRenderer.OpacityAt(invalidAge, profile), 0,
@@ -168,7 +191,7 @@ foreach (var profile in profiles)
 }
 Console.WriteLine($"Refresh timing checks passed: {assertions} assertions, {profiles.Count} timing profiles, "
     + $"{arrivals} depth/distance arrivals; smallest guaranteed wall tail={smallestWallTail:F3}ms. "
-    + "Default 3000ms/1.2 clock, normalized settings, complete pulses, bidirectional depth, distance order, "
+    + "Archived 3000ms/1.2 clock, instant-start lead-in removal, normalized settings, complete pulses, bidirectional depth, distance order, "
     + "fractional envelopes and CPU clock verified without desktop or model inference.");
 
 internal sealed class ClockSpy : IRefreshRenderer

@@ -26,6 +26,9 @@ namespace Action_Wheel.Services
 
         internal double PlaybackDurationMs => Renderer.Timing.PlaybackDurationMs;
 
+        /// <summary>UI presentation can prepare while the frame retains cancellation ownership.</summary>
+        internal GpuRefreshRenderer? BorrowGpuRenderer() => _gpuRenderer;
+
         /// <summary>Transfers GPU ownership to the menu. Other gesture completions can safely dispose the frame.</summary>
         internal GpuRefreshRenderer? TakeGpuRenderer()
         {
@@ -86,7 +89,7 @@ namespace Action_Wheel.Services
                     // Cancel only this gesture's wait, never the process-wide training task.
                     await RefreshRenderWarmup.EnsureAsync().WaitAsync(cancellation).ConfigureAwait(false);
                     return Capture(position, grabbed, cancellation,
-                        new RefreshTimingProfile(settings ?? RefreshAnimationSettings.Default));
+                        new RefreshTimingProfile(settings ?? RefreshAnimationSettings.Default, instantStart: true));
                 }
                 catch (OperationCanceledException) { return null; }
                 finally { grabbed(); }
@@ -114,38 +117,12 @@ namespace Action_Wheel.Services
 
                 // Preserve the raw capture for depth and capture-relative light/LUT correction.
                 // The hold's grey cover is only the initial handoff, not a radial reveal layer.
-                byte[] grey = BuildGrey(pixels);
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);
                 cancellation.ThrowIfCancellationRequested();
                 RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h);
                 cancellation.ThrowIfCancellationRequested();
-                var frame = new RefreshFrame
-                {
-                    Grey = grey,
-                    Renderer = new SpectrumOverlayRefreshRenderer(w, h, pixels, depth, originX, originY, timing: timing),
-                    Bounds = new RectInt32(x, y, w, h),
-                    OriginX = originX,
-                    OriginY = originY,
-                };
-                try
-                {
-                    cancellation.ThrowIfCancellationRequested();
-                    frame._gpuScene = new GpuRefreshScene(frame.Renderer);
-                    frame._gpuRenderer = new GpuRefreshRenderer(frame._gpuScene);
-                    cancellation.ThrowIfCancellationRequested();
-                }
-                catch (OperationCanceledException)
-                {
-                    frame.Dispose();
-                    return null;
-                }
-                catch (Exception)
-                {
-                    // Hardware/driver failure keeps a functional CPU fallback.
-                    frame.Dispose();
-                }
-                return frame;
+                return CreatePrepared(pixels, depth, new RectInt32(x, y, w, h), originX, originY, timing, cancellation);
             }
             catch (Exception)
             {
@@ -153,6 +130,39 @@ namespace Action_Wheel.Services
                 // release path treats null as a plain restore and closes the menu safely.
                 return null;
             }
+        }
+
+        /// <summary>Builds the same immutable scene for real captures and opt-in synthetic checks.</summary>
+        internal static RefreshFrame CreatePrepared(byte[] pixels, RefreshDepthMap depth, RectInt32 bounds,
+            int originX, int originY, RefreshTimingProfile timing, CancellationToken cancellation = default)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var frame = new RefreshFrame
+            {
+                Grey = BuildGrey(pixels),
+                Renderer = new SpectrumOverlayRefreshRenderer(bounds.Width, bounds.Height, pixels, depth, originX, originY, timing: timing),
+                Bounds = bounds,
+                OriginX = originX,
+                OriginY = originY,
+            };
+            try
+            {
+                cancellation.ThrowIfCancellationRequested();
+                frame._gpuScene = new GpuRefreshScene(frame.Renderer);
+                frame._gpuRenderer = new GpuRefreshRenderer(frame._gpuScene);
+                cancellation.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException)
+            {
+                frame.Dispose();
+                throw;
+            }
+            catch (Exception)
+            {
+                // Hardware/driver failure keeps a functional CPU fallback.
+                frame.Dispose();
+            }
+            return frame;
         }
 
         /// <summary>The same blend as ScreenGrade's matrix, so swapping the cover for live colour is invisible.</summary>

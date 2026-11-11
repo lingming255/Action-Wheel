@@ -14,12 +14,14 @@ namespace Action_Wheel.Services
         internal double RiseMs { get; }
         internal double FadeStartMs { get; }
         internal double BackgroundRestoreMs { get; }
+        internal double StartDelayMs { get; }
         internal double ReferenceDurationMs { get; }
         internal double ReferenceTimeRatio => ReferenceDurationMs / PlaybackDurationMs;
 
-        internal RefreshTimingProfile(RefreshAnimationSettings settings)
+        internal RefreshTimingProfile(RefreshAnimationSettings settings, bool instantStart = false)
         {
             Settings = settings.Normalised();
+            StartDelayMs = instantStart ? 0 : RefreshDepthSweep.StartDelayMs;
             DistanceDelayMs = RefreshDepthSweep.DistanceDelayMs * Settings.DistanceDelayPercent / 100;
             double pulse = Settings.PixelDurationPercent / 100;
             LifetimeMs = RefreshDepthSweep.LifetimeMs * pulse;
@@ -30,12 +32,13 @@ namespace Action_Wheel.Services
             // requested duration keeps every allowed combination from clipping late pixels.
             const double tail = RefreshDepthSweep.DurationMs - RefreshDepthSweep.StartDelayMs
                 - RefreshDepthSweep.DepthTravelMs - RefreshDepthSweep.DistanceDelayMs - RefreshDepthSweep.LifetimeMs;
-            ReferenceDurationMs = RefreshDepthSweep.StartDelayMs + RefreshDepthSweep.DepthTravelMs
+            ReferenceDurationMs = StartDelayMs + RefreshDepthSweep.DepthTravelMs
                 + DistanceDelayMs + LifetimeMs + tail;
         }
 
         internal double StartAt(float depth, float originDepth, double normalizedDistance)
             => RefreshDepthSweep.StartAt(depth, originDepth, normalizedDistance)
+                + StartDelayMs - RefreshDepthSweep.StartDelayMs
                 + (DistanceDelayMs - RefreshDepthSweep.DistanceDelayMs) * normalizedDistance;
     }
 }

@@ -93,8 +93,9 @@ namespace Action_Wheel
 
             SetUpTrayIcon();
 
-            // Exercise the complete CPU renderer offscreen while the app is idle. A gesture
+            // Exercise the model and complete renderer offscreen while the app is idle. A gesture
             // started immediately after launch awaits this same one-shot task before capturing.
+            RefreshRenderWarmup.TryDepthWarmup = RefreshDepthEstimator.Warmup;
             RefreshRenderWarmup.TryGpuWarmup = (reference, cancellation) =>
             {
                 using var renderer = new GpuRefreshRenderer(new GpuRefreshScene(reference));

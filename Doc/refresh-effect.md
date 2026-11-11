@@ -21,9 +21,10 @@ per capture and is not involved in animation frames.
 surface directly. There is no per-frame pixel readback, `WriteableBitmap` or CPU image beneath
 the GPU layer. A 60 Hz elapsed-time schedule follows Composition rendering callbacks, skipping
 missed states without simulation catch-up. By default it stops at 2500 ms, matching the menu's close timer.
-The default reference time domain advances at 1.2x: spatial delay is at most 583.33 ms,
-depth travel 1325 ms and block lifetime 425 ms. The latest full fade finishes at 2432.5 ms.
-The archived 3000-ms formulas below remain the default CPU reference domain, not the wall clock.
+Real captures remove the former 119 reference-ms initial pause. At the default settings the
+2881-ms reference domain advances at 1.1524x: spatial delay is at most 607.43 ms,
+depth travel 1379.73 ms and block lifetime 442.55 ms. The latest full fade finishes at
+2429.71 ms. The archived 3000-ms / 1.2x profile remains the diagnostic reference, not live timing.
 
 Settings > Appearance & trigger > Desktop refresh exposes three saved controls:
 
@@ -59,7 +60,9 @@ The user's observation that CS does not trigger the effect has no confirmed caus
 change does not add or remove a game-specific rule.
 
 Device/shader/upload work happens on the capture worker before playback. Startup primes the
-same GPU path offscreen; its shader bytecode is cached process-wide. The former longer CPU
+real depth session with a synthetic 640x360 image (392x224 inference), then the same GPU path
+offscreen; its shader bytecode is cached process-wide. Warmup captures no desktop image and
+failures do not disable the real path from retrying. The former longer CPU
 warmup runs only if hardware preparation fails. Hardware/interop failure before handoff uses
 the retained CPU renderer with the same configured timing, at its original 30 Hz
 budget. Failure during GPU playback closes the decoration and restores the desktop. Stale
@@ -117,6 +120,44 @@ compares full captured BGRA of synthetic offscreen windows with and without clic
 styles at intermediate and ending frames. RGB and alpha differences are both zero. This
 test caught and rejected the earlier constant-alpha layered-window path; the final helper
 lets Composition own opacity. It does not synthesize clicks or capture the user's desktop.
+
+## Release feedback and prepared presentation (2026-11-11)
+
+Releasing in the centre synchronously hides the ring, enables input transparency and creates
+five small pigment-coloured Composition blocks at the release position. A native repeating
+opacity pulse with soft same-colour shadows bridges unfinished capture/depth/scene work.
+Prepared frames supply the screenshot pigment; otherwise the centre button supplies the colour.
+There is no white core or fullscreen glare. Two rendering callbacks let that first composition
+batch commit before synchronous release retiming; an 80-ms timeout avoids waiting forever
+for an occluded window. This is an immediate local acknowledgement, not a claim of zero-ms
+full-depth scan latency.
+
+During the hold, the capture observer prepares the DXGI/Composition surface on a collapsed
+canvas. It checks the exact menu/frame/task identities before touching UI. The frame retains
+the GPU renderer while this presentation borrows it, allowing final origin retiming. Release
+transfers ownership to the existing playback before frame disposal; cancelling detaches the
+borrowed presentation before disposing the frame. Interop/retiming failure retains CPU fallback.
+The existing three-frame opaque grey handoff still hides restoration of the screen matrix;
+local feedback clears as the main scan starts without the former initial 119-ms reference pause.
+Total main-scan duration remains the saved setting. A very short hold may still require depth
+and scene preparation after release, with the local feedback continuing during that wait.
+
+Before editing, all 193 source blobs/tree entries, three runtime files, three model files and
+twelve actual local configuration files were verified in
+`archive/refresh-before-instant-release-20261111` and its matching `bin/Backups/` folder.
+Timing checks cover both archived and immediate profiles (17,118 assertions / 20 combinations /
+3,600 depth-distance samples). Actual GPU/CPU comparisons cover 131 cases including first
+light, retargeting and the immediate profile; maximum displayed difference is one channel byte.
+Hidden release preparation/ownership checks and published runtime smoke results are saved in
+`bin/Review/refresh-instant-release-20261111/`. They use synthetic input and do not replace the
+user's visual acceptance.
+
+The final single-file smoke passed prepared and pending release handoffs, grade cleanup before
+window close, frame disposal after GPU adoption, and forced prepared-GPU loss followed by a
+real CPU bitmap upload. Local feedback creation measured 1.57–2.14 ms in its two hidden cases,
+plus 2.61–3.69 ms waiting for rendering callbacks; these are not mouse-to-screen measurements.
+The synthetic real-model warmup took 488.31 ms in that process, without capturing the desktop.
+Native mapping samples and styled/unmodified offscreen BGRA comparisons still passed.
 
 ## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
 

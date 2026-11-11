@@ -108,6 +108,7 @@ internal static class Program
             Require(SHA256.HashData(source).AsSpan().SequenceEqual(sourceHash), "GPU preparation/render mutated capture pixels.");
         }
 
+        foreach (bool instantStart in new[] { false, true })
         foreach (var options in new RefreshAnimationSettings[]
         {
             new() { DurationMs = 600, DistanceDelayPercent = 0, PixelDurationPercent = 25 },
@@ -117,7 +118,7 @@ internal static class Program
         {
             const int width = 173, height = 97;
             byte[] source = Scene(width, height);
-            var timing = new RefreshTimingProfile(options);
+            var timing = new RefreshTimingProfile(options, instantStart);
             float[] depths = Enumerable.Range(0, width * height)
                 .Select(p => (p % width) / (float)(width - 1)).ToArray();
             var reference = new SpectrumOverlayRefreshRenderer(width, height, source,
@@ -126,12 +127,17 @@ internal static class Program
             var fallback = new AcceleratedRefreshRenderer(reference, timing);
             Require(gpu.DurationMs == options.DurationMs && fallback.DurationMs == options.DurationMs,
                 "Custom duration differs between CPU and GPU.");
+            Require(gpu.TimeRatio == timing.ReferenceTimeRatio,
+                "GPU clock ignored the custom or instant reference span.");
+            if (instantStart)
+                Require(timing.StartAt(.5f, .5f, 0) == 0,
+                    "Instant-start GPU scene retained the archived scan lead-in.");
             byte[] pixels = new byte[source.Length], light = new byte[4], fallbackPixels = new byte[source.Length];
             foreach (double fraction in new[] { 0, .15, .4, .75, .99, 1.0 })
             {
                 double referenceMs = fraction * timing.ReferenceDurationMs;
                 Compare(reference, gpu, source, pixels, light, referenceMs,
-                    $"custom {options.DurationMs}ms stagger{options.DistanceDelayPercent}% pulse{options.PixelDurationPercent}%");
+                    $"{(instantStart ? "instant" : "archived")} custom {options.DurationMs}ms stagger{options.DistanceDelayPercent}% pulse{options.PixelDurationPercent}%");
                 fallback.Render(fraction * timing.PlaybackDurationMs, fallbackPixels, light);
                 reference.Render(fraction * timing.PlaybackDurationMs * timing.ReferenceTimeRatio, pixels, light);
                 Require(fallbackPixels.AsSpan().SequenceEqual(pixels), "Custom CPU fallback clock is inconsistent.");
@@ -139,7 +145,20 @@ internal static class Program
             reference.SetOrigin(0, height - 1);
             var retimed = new GpuRefreshScene(reference);
             gpu.SetTimings(retimed.Blocks, retimed.SpectrumParameters);
-            Compare(reference, gpu, source, pixels, light, timing.ReferenceDurationMs * .4, "custom release retiming");
+            Compare(reference, gpu, source, pixels, light, timing.ReferenceDurationMs * .4,
+                $"{(instantStart ? "instant" : "archived")} custom release retiming");
+            if (instantStart)
+            {
+                double firstStart = double.PositiveInfinity;
+                foreach (var block in reference.BlocksRenderer.Blocks)
+                    firstStart = Math.Min(firstStart, block.StartMs);
+                double firstPeak = firstStart + timing.RiseMs;
+                Compare(reference, gpu, source, pixels, light, firstPeak,
+                    "instant retargeted first visible pixel rise");
+                gpu.Render(timing.PlaybackDurationMs);
+                Require(Readback(gpu).All(value => value == 0),
+                    "Instant-start GPU scene did not clear at the selected wall deadline.");
+            }
         }
 
         // Disposal is intentionally repeated because menu cancellation and close can converge.
