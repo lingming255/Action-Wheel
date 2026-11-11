@@ -76,11 +76,10 @@ namespace Action_Wheel.Services
         /// <summary>
         /// Waits for the shared startup renderer warmup, then captures and builds on a worker.
         /// This keeps startup training frames from competing with a real gesture's playback.
-        /// <paramref name="grabbed"/> runs as soon as the
-        /// raw screen has been read, which is the earliest safe moment to lower saturation. It may
-        /// run twice on failure paths, so callers must keep it idempotent.
+        /// <paramref name="captured"/> runs once, only after a successful original-colour capture.
+        /// This is the earliest safe moment to start the opening desaturation transition.
         /// </summary>
-        public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action grabbed,
+        public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action<byte[], RectInt32> captured,
             CancellationToken cancellation = default, RefreshAnimationSettings? settings = null)
             => Task.Run(async () =>
             {
@@ -88,14 +87,13 @@ namespace Action_Wheel.Services
                 {
                     // Cancel only this gesture's wait, never the process-wide training task.
                     await RefreshRenderWarmup.EnsureAsync().WaitAsync(cancellation).ConfigureAwait(false);
-                    return Capture(position, grabbed, cancellation,
+                    return Capture(position, captured, cancellation,
                         new RefreshTimingProfile(settings ?? RefreshAnimationSettings.Default, instantStart: true));
                 }
                 catch (OperationCanceledException) { return null; }
-                finally { grabbed(); }
             });
 
-        private static RefreshFrame? Capture(PointInt32 position, Action grabbed, CancellationToken cancellation,
+        private static RefreshFrame? Capture(PointInt32 position, Action<byte[], RectInt32> captured, CancellationToken cancellation,
             RefreshTimingProfile timing)
         {
             try
@@ -110,10 +108,10 @@ namespace Action_Wheel.Services
                 int w = mi.rcMonitor.right - x, h = mi.rcMonitor.bottom - y;
 
                 byte[]? pixels = Grab(x, y, w, h);
-                grabbed();
                 if (pixels == null)
                     return null;
                 cancellation.ThrowIfCancellationRequested();
+                captured(pixels, new RectInt32(x, y, w, h));
 
                 // Preserve the raw capture for depth and capture-relative light/LUT correction.
                 // The hold's grey cover is only the initial handoff, not a radial reveal layer.

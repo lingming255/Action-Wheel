@@ -114,6 +114,8 @@ namespace Action_Wheel.Services
                     }
                 }
                 object releasePreparation = await RadialMenu.RunReleasePreparationProbeAsync();
+                object reclaimOpening = await RefreshReclaimIntro.RunHiddenProbeAsync(verifyOffscreenShow: true);
+                object gradeTransition = await ScreenGrade.RunTransitionProbeAsync();
                 object presentation = await GpuRefreshPresentationProbe.RunAsync();
                 JsonElement presentationResult = JsonSerializer.SerializeToElement(presentation);
                 bool pixelCaptureAvailable = presentationResult.TryGetProperty("PixelCaptureAvailable", out var available)
@@ -131,6 +133,8 @@ namespace Action_Wheel.Services
                     PixelMappingVerified = pixelMappingVerified,
                     Presentation = presentation,
                     ReleasePreparation = releasePreparation,
+                    ReclaimOpening = reclaimOpening,
+                    GradeTransition = gradeTransition,
                     SyntheticDepthWarmupMs = depthWarmupMs,
                     UsedDesktopCapture = false, DisplayedEffect = false }, new JsonSerializerOptions { WriteIndented = true }));
             }

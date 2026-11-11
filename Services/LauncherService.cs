@@ -652,23 +652,55 @@ namespace Action_Wheel.Services
         private RadialMenu? _gradedMenu;
         private Task<RefreshFrame?>? _refreshFrame;
         private CancellationTokenSource? _refreshCaptureCancellation;
+        private RefreshReclaimIntro? _refreshIntro;
+        private Task<bool>? _refreshGradeTransition;
+        private TaskCompletionSource<bool>? _refreshCapturePresented;
 
         /// <summary>
-        /// Starts the hold half of the refresh: capture the monitor for the mosaic, then grey the
-        /// screen once the capture has the colour it needs. UI thread.
+        /// Starts the inward opening while the original monitor and depth prepare in parallel.
+        /// Desaturation begins only after the capture has its original colour. UI thread.
         /// </summary>
         private void BeginGrade(RadialMenu menu, PointInt32 position)
         {
-            CancelRefreshCapture();
+            // Closed can arrive after a replacement menu was created. End the previous owner
+            // explicitly before its colour matrix can leak into the next original capture.
+            _ = EndGrade();
             var cancellation = new CancellationTokenSource();
+            var capturedOnUi = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _refreshCapturePresented = capturedOnUi;
             _refreshCaptureCancellation = cancellation;
             _gradedMenu = menu;
-            _refreshFrame = RefreshFrame.CaptureAsync(position, () => _dispatcherQueue.TryEnqueue(() =>
+            _refreshFrame = RefreshFrame.CaptureAsync(position, (pixels, bounds) =>
             {
-                // The gesture may already have ended while the capture ran.
-                if (ReferenceEquals(_gradedMenu, menu))
-                    ScreenGrade.Lower();
-            }), cancellation.Token, settings: _refreshSettings);
+                if (!_dispatcherQueue.TryEnqueue(() =>
+                {
+                    // A late raw capture must never colour or grey a replacement gesture.
+                    if (_stopped || !ReferenceEquals(_gradedMenu, menu)
+                        || !ReferenceEquals(_refreshCapturePresented, capturedOnUi)
+                        || cancellation.IsCancellationRequested)
+                    {
+                        capturedOnUi.TrySetResult(false);
+                        return;
+                    }
+                    try
+                    {
+                        _refreshIntro?.UpdateCapture(pixels, bounds);
+                        // A cold startup can outlast the opening. Still use a short smooth fade
+                        // rather than jumping from colour to grey when its raw capture arrives.
+                        double remaining = Math.Max(100, _refreshIntro?.RemainingMs ?? RefreshReclaimIntro.DurationMs);
+                        _refreshGradeTransition = ScreenGrade.LowerGraduallyAsync(TimeSpan.FromMilliseconds(remaining));
+                        capturedOnUi.TrySetResult(true);
+                    }
+                    catch (Exception)
+                    {
+                        // Native grading/intro are decorative. Keep the existing release path usable.
+                        ScreenGrade.Lower();
+                        _refreshGradeTransition = Task.FromResult(false);
+                        capturedOnUi.TrySetResult(false);
+                    }
+                })) capturedOnUi.TrySetResult(false);
+            }, cancellation.Token, settings: _refreshSettings);
+            _refreshIntro = RefreshReclaimIntro.TryStart(position, WinRT.Interop.WindowNative.GetWindowHandle(menu));
             _ = PrepareRefreshPresentationAsync(menu, _refreshFrame);
         }
 
@@ -696,6 +728,11 @@ namespace Action_Wheel.Services
         private Task<RefreshFrame?>? EndGrade()
         {
             var frame = _refreshFrame;
+            _refreshIntro?.Dispose();
+            _refreshIntro = null;
+            _refreshCapturePresented?.TrySetResult(false);
+            _refreshCapturePresented = null;
+            _refreshGradeTransition = null;
             _gradedMenu?.DetachBorrowedRefreshPresentation();
             _gradedMenu = null;
             _refreshFrame = null;
@@ -741,10 +778,23 @@ namespace Action_Wheel.Services
                 // before Composition can commit the local feedback's first displayed frame.
                 await menu.WaitForRefreshFeedbackAsync();
                 var pending = ReferenceEquals(_gradedMenu, menu) ? _refreshFrame : null;
+                var capturedOnUi = _refreshCapturePresented;
+                var intro = _refreshIntro;
                 RefreshFrame? frame = pending == null ? null : await pending;
                 // A canceled/replaced gesture must never retime or start the old menu after
                 // its background preparation completes. Rebase only the small prepared grid.
-                if (!ReferenceEquals(_currentMenu, menu)) return;
+                if (!ReferenceEquals(_currentMenu, menu) || !ReferenceEquals(_refreshFrame, pending)) return;
+                if (frame != null)
+                {
+                    // Capture completion can beat its queued UI notification. Await that exact
+                    // gesture's notification before reading its fade task, then let the inward
+                    // opening finish without freezing the wheel's ordinary hit-testing/actions.
+                    if (capturedOnUi != null) await capturedOnUi.Task;
+                    if (!ReferenceEquals(_currentMenu, menu) || !ReferenceEquals(_refreshFrame, pending)) return;
+                    await Task.WhenAll(intro?.Completion ?? Task.CompletedTask,
+                        (Task?)_refreshGradeTransition ?? Task.CompletedTask);
+                    if (!ReferenceEquals(_currentMenu, menu) || !ReferenceEquals(_refreshFrame, pending)) return;
+                }
                 frame?.PrepareRelease(release);
                 menu.PlayRefresh(frame, () =>
                 {

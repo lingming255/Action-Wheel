@@ -196,6 +196,52 @@ composition and prepared/pending release ownership with CPU fallback. Visual for
 depth model and the saved 1100 ms / 100% / 100% settings are unchanged. Real desktop visual
 acceptance remains with the user.
 
+## Reclaim opening trial (2026-11-11)
+
+`codex/refresh-reclaim-intro` trials the requested inward opening, wheel interaction and
+outward release sequence. The preceding `13d7abc` is preserved at
+`archive/refresh-before-reclaim-intro-20261111`. Its matching
+`bin/Backups/refresh-before-reclaim-intro-20261111/` contains the source ZIP and
+`manifest.json`: all 194 Git blobs/tree entries, three runtime files, three model files and
+twelve actual local configuration files were verified, including copied-file SHA-256 hashes.
+
+`RefreshReclaimIntro` creates an independent monitor-sized decoration lasting 420 ms. At most
+600 stationary squares pulse from farthest to nearest in 40 opacity bands, with soft shadows
+of the same colour. Original capture samples replace the initial pigment when available.
+It uses no screenshot texture, desktop displacement or image scaling. The interactive ring
+keeps its existing geometry, opening animation and hit targets while preparation continues.
+
+The decoration is click-through, never activates and sits behind the menu. Capture exclusion
+is requested and confirmed before showing it; if unavailable, it stays hidden until the raw
+grab finishes. HWND bounds use physical monitor coordinates, and Composition maps those
+coordinates through inverse DPI. Border styles are removed again after the first show to
+handle WinUI restoring a native frame. Disposal hides the window before tearing down the
+transparent backdrop and completes any release waiting for the intro.
+
+The capture worker now notifies UI exactly once, only after a successful uncancelled raw
+colour grab. That notification starts smoothstep desaturation over the intro's remaining
+time, with a minimum 100-ms fade. A 16-ms UI timer advances the Magnification colour matrix
+from elapsed time; native Composition still runs the block opacity animations. A fast centre
+release retains local feedback and waits for its exact frame, raw-capture UI notification,
+intro completion and grade transition before the grey-cover handoff. Menu/task identities
+are rechecked after waits. Cancellation completes pending notifications and restores colour;
+each new `BeginGrade` first ends the previous owner so its matrix cannot taint a new capture.
+
+A cold startup can outlast the opening and still require preparation after release; this
+does not guarantee zero-ms full-scan latency. Outward scan timing, the depth model, visual
+formulas and saved 1100 ms / 100% / 100% settings are unchanged.
+
+Debug and final single-file hidden smoke passed. The opening probe checks capture affinity,
+matching pigment/shadow, click-through/no-activation styles, physical/DPI dimensions,
+completion and early disposal; an empty-region window beyond the virtual desktop checks
+first-show frame removal without displaying any pixels. The grading probe's 37 assertions
+use an injected native effect, covering the curve, exact endpoints, cancellation, late ticks,
+duplicate starts, shutdown and native failure without modifying the desktop. Existing release
+ownership/CPU fallback, DPI pixel mapping and click-through BGRA comparisons still pass,
+as do 41 real mouse-dispatch assertions and all 148 settings bindings. Reports are under
+`bin/Review/reclaim-intro-20261111/`. Real desktop appearance and motion remain for the
+user's acceptance.
+
 ## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
