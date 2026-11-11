@@ -10,7 +10,7 @@ namespace Action_Wheel.Services
     /// Original monitor capture and learned depth for the uniform-block scan. Capture happens
     /// before <see cref="ScreenGrade"/> lowers saturation; inference prepares on the hold worker.
     /// </summary>
-    internal sealed class RefreshFrame
+    internal sealed class RefreshFrame : IDisposable
     {
         /// <summary>Premultiplied BGRA cover graded exactly like <see cref="ScreenGrade"/>.</summary>
         public required byte[] Grey { get; init; }
@@ -21,6 +21,26 @@ namespace Action_Wheel.Services
         public int OriginX { get; private set; }
         public int OriginY { get; private set; }
         private bool _releasePrepared;
+        private GpuRefreshScene? _gpuScene;
+        private GpuRefreshRenderer? _gpuRenderer;
+
+        internal const double PlaybackDurationMs = AcceleratedRefreshRenderer.PlaybackDurationMs;
+
+        /// <summary>Transfers GPU ownership to the menu. Other gesture completions can safely dispose the frame.</summary>
+        internal GpuRefreshRenderer? TakeGpuRenderer()
+        {
+            var renderer = _gpuRenderer;
+            _gpuRenderer = null;
+            _gpuScene = null;
+            return renderer;
+        }
+
+        public void Dispose()
+        {
+            _gpuRenderer?.Dispose();
+            _gpuRenderer = null;
+            _gpuScene = null;
+        }
 
         /// <summary>
         /// UI thread, after capture completes and before playback. The first release freezes
@@ -33,6 +53,19 @@ namespace Action_Wheel.Services
             int originX = (int)Math.Clamp((long)release.X - Bounds.X, 0, Bounds.Width - 1);
             int originY = (int)Math.Clamp((long)release.Y - Bounds.Y, 0, Bounds.Height - 1);
             Renderer.SetOrigin(originX, originY);
+            if (_gpuRenderer != null && _gpuScene != null)
+            {
+                try
+                {
+                    _gpuScene.UpdateTimings(Renderer);
+                    _gpuRenderer.SetTimings(_gpuScene.Blocks, _gpuScene.SpectrumParameters);
+                }
+                catch (Exception)
+                {
+                    // Device loss during preparation uses the still-valid CPU renderer.
+                    Dispose();
+                }
+            }
             OriginX = originX; OriginY = originY;
             _releasePrepared = true;
         }
@@ -85,7 +118,7 @@ namespace Action_Wheel.Services
                 cancellation.ThrowIfCancellationRequested();
                 RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h);
                 cancellation.ThrowIfCancellationRequested();
-                return new RefreshFrame
+                var frame = new RefreshFrame
                 {
                     Grey = grey,
                     Renderer = new SpectrumOverlayRefreshRenderer(w, h, pixels, depth, originX, originY),
@@ -93,6 +126,24 @@ namespace Action_Wheel.Services
                     OriginX = originX,
                     OriginY = originY,
                 };
+                try
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    frame._gpuScene = new GpuRefreshScene(frame.Renderer);
+                    frame._gpuRenderer = new GpuRefreshRenderer(frame._gpuScene);
+                    cancellation.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException)
+                {
+                    frame.Dispose();
+                    return null;
+                }
+                catch (Exception)
+                {
+                    // Hardware/driver failure keeps a functional CPU fallback.
+                    frame.Dispose();
+                }
+                return frame;
             }
             catch (Exception)
             {

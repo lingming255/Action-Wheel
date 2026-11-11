@@ -632,6 +632,10 @@ namespace Action_Wheel.Services
             _refreshFrame = null;
             CancelRefreshCapture();
             ScreenGrade.Restore();
+            if (frame != null)
+                _ = frame.ContinueWith(completed => completed.Result?.Dispose(),
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
+                    TaskScheduler.Default);
             return frame;
         }
 

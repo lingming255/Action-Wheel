@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/IRefreshRenderer.cs" Link="IRefreshRenderer.cs" />
+    <Compile Include="../../Services/AcceleratedRefreshRenderer.cs" Link="AcceleratedRefreshRenderer.cs" />
+    <Compile Include="../../Services/ReferenceEffectMath.cs" Link="ReferenceEffectMath.cs" />
+    <Compile Include="../../Services/RefreshOutputEncoder.cs" Link="RefreshOutputEncoder.cs" />
+    <Compile Include="../../Services/RefreshSpectrumEffect.cs" Link="RefreshSpectrumEffect.cs" />
+    <Compile Include="../../Services/UniformBlockRefreshRenderer.cs" Link="UniformBlockRefreshRenderer.cs" />
+    <Compile Include="../../Services/RefreshDepthSweep.cs" Link="RefreshDepthSweep.cs" />
+    <Compile Include="../../Services/SpectrumOverlayRefreshRenderer.cs" Link="SpectrumOverlayRefreshRenderer.cs" />
+    <Compile Include="../../Services/GpuRefreshScene.cs" Link="GpuRefreshScene.cs" />
+    <Compile Include="../../Services/GpuRefreshRenderer.cs" Link="GpuRefreshRenderer.cs" />
+    <Compile Include="../../Services/GpuRefreshDevice.cs" Link="GpuRefreshDevice.cs" />
+    <EmbeddedResource Include="../../Assets/RefreshReference/*.rgb.gz"
+                      LogicalName="ActionWheel.Refresh.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../Assets/RefreshGpu.hlsl" LogicalName="ActionWheel.RefreshGpu.hlsl" />
+  </ItemGroup>
+</Project>

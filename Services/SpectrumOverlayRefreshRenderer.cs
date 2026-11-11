@@ -31,6 +31,14 @@ namespace Action_Wheel.Services
 
         internal UniformBlockRefreshRenderer BlocksRenderer { get; }
         internal float OriginDepth => BlocksRenderer.OriginDepth;
+        internal int NativeWidth => _width;
+        internal int NativeHeight => _height;
+        internal int WorkWidth => _workWidth;
+        internal int WorkHeight => _workHeight;
+        internal byte[] CapturePixels => _capture;
+        internal Vector3[] PreparedSource => _source.Pixels;
+        internal double[] PreparedStarts => _starts;
+        internal RefreshSpectrumEffect PreparedSpectrum => _spectrum;
         public double DurationMs => RefreshDepthSweep.DurationMs;
         // A runs three Gaussian pairs and native delta composition in addition to the base.
         // A display-only 30 Hz budget skips directly to elapsed time, without history catch-up.

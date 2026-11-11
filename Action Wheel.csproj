@@ -63,6 +63,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\RefreshReference\*.rgb.gz" LogicalName="ActionWheel.Refresh.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\RefreshGpu.hlsl" LogicalName="ActionWheel.RefreshGpu.hlsl" />
     <!-- Also ship the real application icon as content for the transparent custom title bars. -->
     <None Remove="icon.ico" />
     <Content Include="icon.ico" CopyToOutputDirectory="PreserveNewest" />

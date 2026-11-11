@@ -4,7 +4,60 @@ A centre release of the wheel plays a desktop visual effect. Hold left and press
 then release right inside `RingGeometry.GestureDeadZone` (58 DIP). Releasing in a sector runs
 that action instead; releasing left first or pressing Esc cancels.
 
-## Current experiment: full grey-to-colour pulse and longer distance stagger (2026-11-11)
+## Current playback: hardware GPU, 2.5 seconds (2026-11-11)
+
+The GPU migration is on `codex/refresh-gpu`. The preceding deployed CPU version `a3b54c0`
+is preserved at `archive/refresh-before-gpu-20261111` and in the matching `bin/Backups/`
+directory: all 173 source blobs and all six runtime/model backup hashes were verified.
+
+`GpuRefreshScene` uploads the CPU reference's exact prepared geometry, glyph pigment, rain
+parameters, source colour and native grey LUT background. `GpuRefreshRenderer` executes the
+block emission, four box-blur stages, ASCII/rain, six Gaussian passes, HSL light delta and
+native premultiplied composition in D3D11 pixel shaders. Geometry and source textures stay on
+the GPU; release only uploads the two arrival-time maps. The model remains one CPU inference
+per capture and is not involved in animation frames.
+
+`GpuRefreshPlayback` presents a premultiplied DXGI swapchain through the WinUI Composition
+surface directly. There is no per-frame pixel readback, `WriteableBitmap` or CPU image beneath
+the GPU layer. A 60 Hz elapsed-time schedule follows Composition rendering callbacks, skipping
+missed states without simulation catch-up. It stops at 2500 ms, matching the menu's close timer.
+The entire reference time domain advances at 1.2x: spatial delay is now at most 583.33 ms,
+depth travel 1325 ms and block lifetime 425 ms. The latest full fade finishes at 2432.5 ms.
+The archived 3000-ms formulas below remain the CPU reference domain, not the wall clock.
+
+Device/shader/upload work happens on the capture worker before playback. Startup primes the
+same GPU path offscreen; its shader bytecode is cached process-wide. The former longer CPU
+warmup runs only if hardware preparation fails. Hardware/interop failure before handoff uses
+the retained CPU renderer with the same 1.2x clock and 2500-ms duration, at its original 30 Hz
+budget. Failure during GPU playback closes the decoration and restores the desktop. Stale
+capture results dispose GPU resources; ownership transfers once to the playing menu.
+
+The opt-in `Tools/GpuRefreshCheck` runs actual hardware shaders against the CPU reference.
+Its 86 comparisons cover 1x1, clipped cells, the 1280-side work boundary, 1080p/4K, retargeting,
+stateless time jumps, immutable inputs, initial grey, transparent ending and CPU fallback.
+The displayed result reconstructed over the capture differs by at most one byte per channel;
+all samples' p99 error is zero. Raw alpha can differ near quantization thresholds (largest
+sampled difference 51), so this does not establish identity over changing background content.
+
+On the local RTX 5070 Ti Laptop GPU, 60 samples per resolution measured:
+
+| Output | GPU timestamp median / p95 | Render + GPU completion median / p95 |
+| --- | --- | --- |
+| 1920x1080 | 0.252 / 0.460 ms | 0.489 / 0.933 ms |
+| 3840x2160 | 0.449 / 0.609 ms | 0.849 / 4.636 ms |
+
+These figures exclude capture, model, scene preparation, presentation and DWM. GPU timestamps
+are disjoint-validated; completion waits use no pixel readback. They demonstrate shader cost,
+not guaranteed desktop fps or performance on another GPU. Raw results are in ignored
+`bin/Review/gpu-refresh-20261111/validation.json`.
+
+`--refresh-gpu-smoke <absolute-report-path>` is an explicit integration diagnostic: it creates
+hidden, never activated WinUI windows, binds the real Composition surface and presents synthetic
+frames, without hooks, settings changes, desktop capture or visible effects. It checks repeated
+creation/disposal and the live Composition callback path. Normal launches write no logs.
+Complex visual acceptance remains with the user.
+
+## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
 its own publish at `bin/Publish/refresh-bidirectional-depth-20261111-win-x64`. The experiment

@@ -54,6 +54,13 @@ namespace Action_Wheel.Services
         private float _seconds;
         private float _filterAmount;
 
+        // Immutable geometry is shared with the GPU upload; neither renderer mutates it.
+        internal Vector3[] PreparedPigment => _preparedPigment
+            ?? throw new InvalidOperationException("Spectrum geometry must be prepared first.");
+        internal Vector2[] PreparedRain => _preparedRain
+            ?? throw new InvalidOperationException("Spectrum geometry must be prepared first.");
+        internal Vector3 RainColour => _rainColour;
+
         public RefreshSpectrumEffect(int width, int height, ReferenceTexture atlas,
             ReferenceTexture colourBar, ReferenceTexture lut)
         {

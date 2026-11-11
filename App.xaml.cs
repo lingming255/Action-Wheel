@@ -39,6 +39,15 @@ namespace Action_Wheel
         /// <param name="args">Details about the launch request and process.</param>
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
+            // Explicit, hidden diagnostic: exercise the real WinUI Composition interop without
+            // registering hooks, touching settings, capturing the desktop or showing a window.
+            string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--refresh-gpu-smoke")
+            {
+                GpuRefreshSmoke.Run(command[2], Exit);
+                return;
+            }
+
             // Logging was removed for privacy. Clear the two exact files written by older builds;
             // settings, profiles and all other user data in this directory remain untouched.
             AppDataPaths.DeleteLegacyLogs();
@@ -86,6 +95,18 @@ namespace Action_Wheel
 
             // Exercise the complete CPU renderer offscreen while the app is idle. A gesture
             // started immediately after launch awaits this same one-shot task before capturing.
+            RefreshRenderWarmup.TryGpuWarmup = (reference, cancellation) =>
+            {
+                using var renderer = new GpuRefreshRenderer(new GpuRefreshScene(reference));
+                for (int frame = 0; frame < 8; frame++)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    renderer.Render(500 + frame * 170);
+                }
+                // Only a startup diagnostic fence; playback never reads its pixels back.
+                renderer.Device.WaitIdle();
+                return true;
+            };
             _ = RefreshRenderWarmup.EnsureAsync();
 
             _ = CheckForUpdatesAsync(viewModel);

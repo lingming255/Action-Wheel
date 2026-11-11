@@ -55,6 +55,12 @@ namespace Action_Wheel.Services
         public int BloomWidth => 1;
         public int BloomHeight => 1;
         internal ReadOnlySpan<Block> Blocks => _blocks;
+        internal int CellSize => _cellSize;
+        internal int Columns => _columns;
+        internal int EmissionStep => _bloomStep;
+        internal int EmissionWidth => _bloomWidth;
+        internal int EmissionHeight => _bloomHeight;
+        internal byte[] PreparedBackground => _background;
         internal float OriginDepth { get; private set; }
 
         public UniformBlockRefreshRenderer(int width, int height, byte[] capture, RefreshDepthMap depth,

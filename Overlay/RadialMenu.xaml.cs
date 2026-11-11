@@ -241,6 +241,7 @@ namespace Action_Wheel.Overlay
         private EventHandler<object>? _refreshOnRendering;
         private DispatcherQueueTimer? _refreshTimer;
         private RefreshPlayback? _refreshPlayback;
+        private GpuRefreshPlayback? _gpuRefreshPlayback;
 
         /// <summary>
         /// The one path that ever closes this window - a button click, a click elsewhere on the
@@ -281,6 +282,8 @@ namespace Action_Wheel.Overlay
             }
             _refreshPlayback?.Dispose();
             _refreshPlayback = null;
+            _gpuRefreshPlayback?.Dispose();
+            _gpuRefreshPlayback = null;
             _refreshTimer?.Stop();
             _refreshTimer = null;
 
@@ -1685,7 +1688,7 @@ namespace Action_Wheel.Overlay
         /// </remarks>
         internal void PlayRefresh(RefreshFrame? frame, Action restoreColour)
         {
-            if (_refreshPlayback != null)
+            if (_refreshPlayback != null || _gpuRefreshPlayback != null)
                 return;
             if (_closed || _appWindow == null)
             {
@@ -1721,18 +1724,28 @@ namespace Action_Wheel.Overlay
             SetWindowPos(_windowHandle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                 SWP_NOACTIVATE);
 
-            // One image contains the native blocks, same-colour bloom and background correction.
-            var bitmap = new WriteableBitmap(bounds.Width, bounds.Height);
-            using (var stream = bitmap.PixelBuffer.AsStream())
-                stream.Write(frame.Grey, 0, frame.Grey.Length);
-            bitmap.Invalidate();
-            AddRefreshImage(bitmap, layerW, layerH);
-            _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, CloseMenu);
+            // Hardware frames stay on GPU from shading through the Composition surface.
+            // A device/interop failure before handoff retains the existing CPU image path.
+            var gpu = frame.TakeGpuRenderer();
+            if (gpu != null)
+            {
+                try { _gpuRefreshPlayback = new GpuRefreshPlayback(gpu, RefreshLayer); }
+                catch (Exception) { gpu.Dispose(); }
+            }
+            if (_gpuRefreshPlayback == null)
+            {
+                var bitmap = new WriteableBitmap(bounds.Width, bounds.Height);
+                using (var stream = bitmap.PixelBuffer.AsStream())
+                    stream.Write(frame.Grey, 0, frame.Grey.Length);
+                bitmap.Invalidate();
+                AddRefreshImage(bitmap, layerW, layerH);
+                _refreshPlayback = new RefreshPlayback(frame, DispatcherQueue, bitmap, CloseMenu);
+            }
 
             // Playback lifetime is independent of decorative visuals.
             var timer = DispatcherQueue.CreateTimer();
             timer.IsRepeating = false;
-            timer.Interval = TimeSpan.FromMilliseconds(frame.Renderer.DurationMs);
+            timer.Interval = TimeSpan.FromMilliseconds(RefreshFrame.PlaybackDurationMs);
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
@@ -1754,6 +1767,7 @@ namespace Action_Wheel.Overlay
                 restoreColour();
                 timer.Start();
                 _refreshPlayback?.Start();
+                _gpuRefreshPlayback?.Start(CloseMenu);
             };
             CompositionTarget.Rendering += _refreshOnRendering;
         }

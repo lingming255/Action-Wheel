@@ -18,6 +18,9 @@ namespace Action_Wheel.Services
         private static readonly object Gate = new();
         private static readonly CancellationTokenSource Lifetime = new();
         private static Task? _completion;
+        // Assigned once by App before startup. Keeping this optional also lets the CPU reference
+        // checks run without loading any graphics APIs.
+        internal static Func<SpectrumOverlayRefreshRenderer, CancellationToken, bool>? TryGpuWarmup { get; set; }
 
         /// <summary>Starts or joins the same best-effort background warmup.</summary>
         public static Task EnsureAsync()
@@ -52,6 +55,12 @@ namespace Action_Wheel.Services
             RefreshDepthMap depth = CreateDepth();
             var renderer = new SpectrumOverlayRefreshRenderer(
                 Width, Height, capture, depth, Width / 2, Height / 2);
+            try
+            {
+                if (TryGpuWarmup?.Invoke(renderer, cancellation) == true) return;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { /* Fall through to CPU warmup when hardware is unavailable. */ }
             byte[] pixels = new byte[capture.Length];
             byte[] light = new byte[renderer.BloomWidth * renderer.BloomHeight * 4];
             var clock = Stopwatch.StartNew();
