@@ -64,6 +64,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\RefreshReference\*.rgb.gz" LogicalName="ActionWheel.Refresh.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Assets\RefreshGpu.hlsl" LogicalName="ActionWheel.RefreshGpu.hlsl" />
+    <!-- Small CC0 cues are embedded so single-file publishing has no working-directory dependency. -->
+    <EmbeddedResource Include="Doc\prototypes\wheel-sounds\*.wav" LogicalName="ActionWheel.WheelSounds.%(Filename)%(Extension)" />
+    <Content Include="Doc\prototypes\wheel-sounds\License-Kenney.txt" Link="Licenses\Kenney-Interface-Sounds.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Also ship the real application icon as content for the transparent custom title bars. -->
     <None Remove="icon.ico" />
     <Content Include="icon.ico" CopyToOutputDirectory="PreserveNewest" />
@@ -74,8 +77,7 @@
     <!-- FontGlyphs needs the raw bytes too. In a single-file publish AppContext.BaseDirectory is
          the EXE directory, not the bundle extraction directory, so a physical-path lookup cannot
          see the bundled content. The stable logical name lets IconFont read it from any build. -->
-    <EmbeddedResource Include="Assets\Fonts\CaskaydiaCoveNerdFontPropo-Regular.ttf"
-                      LogicalName="ActionWheel.IconFont.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\CaskaydiaCoveNerdFontPropo-Regular.ttf" LogicalName="ActionWheel.IconFont.ttf" />
     <!-- The OFL requires the licence to travel with the font, so these ship too. -->
     <Content Include="Assets\Fonts\Licenses\**" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SplashScreen.scale-200.png" />
@@ -115,6 +117,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />

@@ -147,6 +147,35 @@ namespace Action_Wheel.Overlay
             return storyboard;
         }
 
+        /// <summary>The glass sheet, dividers and icons always move as one continuous surface.</summary>
+        internal static Storyboard BuildUnified(FrameworkElement container, double durationMs,
+            bool closing = false, bool confirmed = false, RingAnimation kind = RingAnimation.Fade)
+        {
+            var transform = EnsureTransform(container);
+            var storyboard = new Storyboard();
+            double duration = closing ? Math.Clamp(durationMs * .65, 70, 160) : durationMs;
+            double fromScale = closing ? transform.ScaleX : kind switch
+            {
+                RingAnimation.Converge => 1.06,
+                RingAnimation.Pop => .86,
+                RingAnimation.Radiate => .88,
+                _ => .92,
+            };
+            double toScale = closing ? (confirmed ? .90 : .95) : 1;
+            EasingFunctionBase easing = !closing && kind == RingAnimation.Pop
+                ? new BackEase { Amplitude = .25, EasingMode = EasingMode.EaseOut }
+                : new CubicEase { EasingMode = closing ? EasingMode.EaseIn : EasingMode.EaseOut };
+            Add(storyboard, container, "Opacity", closing ? container.Opacity : 0,
+                closing ? 0 : 1, 0, duration, 1, easing);
+            foreach (string axis in new[] { "ScaleX", "ScaleY" })
+                Add(storyboard, container, $"(UIElement.RenderTransform).(CompositeTransform.{axis})",
+                    fromScale, toScale, 0, duration, 1, easing);
+            if (!closing && kind is RingAnimation.Sweep or RingAnimation.CounterSweep)
+                Add(storyboard, container, "(UIElement.RenderTransform).(CompositeTransform.Rotation)",
+                    kind == RingAnimation.Sweep ? -8 : 8, 0, 0, duration, 1, easing);
+            return storyboard;
+        }
+
         /// <summary>
         /// The original animation, timings unchanged: the ring fades and scales up as a whole while
         /// the buttons come in one after another, the last landing 186 ms in. Deliberately the plain

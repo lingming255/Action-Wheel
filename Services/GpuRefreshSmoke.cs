@@ -114,6 +114,7 @@ namespace Action_Wheel.Services
                         window.Close();
                     }
                 }
+                object glassRing = await RadialMenu.RunGlassProbeAsync();
                 object releasePreparation = await RadialMenu.RunReleasePreparationProbeAsync();
                 object reclaimOpening = await RefreshReclaimIntro.RunHiddenProbeAsync(verifyOffscreenShow: true);
                 object reclaimSettings = await RefreshReclaimIntro.RunSettingsProbeAsync();
@@ -137,6 +138,7 @@ namespace Action_Wheel.Services
                     PixelMappingVerified = pixelMappingVerified,
                     Presentation = presentation,
                     ReleasePreparation = releasePreparation,
+                    GlassRing = glassRing,
                     ReclaimOpening = reclaimOpening,
                     ReclaimSettings = reclaimSettings,
                     ParallelIntro = parallelIntro,

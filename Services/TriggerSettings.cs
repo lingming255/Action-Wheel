@@ -48,6 +48,7 @@ namespace Action_Wheel.Services
                     }.Normalised(),
                     Refresh = ReadRefreshSettings(root),
                     Reclaim = ReadReclaimSettings(root),
+                    Sounds = ReadSoundSettings(root),
                 };
             }
             catch (Exception)
@@ -65,6 +66,7 @@ namespace Action_Wheel.Services
                 var appearance = (preferences.Appearance ?? RingAppearance.Default).Normalised();
                 var refresh = (preferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
                 var reclaim = (preferences.Reclaim ?? ReclaimAnimationSettings.Default).Normalised();
+                var sounds = (preferences.Sounds ?? WheelSoundSettings.Default).Normalised();
 
                 using var stream = new MemoryStream();
                 using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -87,6 +89,10 @@ namespace Action_Wheel.Services
                     writer.WriteNumber("pixelDurationMs", reclaim.PixelDurationMs);
                     writer.WriteNumber("densityPercent", reclaim.DensityPercent);
                     writer.WriteNumber("glowPercent", reclaim.GlowPercent);
+                    writer.WriteEndObject();
+                    writer.WriteStartObject("wheelSounds");
+                    writer.WriteBoolean("enabled", sounds.Enabled);
+                    writer.WriteNumber("volumePercent", sounds.VolumePercent);
                     writer.WriteEndObject();
                     writer.WriteEndObject();
                 }
@@ -143,6 +149,17 @@ namespace Action_Wheel.Services
                 ? result : fallback;
         }
 
+        private static WheelSoundSettings ReadSoundSettings(JsonElement root)
+        {
+            if (!root.TryGetProperty("wheelSounds", out var value) || value.ValueKind != JsonValueKind.Object)
+                return WheelSoundSettings.Default;
+            return new WheelSoundSettings
+            {
+                Enabled = value.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.True,
+                VolumePercent = ReadDouble(value, "volumePercent", WheelSoundSettings.DefaultVolumePercent),
+            }.Normalised();
+        }
+
         /// <summary>
         /// Reads the effect duration in its current unit (milliseconds), or converts a percentage
         /// written by a version before the slider - <c>ms = percent * DefaultAnimationDurationMs /
@@ -175,5 +192,7 @@ namespace Action_Wheel.Services
         public RefreshAnimationSettings Refresh { get; init; } = RefreshAnimationSettings.Default;
 
         public ReclaimAnimationSettings Reclaim { get; init; } = ReclaimAnimationSettings.Default;
+
+        public WheelSoundSettings Sounds { get; init; } = WheelSoundSettings.Default;
     }
 }

@@ -846,6 +846,22 @@
 
                         <Border Style="{StaticResource CardBorderStyle}" Padding="16">
                             <StackPanel Spacing="12">
+                                <TextBlock Text="轮盘音效 / Wheel sounds" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <ToggleSwitch Header="展开、切换、确认与取消&#x0a;Open, switch, confirm and cancel"
+                                              IsOn="{Binding WheelSoundsEnabled, Mode=TwoWay}"
+                                              OnContent="开启 / On" OffContent="关闭 / Off"/>
+                                <Slider Header="音效音量&#x0a;Sound volume" Minimum="0" Maximum="100" StepFrequency="1"
+                                        Value="{Binding WheelSoundVolumePercent, Mode=TwoWay}"
+                                        IsEnabled="{Binding WheelSoundsEnabled, Mode=OneWay}"/>
+                                <TextBlock Text="{Binding WheelSoundVolumeText, Mode=OneWay}" FontSize="12"
+                                           HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Text="默认关闭。保存后下次打开轮盘生效；方向切换声比确认声轻。 / Off by default. Save to apply on the next opening; direction changes are quieter than confirmation."
+                                           TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="16">
+                            <StackPanel Spacing="12">
                                 <TextBlock Text="回收开场 / Reclaim opening" FontWeight="SemiBold" TextWrapping="Wrap"/>
                                 <TextBlock Text="打开轮盘时由远及近亮起并消散，背景同时渐灰。保存后下次打开生效；松手后的外散可与之并行。 / Blocks pulse inward as the wheel opens while the scene fades to grey. Save to apply on the next opening; outward refresh can overlap it."
                                            TextWrapping="Wrap" FontSize="12"

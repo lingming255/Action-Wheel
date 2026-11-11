@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="Action_Wheel.Overlay.RadialMenu"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -11,147 +11,36 @@
     <!-- Make root transparent so wallpaper shows through -->
     <Grid x:Name="RootGrid" Background="Transparent">
         <Grid.Resources>
-            
-            <!--
-                Style for the outer buttons.
-
-                These buttons MUST use their own ControlTemplate instead of relying on WinUI's
-                default one: in the default template, Background/Foreground set on the Button only
-                take effect in the initial rest state - the "PointerOver" VisualState overwrites the
-                ContentPresenter directly with a theme brush, and the "Normal" state has NO setter to
-                restore it, so the hover colour stays stuck permanently after the first time the
-                pointer moves over it. (See "lightweight styling" in Microsoft's XAML styles docs.)
-
-                This template uses TemplateBinding for colour and DELIBERATELY declares no colour in
-                any VisualState - each button's colour comes from actions.json, so it has to be set
-                by code onto the Button's Background/Foreground. A colour setter in a VisualState
-                would overwrite that value. Hover/pressed are handled by RadialMenu.ApplyPointerStates
-                in code-behind; all that's left here is the scale-up effect.
-            -->
+            <!-- One glass sheet supplies the fill. Buttons only host icons and hit targets. -->
             <Style x:Key="RadialButtonStyle" TargetType="Button">
                 <Setter Property="Width" Value="52"/>
                 <Setter Property="Height" Value="52"/>
-                <!-- Defaults only. Button size is a user setting, so RadialMenu.ApplySizes writes
-                     Width/Height/CornerRadius onto each Button as local values and the template
-                     below reads them back through TemplateBinding rather than hard-coding 44/22. -->
                 <Setter Property="CornerRadius" Value="26"/>
-                <Setter Property="FontSize" Value="30"/>
                 <Setter Property="BorderThickness" Value="0"/>
                 <Setter Property="Padding" Value="0"/>
                 <Setter Property="UseSystemFocusVisuals" Value="False"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Grid RenderTransformOrigin="0.5,0.5">
-                                <!-- RenderTransformOrigin, not CenterX/CenterY: the origin is a
-                                     fraction of the element, so it stays the middle whatever
-                                     diameter the user picks. Absolute centres would need
-                                     rewriting on every size change. -->
-                                <Grid.RenderTransform>
-                                    <ScaleTransform x:Name="HoverScale" ScaleX="1" ScaleY="1"/>
-                                </Grid.RenderTransform>
-                                <!-- Empty and BELOW Bd: RadialMenu.ApplyShadow attaches the shadow
-                                     sprite visual here, so the shadow is drawn behind the button. -->
-                                <Border x:Name="ShadowHost"
-                                        Width="{TemplateBinding Width}"
-                                        Height="{TemplateBinding Height}"/>
-
-                                <Border x:Name="Bd"
-                                        Background="{TemplateBinding Background}"
+                            <Grid>
+                                <Border x:Name="ShadowHost"/>
+                                <Border Background="{TemplateBinding Background}"
                                         BorderBrush="{TemplateBinding BorderBrush}"
                                         BorderThickness="{TemplateBinding BorderThickness}"
                                         CornerRadius="{TemplateBinding CornerRadius}">
-                                    <ContentPresenter x:Name="ContentHost"
-                                                      Content="{TemplateBinding Content}"
+                                    <ContentPresenter Content="{TemplateBinding Content}"
                                                       Foreground="{TemplateBinding Foreground}"
-                                                      HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"/>
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="1"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="1"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="PointerOver">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="1.10"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="1.10"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Pressed">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="0.94"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="0.94"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Disabled"/>
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
                             </Grid>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
             </Style>
-
-            <!-- Style for the center button. Same reason as above for needing its own template. -->
-            <Style x:Key="CenterButtonStyle" TargetType="Button">
-                <Setter Property="Width" Value="104"/>
-                <Setter Property="Height" Value="104"/>
-                <Setter Property="CornerRadius" Value="52"/>
-                <Setter Property="FontSize" Value="30"/>
-                <Setter Property="Padding" Value="0"/>
-                <Setter Property="UseSystemFocusVisuals" Value="False"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Grid RenderTransformOrigin="0.5,0.5">
-                                <Grid.RenderTransform>
-                                    <ScaleTransform x:Name="HoverScale" ScaleX="1" ScaleY="1"/>
-                                </Grid.RenderTransform>
-                                <Border x:Name="ShadowHost"
-                                        Width="{TemplateBinding Width}"
-                                        Height="{TemplateBinding Height}"/>
-
-                                <Border x:Name="Bd"
-                                        Background="{TemplateBinding Background}"
-                                        BorderThickness="0"
-                                        CornerRadius="{TemplateBinding CornerRadius}">
-                                    <ContentPresenter x:Name="ContentHost"
-                                                      Content="{TemplateBinding Content}"
-                                                      Foreground="{TemplateBinding Foreground}"
-                                                      HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"/>
-                                </Border>
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="1"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="1"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="PointerOver">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="1.12"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="1.12"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Pressed">
-                                            <VisualState.Setters>
-                                                <Setter Target="HoverScale.ScaleX" Value="0.94"/>
-                                                <Setter Target="HoverScale.ScaleY" Value="0.94"/>
-                                            </VisualState.Setters>
-                                        </VisualState>
-                                        <VisualState x:Name="Disabled"/>
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
-                            </Grid>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
+            <Style x:Key="CenterButtonStyle" TargetType="Button" BasedOn="{StaticResource RadialButtonStyle}">
+                <Setter Property="Width" Value="116"/>
+                <Setter Property="Height" Value="116"/>
+                <Setter Property="CornerRadius" Value="58"/>
             </Style>
         </Grid.Resources>
 
@@ -210,14 +99,14 @@
 
                 <Border x:Name="CenterInfo" Canvas.Left="158" Canvas.Top="158"
                         Width="104" Height="104" CornerRadius="52"
-                        Background="#F0020617" BorderBrush="#5938BDF8" BorderThickness="1"
+                        Background="Transparent" BorderThickness="0"
                         IsHitTestVisible="False" Visibility="Collapsed">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Width="88" Spacing="3">
-                        <TextBlock x:Name="SelectionTitle" Foreground="#FFE0F2FE"
+                        <TextBlock x:Name="SelectionTitle" Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                    FontSize="13" FontWeight="SemiBold" TextAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxLines="1"/>
-                        <TextBlock x:Name="SelectionMeta" Foreground="#FF94A3B8"
+                        <TextBlock x:Name="SelectionMeta" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    FontSize="9" TextAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxLines="1"/>
                     </StackPanel>

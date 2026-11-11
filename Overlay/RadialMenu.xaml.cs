@@ -280,6 +280,9 @@ namespace Action_Wheel.Overlay
         private void RadialMenu_Closed(object sender, WindowEventArgs args)
         {
             _closed = true;
+            _ringMotion?.Stop();
+            _glassSurface?.Dispose();
+            _glassSurface = null;
             IsRefreshPlaying = false;
             _holdTimer.Stop();
             // Rendering is static. If a refresh is cancelled before its three-frame handoff,
@@ -315,26 +318,15 @@ namespace Action_Wheel.Overlay
 
         private void RadialMenu_Loaded(object? sender, RoutedEventArgs e)
         {
+            if (_closed || _closing) return;
             // Sizes before positions: UpdateButtonPositions places each button by its centre, so it
             // has to subtract a radius that is already the one the button will actually be drawn at.
             ApplySizes();
             UpdateButtonPositions(_appearance.OrbitRadius);
             BuildWedges();
             ApplyActions();
-            ApplyShadows();
-
-            var storyboard = RingOpenAnimation.Build(
-                _appearance.Animation, MenuContainer, AllButtons, RingMetrics.For(_appearance));
-
-            if (storyboard == null)
-            {
-                // "None" leaves nothing to wait for, so the settling pass runs straight away.
-                SettleAfterOpening();
-                return;
-            }
-
-            storyboard.Completed += (s, args) => SettleAfterOpening();
-            storyboard.Begin();
+            BeginGlassOpening();
+            WheelSounds.Play(WheelSound.Open);
         }
 
         /// <summary>
@@ -364,13 +356,10 @@ namespace Action_Wheel.Overlay
                 ButtonsCanvas.Height = MenuSize;
             }
 
-            if (_appearance.ButtonSize == RingGeometry.OuterButtonSizeDip)
-                return;
-
             var buttons = AllButtons;
             for (int tag = 0; tag < buttons.Length; tag++)
             {
-                double diameter = tag == 0 ? _appearance.CenterButtonSize : _appearance.ButtonSize;
+                double diameter = tag == 0 ? RingGeometry.InnerRadiusDip * 2 : _appearance.ButtonSize;
                 buttons[tag].Width = diameter;
                 buttons[tag].Height = diameter;
                 buttons[tag].CornerRadius = new CornerRadius(diameter / 2.0);
@@ -401,7 +390,7 @@ namespace Action_Wheel.Overlay
 
             // Pin every button to its final opacity in case composition rounded an animated value.
             foreach (var button in AllButtons)
-                button.Opacity = 1.0;
+                button.Opacity = ReferenceEquals(button, CenterBtn) && CenterInfo.Visibility == Visibility.Visible ? 0 : 1;
         }
 
         /// <summary>
@@ -457,6 +446,7 @@ namespace Action_Wheel.Overlay
         private void BuildWedges()
         {
             double centre = MenuSize / 2.0;
+            BuildGlassSheet();
 
             for (int tag = 1; tag <= 8; tag++)
             {
@@ -469,8 +459,8 @@ namespace Action_Wheel.Overlay
                 double middle = -90.0 + (tag - 1) * 45.0;
                 var wedge = new XamlPath
                 {
-                    Data = CreateWedgeGeometry(centre, middle - 21.5, middle + 21.5),
-                    StrokeThickness = 1,
+                    Data = CreateWedgeGeometry(centre, middle - 22.5, middle + 22.5),
+                    StrokeThickness = 0,
                     Tag = tag.ToString(),
                 };
 
@@ -479,7 +469,8 @@ namespace Action_Wheel.Overlay
                 wedge.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnButtonPressed), true);
                 wedge.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnButtonRest), true);
                 wedge.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnButtonRest), true);
-                wedge.Tapped += (_, _) => InvokeTag(tag);
+                int actionTag = tag;
+                wedge.Tapped += (_, _) => InvokeTag(actionTag);
 
                 Canvas.SetZIndex(wedge, -1);
                 ButtonsCanvas.Children.Insert(0, wedge);
@@ -487,7 +478,7 @@ namespace Action_Wheel.Overlay
             }
         }
 
-        private static PathGeometry CreateWedgeGeometry(double centre, double startDegrees, double endDegrees)
+        private PathGeometry CreateWedgeGeometry(double centre, double startDegrees, double endDegrees)
         {
             static Point Polar(double centre, double radius, double degrees)
             {
@@ -497,13 +488,13 @@ namespace Action_Wheel.Overlay
 
             var figure = new PathFigure
             {
-                StartPoint = Polar(centre, RingGeometry.OuterRadiusDip, startDegrees),
+                StartPoint = Polar(centre, GlassOuterRadius, startDegrees),
                 IsClosed = true,
             };
             figure.Segments.Add(new ArcSegment
             {
-                Point = Polar(centre, RingGeometry.OuterRadiusDip, endDegrees),
-                Size = new Size(RingGeometry.OuterRadiusDip, RingGeometry.OuterRadiusDip),
+                Point = Polar(centre, GlassOuterRadius, endDegrees),
+                Size = new Size(GlassOuterRadius, GlassOuterRadius),
                 SweepDirection = SweepDirection.Clockwise,
             });
             figure.Segments.Add(new LineSegment
@@ -563,13 +554,14 @@ namespace Action_Wheel.Overlay
         /// </summary>
         public void HighlightTag(int? tag)
         {
-            if (_highlightedTag == tag)
+            if (_closing || _highlightedTag == tag)
                 return;
 
             if (_highlightedTag is int previous)
                 _buttonPainters[previous]?.Rest();
 
             _highlightedTag = tag;
+            if (tag is > 0) WheelSounds.Play(WheelSound.Switch);
 
             if (tag is int current)
             {
@@ -626,7 +618,7 @@ namespace Action_Wheel.Overlay
 
         public void UpdateGesture(PointInt32 point, int? mainTag, bool allowHold)
         {
-            if (_closed) return;
+            if (_closed || _closing) return;
             _trackingGesture = true;
             var child = GroupChildAt(point);
             bool changed = _highlightedChild != child;
@@ -709,10 +701,15 @@ namespace Action_Wheel.Overlay
                 ActionKind.CopyText => "松手复制",
                 _ => string.Empty,
             };
+            CenterBtn.Opacity = 0;
             CenterInfo.Visibility = Visibility.Visible;
         }
 
-        private void HideSelectionInfo() => CenterInfo.Visibility = Visibility.Collapsed;
+        private void HideSelectionInfo()
+        {
+            CenterInfo.Visibility = Visibility.Collapsed;
+            CenterBtn.Opacity = 1;
+        }
 
         private static string Truncate(string value, int max) =>
             value.Length <= max ? value : value[..(max - 1)] + "…";
@@ -905,7 +902,7 @@ namespace Action_Wheel.Overlay
             // native Click that still lands afterwards, when the user physically releases the mouse
             // some time after the hold already ran, from invoking the primary action a second time
             // on top of it.
-            if (_closed)
+            if (_closed || _closing)
                 return;
 
             DisarmHold();
@@ -932,10 +929,7 @@ namespace Action_Wheel.Overlay
 
             // Close first: the action synthesises keystrokes for whatever is underneath, and the
             // overlay must be out of the way before they land.
-            CloseMenu();
-
-            if (action != null)
-                ActionInvoked?.Invoke(this, action);
+            ConfirmGlassAction(action);
         }
 
         /// <summary>Satellite buttons built so far, keyed by the group's own tag, kept collapsed until expanded.</summary>
@@ -1138,7 +1132,7 @@ namespace Action_Wheel.Overlay
         /// <summary>Runs a group child's action. Mirrors InvokeTag's own close-then-dispatch order.</summary>
         private void GroupChildButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_closed || sender is not Button button || button.Tag is not string tag
+            if (_closed || _closing || sender is not Button button || button.Tag is not string tag
                 || !TryParseChildTag(tag, out int parentTag, out int childIndex))
             {
                 return;
@@ -1149,8 +1143,7 @@ namespace Action_Wheel.Overlay
             if (action == null)
                 return;
 
-            CloseMenu();
-            ActionInvoked?.Invoke(this, action);
+            ConfirmGlassAction(action);
         }
 
         /// <summary>
@@ -1170,8 +1163,7 @@ namespace Action_Wheel.Overlay
 
             var action = child with { Kind = child.HoldKind, Value = child.HoldValue, Arguments = child.HoldArguments };
 
-            CloseMenu();
-            ActionInvoked?.Invoke(this, action);
+            ConfirmGlassAction(action);
         }
 
         /// <summary>
@@ -1196,7 +1188,7 @@ namespace Action_Wheel.Overlay
 
                 // Content first: ApplyPointerStates recolours the icon element directly, so it has
                 // to be able to see it.
-                button.Content = IconFactory.CreateIcon(action, _appearance.IconSize);
+                button.Content = IconFactory.CreateIcon(action, _appearance.IconSize * .73, new SolidColorBrush(GlassInk));
 
                 ApplyPointerStates(button, action, tag, background, foreground);
 
@@ -1283,80 +1275,37 @@ namespace Action_Wheel.Overlay
         /// </remarks>
         private void ApplyPointerStates(Button button, ActionItem action, int tag, Color background, Color foreground)
         {
-            // "is Image" rather than IconFile.IsVector alone: IsVector only looks at the extension,
-            // so a path whose .svg has since been deleted or renamed would still claim the swap.
-            // The button would then invert on hover while showing a fallback glyph - and on the
-            // centre button that is exactly the "solid disc disappears" look avoided below.
-            // Content was assigned immediately above, so this is the icon that actually got built.
-            bool swapsTintedSvg = action.IconTint
-                && IconFile.IsVector(action.IconPath)
-                && button.Content is Image;
-
-            // Outer buttons invert on hover; the filled centre button lightens instead, because
-            // inverting a solid disc reads as the button disappearing. A tinted SVG is the
-            // exception: swapping its icon and fill colours is the contrast behaviour users
-            // explicitly selected by tinting it.
-            bool inverts = tag != 0 || swapsTintedSvg;
-
-            var restBackground = new SolidColorBrush(background);
-            var restForeground = new SolidColorBrush(foreground);
-            var restBorder = new SolidColorBrush(tag == 0
-                ? Color.FromArgb(0x59, 0x94, 0xA3, 0xB8)
-                : Color.FromArgb(0x59, 0x38, 0xBD, 0xF8));
-
-            var hoverBackground = new SolidColorBrush(tag == 0
-                ? IconFactory.Lighten(background, 0.10)
-                : Color.FromArgb(0xF2, 0x16, 0x4E, 0x63));
-            var hoverForeground = new SolidColorBrush(tag == 0 ? foreground : Color.FromArgb(0xFF, 0xE0, 0xF2, 0xFE));
-            var hoverBorder = new SolidColorBrush(Color.FromArgb(0xFF, 0x38, 0xBD, 0xF8));
-
-            var pressedBackground = new SolidColorBrush(
-                inverts ? IconFactory.Darken(foreground, 0.15) : IconFactory.Darken(background, 0.13));
-
-            // A glyph icon has to be recoloured explicitly. Setting Button.Foreground alone is not
-            // enough - the ContentPresenter passes it down as an inherited value, which an
-            // IconElement does not always pick up, and the glyph would keep its rest colour on a
-            // background that has already changed. A tinted SVG has its colour baked into its
-            // decoded source, so prepare the inverse-colour source once and swap the Image element.
+            var restForeground = new SolidColorBrush(GlassInk);
+            var hoverForeground = new SolidColorBrush(GlassInk);
             var restContent = button.Content as FrameworkElement;
-
-            // Built on the first hover, not here. Producing it means reading the .svg, rewriting
-            // every paint attribute and decoding the result, and ApplyActions runs on the path that
-            // opens the ring - where the whole budget is about 18 ms. Most buttons are never
-            // hovered before the menu closes again, and IconFactory caches the decoded source, so
-            // the cost is paid once per colour rather than on every open.
-            FrameworkElement? tintedHover = null;
-            FrameworkElement? HoverContent() => swapsTintedSvg
-                ? tintedHover ??= IconFactory.CreateIcon(
-                    action with { Foreground = IconFactory.ToHex(background) }, _appearance.IconSize)
-                : restContent;
-
-            void Paint(Brush fill, Brush content, Brush border, bool hover)
+            bool swapsTintedSvg = action.IconTint && IconFile.IsVector(action.IconPath) && restContent is Image;
+            FrameworkElement? tinted = null;
+            void Paint(bool hover, bool pressed = false)
             {
-                button.Background = tag == 0 ? fill : new SolidColorBrush(Colors.Transparent);
-                button.Foreground = content;
-                button.BorderBrush = tag == 0 ? border : new SolidColorBrush(Colors.Transparent);
-
+                button.Background = new SolidColorBrush(tag == 0 && hover
+                    ? Color.FromArgb(pressed ? (byte)48 : (byte)25, 161, 214, 206) : Colors.Transparent);
+                button.BorderBrush = new SolidColorBrush(Colors.Transparent);
+                button.BorderThickness = new Thickness(0);
+                button.Foreground = hover ? hoverForeground : restForeground;
                 if (tag != 0 && _wedges[tag] is XamlPath wedge)
                 {
-                    wedge.Fill = fill;
-                    wedge.Stroke = border;
-                    SetSelectedOffset(wedge, button, tag, hover ? RingGeometry.SelectedOffsetDip : 0);
+                    wedge.Fill = new SolidColorBrush(hover
+                        ? GlassIsDark ? Color.FromArgb(pressed ? (byte)72 : (byte)42, 161, 214, 206)
+                            : Color.FromArgb(pressed ? (byte)90 : (byte)60, 235, 255, 252)
+                        : Colors.Transparent);
+                    wedge.Stroke = null;
+                    if (_directionArcs[tag] is XamlPath arc) arc.Opacity = hover ? 1 : 0;
                 }
-
-                var desiredContent = hover ? HoverContent() : restContent;
-                if (desiredContent != null && !ReferenceEquals(button.Content, desiredContent))
-                    button.Content = desiredContent;
-
-                if (desiredContent is IconElement icon)
-                    icon.Foreground = content;
+                var desiredContent = swapsTintedSvg
+                    ? tinted ??= IconFactory.CreateIcon(action with { Foreground = IconFactory.ToHex(GlassInk) },
+                        _appearance.IconSize * .73)
+                    : restContent;
+                if (desiredContent != null && !ReferenceEquals(button.Content, desiredContent)) button.Content = desiredContent;
+                if (desiredContent is IconElement icon) icon.Foreground = restForeground;
             }
-
-            void Rest() => Paint(restBackground, restForeground, restBorder, false);
-            // Keep the circular outline opposite to the fill as well. Only its brush changes; the
-            // template keeps the same 2 px BorderThickness in every pointer state.
-            void Hover() => Paint(hoverBackground, hoverForeground, hoverBorder, true);
-            void Pressed() => Paint(pressedBackground, hoverForeground, hoverBorder, true);
+            void Rest() => Paint(false);
+            void Hover() => Paint(true);
+            void Pressed() => Paint(true, true);
 
             // Kept so the drag gesture can highlight a button the pointer is nowhere near.
             _buttonPainters[tag] = new ButtonPainter(Rest, Hover, Pressed);
@@ -1404,7 +1353,7 @@ namespace Action_Wheel.Overlay
 
         private void OnButtonHover(object sender, PointerRoutedEventArgs e)
         {
-            if (_trackingGesture) return;
+            if (_trackingGesture || _closing) return;
             // Also reached on release (see ApplyPointerStates), which is exactly when a held-past-
             // threshold press needs its countdown cancelled - the button is either about to raise a
             // normal Click (release before the threshold) or already handled by FireHold (release
@@ -1563,7 +1512,7 @@ namespace Action_Wheel.Overlay
                 int noBorder = DWMWA_COLOR_NONE;
                 DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
 
-                SystemBackdrop = new TransparentSystemBackdrop();
+                SystemBackdrop = _transparentBackdrop = new TransparentSystemBackdrop();
 
                 // WinUI clears the native client surface with its theme background before drawing
                 // XAML. In Light mode that clear is white and remains visible through transparent
@@ -1610,10 +1559,20 @@ namespace Action_Wheel.Overlay
         /// Microsoft.UI.Composition.Compositor used for XAML element visuals - so a dedicated
         /// Compositor has to be created here (the standard pattern for custom system backdrops).
         /// </summary>
+        private TransparentSystemBackdrop? _transparentBackdrop;
+
         internal sealed class TransparentSystemBackdrop : SystemBackdrop
         {
             private WindowsSystemDispatcherQueueHelper? _dispatcherQueueHelper;
             private Windows.UI.Composition.Compositor? _compositor;
+            private Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop? _target;
+            private Windows.UI.Composition.CompositionColorBrush? _transparent;
+            internal Windows.UI.Composition.Compositor Compositor => _compositor
+                ?? throw new InvalidOperationException("The transparent backdrop is not connected.");
+            internal void SetBrush(Windows.UI.Composition.CompositionBrush? brush)
+            {
+                if (_target != null) _target.SystemBackdrop = brush ?? _transparent;
+            }
 
             protected override void OnTargetConnected(Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
             {
@@ -1621,12 +1580,17 @@ namespace Action_Wheel.Overlay
                 _dispatcherQueueHelper = new WindowsSystemDispatcherQueueHelper();
                 _dispatcherQueueHelper.EnsureWindowsSystemDispatcherQueueController();
                 _compositor = new Windows.UI.Composition.Compositor();
-                connectedTarget.SystemBackdrop = _compositor.CreateColorBrush(Colors.Transparent);
+                _target = connectedTarget;
+                _transparent = _compositor.CreateColorBrush(Colors.Transparent);
+                connectedTarget.SystemBackdrop = _transparent;
             }
 
             protected override void OnTargetDisconnected(Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop disconnectedTarget)
             {
+                _target = null;
                 disconnectedTarget.SystemBackdrop = null;
+                _transparent?.Dispose();
+                _transparent = null;
                 _compositor?.Dispose();
                 _compositor = null;
                 base.OnTargetDisconnected(disconnectedTarget);
@@ -1738,8 +1702,11 @@ namespace Action_Wheel.Overlay
         /// <summary>Gives a release immediate local feedback while exact depth preparation finishes.</summary>
         internal void BeginRefreshFeedback(PointInt32 release)
         {
-            if (_closed || IsRefreshPlaying) return;
+            if (_closed || _closing || IsRefreshPlaying) return;
             IsRefreshPlaying = true;
+            _ringMotion?.Stop();
+            _glassSurface?.Dispose();
+            _glassSurface = null;
             DisarmHold();
             RefreshInputTransparency.Enable(_windowHandle);
             RootGrid.IsHitTestVisible = false;
@@ -2095,7 +2062,7 @@ namespace Action_Wheel.Overlay
         {
             // The canvas is MenuSize square; keep the centre button exactly at its midpoint.
             double canvasSize = MenuSize;
-            double centerBtnSize = _appearance.CenterButtonSize;
+            double centerBtnSize = RingGeometry.InnerRadiusDip * 2;
             double centerBtnLeft = (canvasSize - centerBtnSize) / 2.0;
             double centerBtnTop = (canvasSize - centerBtnSize) / 2.0;
 
@@ -2157,7 +2124,7 @@ namespace Action_Wheel.Overlay
                 return;
 
             // Clicked inside the window but not on a button -> close menu
-            CloseMenu();
+            DismissMenu();
         }
 
         private static bool IsWithinButton(DependencyObject? source)

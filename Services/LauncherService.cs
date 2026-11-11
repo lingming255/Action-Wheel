@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,7 +42,6 @@ namespace Action_Wheel.Services
         private bool _gestureActive;
         private PointInt32 _keyboardGestureOrigin;
         private bool _keyboardGestureActive;
-        private IntPtr _targetWindow;
 
         private PointInt32? _lastHealthCursor;
         private long _lastHealthMouseCallback;
@@ -363,7 +362,7 @@ namespace Action_Wheel.Services
         {
             if (_stopped) return;
             long requestGeneration = ++_menuRequestGeneration;
-            _targetWindow = ActionDispatcher.CaptureTargetWindow();
+            var targetWindow = ActionDispatcher.CaptureTargetWindow();
 
             // Closing and opening both have to happen in the same UI-thread turn. Closing the old
             // menu right here (on the hook's callback) would touch the window from off the UI thread.
@@ -383,7 +382,7 @@ namespace Action_Wheel.Services
                         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
                     }
 
-                    var menu = new RadialMenu(actions, _appearance);
+                    var menu = new RadialMenu(actions, _appearance) { ActionTargetWindow = targetWindow };
                     _currentMenu = menu;
 
                     // Only clear the reference if it still points at this exact menu. The old menu's
@@ -530,7 +529,7 @@ namespace Action_Wheel.Services
         private bool OnEscapePressed()
         {
             var menu = _currentMenu;
-            if (menu == null || menu.IsRefreshPlaying)
+            if (menu == null || menu.IsRefreshPlaying || menu.IsClosing)
                 return false;
 
             _gestureActive = false;
@@ -546,6 +545,8 @@ namespace Action_Wheel.Services
 
         private async void OnActionInvoked(object? sender, ActionItem action)
         {
+            if (_stopped) return;
+            var targetWindow = (sender as RadialMenu)?.ActionTargetWindow ?? IntPtr.Zero;
             if (action.Kind == ActionKind.Function && action.Value == QuickInfoCatalog.NextPage)
             {
                 _quickInfoPage++;
@@ -564,7 +565,7 @@ namespace Action_Wheel.Services
             if (action.Kind == ActionKind.CopyText)
                 _dispatcherQueue.TryEnqueue(() => ActionDispatcher.Execute(action));
             else
-                ActionDispatcher.Execute(action, _targetWindow);
+                ActionDispatcher.Execute(action, targetWindow);
         }
 
         /// <summary>
@@ -583,6 +584,7 @@ namespace Action_Wheel.Services
         private void ApplyTriggerSettings()
         {
             var preferences = TriggerSettings.LoadPreferences();
+            WheelSounds.Configure(preferences.Sounds);
             _mouseHook.Trigger = preferences.Trigger;
             _mouseHook.ChordTimeoutMs = preferences.ChordTimeoutMs;
             _mouseHook.ChordMovementThreshold = preferences.MovementThreshold;
@@ -765,7 +767,7 @@ namespace Action_Wheel.Services
         private async void PlayRefresh(PointInt32 release)
         {
             var menu = _currentMenu;
-            if (menu == null)
+            if (menu == null || menu.IsClosing)
                 return;
 
             try
@@ -853,7 +855,8 @@ namespace Action_Wheel.Services
         {
             try
             {
-                menu.CloseMenu();
+                if (_stopped) menu.CloseMenu();
+                else menu.DismissMenu();
             }
             catch (Exception ex)
             {
@@ -863,6 +866,7 @@ namespace Action_Wheel.Services
 
         public void Dispose()
         {
+            WheelSounds.Shutdown();
             // ActionDispatcher.ActionFailed is static; leaving this subscribed would keep the whole
             // service - and the window it reports into - alive past shutdown.
             ActionDispatcher.ActionFailed -= OnActionFailed;

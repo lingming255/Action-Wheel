@@ -137,6 +137,7 @@ namespace Action_Wheel.ViewModels
             _appearance = (triggerPreferences.Appearance ?? RingAppearance.Default).Normalised();
             _refreshSettings = (triggerPreferences.Refresh ?? RefreshAnimationSettings.Default).Normalised();
             _reclaimSettings = (triggerPreferences.Reclaim ?? ReclaimAnimationSettings.Default).Normalised();
+            _soundSettings = (triggerPreferences.Sounds ?? WheelSoundSettings.Default).Normalised();
             _activeProfileName = ActiveProfileSettings.Load();
             _loadedProfileName = _activeProfileName;
 
@@ -180,6 +181,7 @@ namespace Action_Wheel.ViewModels
 
             RaiseRefreshSettings();
             RaiseReclaimSettings();
+            RaiseSoundSettings();
 
             UndoCommand.RaiseCanExecuteChanged();
             RedoCommand.RaiseCanExecuteChanged();
@@ -618,6 +620,7 @@ namespace Action_Wheel.ViewModels
         private RingAppearance _savedAppearance = RingAppearance.Default;
         private RefreshAnimationSettings _savedRefreshSettings = RefreshAnimationSettings.Default;
         private ReclaimAnimationSettings _savedReclaimSettings = ReclaimAnimationSettings.Default;
+        private WheelSoundSettings _savedSoundSettings = WheelSoundSettings.Default;
         private int _savedTriggerIndex;
         private double _savedChordTimeoutMs;
         private double _savedMovementThreshold;
@@ -627,6 +630,7 @@ namespace Action_Wheel.ViewModels
             _appearance != _savedAppearance
             || _refreshSettings != _savedRefreshSettings
             || _reclaimSettings != _savedReclaimSettings
+            || _soundSettings != _savedSoundSettings
             || _triggerIndex != _savedTriggerIndex
             || _chordTimeoutMs != _savedChordTimeoutMs
             || _movementThreshold != _savedMovementThreshold
@@ -641,6 +645,7 @@ namespace Action_Wheel.ViewModels
             _savedAppearance = _appearance;
             _savedRefreshSettings = _refreshSettings;
             _savedReclaimSettings = _reclaimSettings;
+            _savedSoundSettings = _soundSettings;
             _savedTriggerIndex = _triggerIndex;
             _savedChordTimeoutMs = _chordTimeoutMs;
             _savedMovementThreshold = _movementThreshold;
@@ -755,6 +760,7 @@ namespace Action_Wheel.ViewModels
                     Appearance = _appearance,
                     Refresh = _refreshSettings,
                     Reclaim = _reclaimSettings,
+                    Sounds = _soundSettings,
                 }, out triggerError))
             {
                 // preferences.json now carries the ring's size and animation as well as the trigger,
@@ -857,6 +863,7 @@ namespace Action_Wheel.ViewModels
             ApplyAppearance(RingAppearance.Default, nameof(Appearance));
             ApplyRefreshSettings(RefreshAnimationSettings.Default, nameof(RefreshSettings));
             ApplyReclaimSettings(ReclaimAnimationSettings.Default, nameof(ReclaimSettings));
+            ApplySoundSettings(WheelSoundSettings.Default);
 
             // Undo is a stack of ActionItem snapshots and does not carry the appearance, so the
             // message must not promise that it does.
