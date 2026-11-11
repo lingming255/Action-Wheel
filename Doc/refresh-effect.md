@@ -205,7 +205,10 @@ outward release sequence. The preceding `13d7abc` is preserved at
 `manifest.json`: all 194 Git blobs/tree entries, three runtime files, three model files and
 twelve actual local configuration files were verified, including copied-file SHA-256 hashes.
 
-`RefreshReclaimIntro` creates an independent monitor-sized decoration lasting 420 ms. At most
+`RefreshReclaimIntro` creates an independent monitor-sized decoration lasting 240 ms. Its block
+pulse scales with the total duration (60 ms, one quarter of the opening). The preceding 420-ms
+trial is preserved at `archive/refresh-reclaim-before-240ms-20261111` (`54fe925`) and the matching
+`bin/Backups/` folder. At most
 600 stationary squares pulse from farthest to nearest in 40 opacity bands, with soft shadows
 of the same colour. Original capture samples replace the initial pigment when available.
 It uses no screenshot texture, desktop displacement or image scaling. The interactive ring

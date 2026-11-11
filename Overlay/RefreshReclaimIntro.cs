@@ -25,10 +25,10 @@ namespace Action_Wheel.Overlay
     /// </summary>
     internal sealed class RefreshReclaimIntro : IDisposable
     {
-        internal const double DurationMs = 420;
+        internal const double DurationMs = 240;
         private const int MaximumBlocks = 600;
         private const int TimingBands = 40;
-        private const double PulseMs = 105;
+        private const double PulseMs = DurationMs / 4;
         private readonly Window _window;
         private readonly Grid _host;
         private readonly RectInt32 _bounds;
