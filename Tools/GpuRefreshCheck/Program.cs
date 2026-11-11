@@ -12,10 +12,13 @@ internal static class Program
     {
         try
         {
-            bool correctness = !args.Contains("--performance-only");
-            bool performance = !args.Contains("--correctness-only");
+            bool preparationOnly = args.Contains("--preparation-only");
+            bool correctness = !preparationOnly && !args.Contains("--performance-only");
+            bool performance = !preparationOnly && !args.Contains("--correctness-only");
             if (correctness) RunCorrectness();
             object[] measurements = performance ? [Measure(1920, 1080), Measure(3840, 2160)] : [];
+            object[] preparation = preparationOnly ? [MeasurePreparation(1920, 1080), MeasurePreparation(3840, 2160)] : [];
+            if (correctness) CheckDeviceReuse();
             var report = new
             {
                 Passed = true,
@@ -26,6 +29,7 @@ internal static class Program
                 ReferenceTimeRatio = GpuRefreshRenderer.ReferenceTimeRatio,
                 Comparisons,
                 Measurements = measurements,
+                Preparation = preparation,
                 TimingBoundary = "CPU submission, Render+Finish completed-frame wall latency, and disjoint-validated GPU timestamp duration are separate. Finish waits for actual GPU work without pixel readback. None includes presentation or model/capture preparation, and none establishes desktop fps.",
             };
             string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
@@ -45,6 +49,76 @@ internal static class Program
             Console.Error.WriteLine(error);
             return 1;
         }
+        finally { GpuRefreshDevice.ShutdownPool(); }
+    }
+
+    private static void CheckDeviceReuse()
+    {
+        const int width = 173, height = 97;
+        byte[] source = Scene(width, height);
+        var reference = Reference(width, height, source);
+        var scene = new GpuRefreshScene(reference);
+        var previous = new GpuRefreshRenderer(scene);
+        nint native = previous.Device.NativeDevice;
+        previous.Render(700);
+        byte[] expected = Readback(previous);
+        // Swapchains remain lease-local and must never survive in the idle cache.
+        previous.Device.CreateSwapChain(width, height);
+        previous.Dispose();
+        using var reused = new GpuRefreshRenderer(scene);
+        Require(reused.Device.ReusedBackend && reused.Device.NativeDevice == native,
+            "A completed gesture did not reuse the idle native device.");
+        Require(reused.Device.SwapChain == 0 && reused.Device.SwapChainScale == 0,
+            "A reused device retained a previous window's swapchain or scale.");
+        previous.Dispose();
+        reused.Render(700);
+        Require(Readback(reused).AsSpan().SequenceEqual(expected),
+            "A stale gesture disposal or recycled device changed the new frame.");
+        using var overlap = new GpuRefreshRenderer(scene);
+        Require(overlap.Device.NativeDevice != reused.Device.NativeDevice,
+            "Two active gestures share the same immediate context.");
+        overlap.Render(1100);
+        Require(Readback(reused).AsSpan().SequenceEqual(expected),
+            "An overlapping gesture overwrote another gesture's output.");
+        using var fresh = new GpuRefreshRenderer(scene, allowDeviceReuse: false);
+        Require(!fresh.Device.ReusedBackend, "The diagnostic fresh-device path reused a backend.");
+        fresh.Render(700);
+        Require(Readback(fresh).AsSpan().SequenceEqual(expected),
+            "Cached and fresh devices render different pixels.");
+        // Shutdown must release an idle owner and reject returns from all live leases.
+        overlap.Dispose();
+        GpuRefreshDevice.ShutdownPool();
+        reused.Dispose();
+        using var afterShutdown = new GpuRefreshRenderer(scene);
+        Require(!afterShutdown.Device.ReusedBackend, "Device shutdown still accepts or lends idle devices.");
+        afterShutdown.Render(700);
+        Require(Readback(afterShutdown).AsSpan().SequenceEqual(expected),
+            "Shutdown cleanup damaged a later independent diagnostic device.");
+        Console.WriteLine("Device reuse: fresh pixels, overlapping isolation, lease-local swapchain, stale disposal and shutdown checked.");
+    }
+
+    private static object MeasurePreparation(int width, int height)
+    {
+        byte[] source = Scene(width, height);
+        var depth = Depth(width, height);
+        var rounds = new List<object>();
+        for (int round = 0; round < 7; round++)
+        {
+            var watch = Stopwatch.StartNew();
+            var reference = new SpectrumOverlayRefreshRenderer(width, height, source, depth, width / 3, height / 2);
+            double cpuMs = watch.Elapsed.TotalMilliseconds;
+            watch.Restart();
+            var scene = new GpuRefreshScene(reference);
+            double mapsMs = watch.Elapsed.TotalMilliseconds;
+            watch.Restart();
+            using var gpu = new GpuRefreshRenderer(scene);
+            double gpuMs = watch.Elapsed.TotalMilliseconds;
+            rounds.Add(new { Round = round, CpuReferenceMs = cpuMs, GpuMapsMs = mapsMs,
+                GpuCreationMs = gpuMs, TotalMs = cpuMs + mapsMs + gpuMs,
+                gpu.Device.ReusedBackend });
+        }
+        return new { Width = width, Height = height, Rounds = rounds,
+            Excludes = "Input generation, model inference, capture, UI presentation and release overlap." };
     }
 
     private static void RunCorrectness()

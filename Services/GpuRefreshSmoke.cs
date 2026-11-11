@@ -98,6 +98,7 @@ namespace Action_Wheel.Services
                             || Math.Abs(host.ActualHeight * finalScale - height) > .05)
                             throw new InvalidOperationException("Refresh cover does not match native capture pixels after the DPI change.");
                         rounds.Add(new { Width = width, Height = height, playback.AdapterName,
+                            ReusedDeviceBackend = renderer.Device.ReusedBackend,
                             InitialRasterizationScale = scale, FinalRasterizationScale = finalScale,
                             playback.PresentedFrames, AutomaticFrames = automaticFrames,
                             ObservedMs = observedMs, PlaybackDurationMs = renderer.DurationMs,
@@ -140,6 +141,7 @@ namespace Action_Wheel.Services
             }
             finally
             {
+                GpuRefreshDevice.ShutdownPool();
                 lifetimeWindow?.Close();
                 exit();
             }

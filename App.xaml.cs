@@ -244,6 +244,8 @@ namespace Action_Wheel
 
             _exiting = true;
             RefreshRenderWarmup.Cancel();
+            // Close the idle device cache before asynchronous capture disposal can return to it.
+            GpuRefreshDevice.ShutdownPool();
 
             // ForceClose, not Close: the settings window would otherwise put an unsaved-changes
             // dialog on screen, and this method cannot wait for an answer - it runs synchronously

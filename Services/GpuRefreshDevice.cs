@@ -17,14 +17,20 @@ namespace Action_Wheel.Services
     internal sealed unsafe class GpuRefreshDevice : IDisposable
     {
         private static readonly ConcurrentDictionary<(string Source, string Entry, string Profile), byte[]> Bytecode = new();
+        private static readonly object PoolGate = new();
+        private static Backend? _idleBackend;
+        private static bool _poolShutdown;
         private nint _device, _context, _vertexShader, _sampler, _rasterizer, _constants, _swapChain;
         private readonly List<IDisposable> _resources = new();
+        private readonly bool _allowReuse;
+        private bool _backendReady;
         private bool _disposed;
         private double _swapChainScale;
         internal nint SwapChain => _swapChain;
         internal nint NativeDevice => _device;
         internal nint NativeContext => _context;
         internal double SwapChainScale => _swapChainScale;
+        internal bool ReusedBackend { get; private set; }
         internal string AdapterName { get; private set; } = "";
         internal uint VendorId { get; private set; }
         internal uint FeatureLevel { get; private set; }
@@ -52,8 +58,31 @@ namespace Action_Wheel.Services
             public void Dispose() => Release(ref Pointer);
         }
 
-        public GpuRefreshDevice()
+        public GpuRefreshDevice(bool allowReuse = true)
         {
+            _allowReuse = allowReuse;
+            if (allowReuse)
+            {
+                Backend? cached;
+                lock (PoolGate)
+                {
+                    cached = _poolShutdown ? null : _idleBackend;
+                    _idleBackend = null;
+                }
+                if (cached != null)
+                {
+                    if (cached.IsHealthy)
+                    {
+                        _device = cached.Device; _context = cached.Context;
+                        _vertexShader = cached.VertexShader; _sampler = cached.Sampler;
+                        _rasterizer = cached.Rasterizer; _constants = cached.Constants;
+                        AdapterName = cached.AdapterName; VendorId = cached.VendorId; FeatureLevel = cached.FeatureLevel;
+                        _backendReady = true; ReusedBackend = true;
+                        return;
+                    }
+                    cached.Dispose();
+                }
+            }
             try
             {
                 nint device = 0, context = 0;
@@ -82,8 +111,39 @@ namespace Action_Wheel.Services
                 nint constantBuffer = 0;
                 Check(((delegate* unmanaged[Stdcall]<nint, BufferDesc*, void*, nint*, int>)V(_device, 3))(_device, &buffer, null, &constantBuffer));
                 _constants = constantBuffer;
+                _backendReady = true;
             }
             catch { Dispose(); throw; }
+        }
+
+        /// <summary>
+        /// Stops caching permanently during app shutdown. Active facades keep their exclusive
+        /// backend until disposal; they can no longer repopulate the process-wide idle slot.
+        /// </summary>
+        internal static void ShutdownPool()
+        {
+            Backend? idle;
+            lock (PoolGate)
+            {
+                _poolShutdown = true;
+                idle = _idleBackend; _idleBackend = null;
+            }
+            idle?.Dispose();
+        }
+
+        private sealed class Backend : IDisposable
+        {
+            internal nint Device, Context, VertexShader, Sampler, Rasterizer, Constants;
+            internal string AdapterName = "";
+            internal uint VendorId, FeatureLevel;
+            internal bool IsHealthy => Device != 0
+                && ((delegate* unmanaged[Stdcall]<nint, int>)V(Device, 39))(Device) == 0;
+
+            public void Dispose()
+            {
+                Release(ref Constants); Release(ref Rasterizer); Release(ref Sampler);
+                Release(ref VertexShader); Release(ref Context); Release(ref Device);
+            }
         }
 
         private void ReadAdapter()
@@ -373,11 +433,35 @@ namespace Action_Wheel.Services
         {
             if (_disposed) return;
             _disposed = true;
+            // A facade is one exclusive lease. Its context and all scene-specific bindings are
+            // cleared before an idle backend can be rented by another worker or playing window.
             if (_context != 0) ((delegate* unmanaged[Stdcall]<nint, void>)V(_context, 110))(_context);
             for (int index = _resources.Count - 1; index >= 0; index--) _resources[index].Dispose();
             _resources.Clear();
-            Release(ref _swapChain); Release(ref _constants); Release(ref _rasterizer); Release(ref _sampler);
-            Release(ref _vertexShader); Release(ref _context); Release(ref _device);
+            Release(ref _swapChain);
+            _swapChainScale = 0;
+            var backend = new Backend
+            {
+                Device = _device, Context = _context, VertexShader = _vertexShader,
+                Sampler = _sampler, Rasterizer = _rasterizer, Constants = _constants,
+                AdapterName = AdapterName, VendorId = VendorId, FeatureLevel = FeatureLevel,
+            };
+            // Do not leave native aliases in a disposed facade. In particular, a delayed second
+            // Dispose from an old frame must never touch a backend already rented by a new frame.
+            _device = _context = _vertexShader = _sampler = _rasterizer = _constants = 0;
+            bool returned = false;
+            if (_allowReuse && _backendReady && backend.IsHealthy)
+            {
+                lock (PoolGate)
+                {
+                    if (!_poolShutdown && _idleBackend == null)
+                    {
+                        _idleBackend = backend;
+                        returned = true;
+                    }
+                }
+            }
+            if (!returned) backend.Dispose();
         }
 
         [DllImport("d3d11.dll", ExactSpelling = true)]

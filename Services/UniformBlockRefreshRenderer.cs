@@ -402,16 +402,20 @@ namespace Action_Wheel.Services
             // The encoder produces a difference overlay. Reconstruct its visible native RGB
             // before removing chroma, then fully cover the live desktop until each cell arrives.
             // Match ScreenGrade/RefreshFrame's Rec.601 grey; retain the reference LUT's luma.
-            for (int offset = 0; offset < result.Length; offset += 4)
+            Parallel.For(0, height, new ParallelOptions { MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount) }, y =>
             {
-                float remaining = 1 - result[offset + 3] / 255f;
-                float red = result[offset + 2] + capture[offset + 2] * remaining;
-                float green = result[offset + 1] + capture[offset + 1] * remaining;
-                float blue = result[offset] + capture[offset] * remaining;
-                byte grey = (byte)Math.Clamp((int)MathF.Round(.30f * red + .59f * green + .11f * blue), 0, 255);
-                result[offset] = result[offset + 1] = result[offset + 2] = grey;
-                result[offset + 3] = 255;
-            }
+                int last = (y + 1) * width * 4;
+                for (int offset = y * width * 4; offset < last; offset += 4)
+                {
+                    float remaining = 1 - result[offset + 3] / 255f;
+                    float red = result[offset + 2] + capture[offset + 2] * remaining;
+                    float green = result[offset + 1] + capture[offset + 1] * remaining;
+                    float blue = result[offset] + capture[offset] * remaining;
+                    byte grey = (byte)Math.Clamp((int)MathF.Round(.30f * red + .59f * green + .11f * blue), 0, 255);
+                    result[offset] = result[offset + 1] = result[offset + 2] = grey;
+                    result[offset + 3] = 255;
+                }
+            });
             return result;
         }
 

@@ -37,12 +37,12 @@ namespace Action_Wheel.Services
         internal double DurationMs => _timing.PlaybackDurationMs;
         internal double TimeRatio => _timing.ReferenceTimeRatio;
 
-        internal GpuRefreshRenderer(GpuRefreshScene scene)
+        internal GpuRefreshRenderer(GpuRefreshScene scene, bool allowDeviceReuse = true)
         {
             ArgumentNullException.ThrowIfNull(scene);
             _timing = scene.Timing;
             Width = scene.Width; Height = scene.Height;
-            Device = new GpuRefreshDevice();
+            Device = new GpuRefreshDevice(allowDeviceReuse);
             try
             {
                 _capture = Device.CreateBgraTexture(Width, Height, scene.Capture);

@@ -30,6 +30,7 @@ internal static class SpectrumOverlayTests
 
     public static void Run()
     {
+        CheckTextureOwnership();
         CheckGaussianPreparation();
         CheckExternalEnvelope();
         CheckOverlay();
@@ -42,6 +43,36 @@ internal static class SpectrumOverlayTests
     private static RefreshSpectrumEffect Spectrum(int width, int height)
         => new(width, height, ReferenceEffectMath.LoadTexture("atlas.rgb.gz"),
             ReferenceEffectMath.LoadTexture("colorbar.rgb.gz"), ReferenceEffectMath.LoadTexture("spectrum-lut.rgb.gz"));
+
+    private static void CheckTextureOwnership()
+    {
+        foreach (string suffix in new[] { "atlas.rgb.gz", "colorbar.rgb.gz", "pixel-lut.rgb.gz", "spectrum-lut.rgb.gz" })
+        {
+            using Stream resource = typeof(ReferenceEffectMath).Assembly.GetManifestResourceStream("ActionWheel.Refresh." + suffix)!;
+            using var zip = new System.IO.Compression.GZipStream(resource, System.IO.Compression.CompressionMode.Decompress);
+            using var reader = new BinaryReader(zip);
+            int width = reader.ReadInt32(), height = reader.ReadInt32();
+            var expected = new Vector3[width * height];
+            for (int pixel = 0; pixel < expected.Length; pixel++)
+                expected[pixel] = new Vector3(reader.ReadByte(), reader.ReadByte(), reader.ReadByte()) / 255;
+
+            var callers = new ReferenceTexture[8];
+            Parallel.For(0, callers.Length, index => callers[index] = ReferenceEffectMath.LoadTexture(suffix));
+            foreach (ReferenceTexture texture in callers)
+                Require(texture.Width == width && texture.Height == height
+                    && texture.Pixels.AsSpan().SequenceEqual(expected),
+                    "Concurrent cached texture loads differ from the original stream decoder.");
+            for (int index = 1; index < callers.Length; index++)
+                Require(!ReferenceEquals(callers[0], callers[index])
+                    && !ReferenceEquals(callers[0].Pixels, callers[index].Pixels),
+                    "Cached resource loads share writable texture state.");
+            callers[0].Pixels[0] = new Vector3(-10, 5, 30);
+            Require(ReferenceEffectMath.LoadTexture(suffix).Pixels.AsSpan().SequenceEqual(expected)
+                && callers[1].Pixels.AsSpan().SequenceEqual(expected),
+                "Writing one loaded texture changed the private cache or another caller.");
+        }
+        Console.WriteLine("Reference textures: concurrent loads match the original stream decoder byte-for-byte, with independent writable copies and an isolated resource cache.");
+    }
 
     private static void CheckGaussianPreparation()
     {

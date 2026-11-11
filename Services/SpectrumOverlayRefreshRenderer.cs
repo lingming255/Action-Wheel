@@ -25,6 +25,7 @@ namespace Action_Wheel.Services
         private readonly ParallelOptions _parallel;
         private readonly Action<int> _envelopeBand, _deltaBand, _compositeBand;
         private readonly float _overlayGain;
+        private int _originX = -1, _originY = -1;
         private double _elapsedMs;
         private byte[]? _activeOutput;
         private CancellationToken _cancellation;
@@ -93,10 +94,13 @@ namespace Action_Wheel.Services
         {
             originX = Math.Clamp(originX, 0, _width - 1);
             originY = Math.Clamp(originY, 0, _height - 1);
+            if (originX == _originX && originY == _originY) return;
             BlocksRenderer.SetOrigin(originX, originY);
             float originDepth = OriginDepth;
             double farthest = RefreshDepthSweep.FarthestDistance(_width, _height, originX, originY);
-            for (int y = 0; y < _workHeight; y++)
+            // Retiming is independent per work pixel and happens before playback. Avoid
+            // serially delaying release for a full work image when the pointer moved.
+            Parallel.For(0, _workHeight, _parallel, y =>
             {
                 double centerY = (y + .5) * _height / _workHeight;
                 for (int x = 0; x < _workWidth; x++)
@@ -106,7 +110,8 @@ namespace Action_Wheel.Services
                     double distance = RefreshDepthSweep.DistanceAt(centerX, centerY, originX, originY, farthest);
                     _starts[pixel] = Timing.StartAt(_depth[pixel], originDepth, distance);
                 }
-            }
+            });
+            _originX = originX; _originY = originY;
         }
 
         public void Render(double elapsedMs, byte[] fullBuffer, byte[] bloomBuffer,

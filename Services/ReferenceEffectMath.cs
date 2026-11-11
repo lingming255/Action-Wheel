@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Action_Wheel.Services
@@ -45,6 +47,7 @@ namespace Action_Wheel.Services
     internal static class ReferenceEffectMath
     {
         private static readonly ConditionalWeakTable<ReferenceTexture, GaussianCache> GaussianPlans = new();
+        private static readonly ConcurrentDictionary<string, Lazy<ReferenceTexture>> ResourceTextures = new(StringComparer.Ordinal);
 
         public static float SmoothStep(float low, float high, float value)
         {
@@ -260,14 +263,27 @@ namespace Action_Wheel.Services
         }
         public static ReferenceTexture LoadTexture(string suffix)
         {
+            // Keep one private decoded asset across gestures. Return an independent writable
+            // texture as before: a caller must never be able to change the cached reference.
+            ReferenceTexture resource = ResourceTextures.GetOrAdd(suffix, static name =>
+                new Lazy<ReferenceTexture>(() => ReadTexture(name), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+            return new ReferenceTexture(resource.Width, resource.Height, (Vector3[])resource.Pixels.Clone());
+        }
+
+        private static ReferenceTexture ReadTexture(string suffix)
+        {
             using Stream resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("ActionWheel.Refresh." + suffix)
                 ?? throw new FileNotFoundException("Missing refresh reference texture: " + suffix);
             using var zip = new GZipStream(resource, CompressionMode.Decompress);
             using var reader = new BinaryReader(zip);
             int width = reader.ReadInt32(), height = reader.ReadInt32();
             var texture = new ReferenceTexture(width, height);
+            // GZipStream.ReadByte decompresses through the stream for every channel. Decode
+            // in one bulk read, retaining the exact byte-to-float arithmetic of the reference.
+            byte[] rgb = new byte[checked(texture.Pixels.Length * 3)];
+            zip.ReadExactly(rgb);
             for (int p = 0; p < texture.Pixels.Length; p++)
-                texture.Pixels[p] = new Vector3(reader.ReadByte(), reader.ReadByte(), reader.ReadByte()) / 255;
+                texture.Pixels[p] = new Vector3(rgb[p * 3], rgb[p * 3 + 1], rgb[p * 3 + 2]) / 255;
             return texture;
         }
     }

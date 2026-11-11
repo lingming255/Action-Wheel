@@ -159,6 +159,43 @@ plus 2.61–3.69 ms waiting for rendering callbacks; these are not mouse-to-scre
 The synthetic real-model warmup took 488.31 ms in that process, without capturing the desktop.
 Native mapping samples and styled/unmodified offscreen BGRA comparisons still passed.
 
+## Preparation optimization (2026-11-11)
+
+The preceding `40aec5f` is preserved at `archive/refresh-before-preparation-opt-20261111`
+and the matching `bin/Backups/` directory. All 194 Git blobs/tree entries, three runtime
+files, three model files and twelve actual local configuration files were verified;
+runtime/model/configuration copies matched their source SHA-256 hashes.
+
+`GpuRefreshDevice` retains at most one healthy idle backend. Each lease has its own facade,
+scene textures, pixel shaders and swapchain; overlapping active leases use separate backends.
+Disposal clears scene bindings and native aliases before returning a healthy backend, so a
+late repeated disposal cannot affect its next lease. Failed devices are not cached, and
+`ShutdownPool` closes the cache during application exit. `ReferenceEffectMath` now lazily
+caches privately decoded embedded textures and reads their RGB bytes in bulk; callers still
+receive independent writable clones. Grey-background preparation and origin retiming use
+at most four row workers, and retiming at the same pixel skips unchanged work.
+
+The fair comparison ran each version serially for seven rounds per resolution, excluding
+the first round from these warm medians:
+
+| Synthetic output | CPU preparation, before / after | GPU creation, before / after | Total preparation, before / after |
+| --- | --- | --- | --- |
+| 1920x1080 | 221.92 / 97.02 ms | 267.51 / 13.02 ms | 512.91 / 120.93 ms |
+| 3840x2160 | 285.03 / 155.99 ms | 265.73 / 21.20 ms | 562.46 / 189.53 ms |
+
+Totals include GPU timing-map preparation and use synthetic images with known depth. They
+exclude model inference, screenshot capture, grey-cover preparation, UI and DWM presentation;
+they are not release-to-display latency measurements. Evidence is under
+`bin/Review/preparation-opt-20261111/`.
+
+Validation preserved 105 complete CPU frames byte for byte against the preceding version.
+All 131 actual GPU/CPU comparisons, 17,118 timing assertions, 148 settings binding checks,
+18 device-pool assertions and both Debug and final single-file hidden integration smoke
+passed. The published smoke confirmed backend reuse, DPI mapping, identical click-through
+composition and prepared/pending release ownership with CPU fallback. Visual formulas, the
+depth model and the saved 1100 ms / 100% / 100% settings are unchanged. Real desktop visual
+acceptance remains with the user.
+
 ## CPU reference: full grey-to-colour pulse and distance stagger (2026-11-11)
 
 The plain bidirectional block version is saved as `160a753` on `codex/refresh-bloom`, with
