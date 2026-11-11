@@ -1,0 +1,345 @@
+<div id="aw-glass-preview" aria-label="Action Wheel 玻璃按钮交互演示 / Glass wheel preview">
+  <style>
+    #aw-glass-preview { color-scheme: dark; font: 14px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #edf1f7; width: 100%; }
+    #aw-glass-preview * { box-sizing: border-box; }
+    #aw-glass-preview button, #aw-glass-preview input { font: inherit; }
+    #aw-glass-preview .aw-product { background: #12161d; border-radius: 22px; overflow: hidden; }
+    #aw-glass-preview .aw-header { padding: 22px 24px 12px; }
+    #aw-glass-preview .aw-brand { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 2px; color: #a7b5c7; }
+    #aw-glass-preview .aw-brand-dot { width: 6px; height: 6px; background: #8ed4d1; border-radius: 50%; }
+    #aw-glass-preview .aw-title { font-size: 20px; font-weight: 500; letter-spacing: .3px; margin-top: 5px; }
+    #aw-glass-preview .aw-title span { margin-left: 8px; font-size: 13px; font-weight: 400; color: #aeb9c9; }
+    #aw-glass-preview .aw-stage { position: relative; height: 394px; isolation: isolate; overflow: hidden; touch-action: none; user-select: none; background: radial-gradient(ellipse at 72% 55%, #29414b 0%, transparent 55%), radial-gradient(ellipse at 24% 5%, #343447 0%, transparent 65%), #141a23; }
+    #aw-glass-preview .aw-scene { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    #aw-glass-preview .aw-landscape { position: absolute; width: 115%; height: 190px; left: -5%; bottom: -85px; border-radius: 50%; transform: rotate(-12deg); background: linear-gradient(20deg, #14262c, #385155); }
+    #aw-glass-preview .aw-landscape::after { content: ""; position: absolute; inset: -23px -30px 75px 35%; border-radius: 50%; transform: rotate(24deg); background: #273740; }
+    #aw-glass-preview .aw-ghost { position: absolute; width: 180px; height: 116px; top: 45px; left: 8%; padding: 15px; border-radius: 12px; background: #d0dbe00b; border: 1px solid #d7e2ed0a; transform: rotate(-6deg); }
+    #aw-glass-preview .aw-ghost i { display: block; height: 5px; width: 70%; margin-top: 12px; background: #c6d2e110; border-radius: 3px; }
+    #aw-glass-preview .aw-ghost i:nth-child(2) { width: 45%; }
+    #aw-glass-preview .aw-ghost i:nth-child(3) { width: 83%; }
+    #aw-glass-preview .aw-grid { position: absolute; inset: 0; background-image: radial-gradient(#d3deeb17 .6px, transparent .6px); background-size: 24px 24px; mask-image: linear-gradient(transparent, #0007, transparent); }
+    #aw-glass-preview .aw-wheel { position: absolute; left: 50%; top: 49%; width: 0; height: 0; --aw-accent: 143, 218, 211; --aw-angle: -90deg; }
+    #aw-glass-preview .aw-bearing { position: absolute; left: 0; top: -47px; width: 144px; height: 94px; border-radius: 50%; transform-origin: 0 50%; transform: rotate(var(--aw-angle)); background: radial-gradient(ellipse at 77% 50%, rgba(var(--aw-accent), .12), transparent 69%); opacity: 0; transition: transform 100ms ease-out, opacity 100ms; pointer-events: none; }
+    #aw-glass-preview .aw-wheel[data-selected]:not([data-selected="0"]) .aw-bearing { opacity: 1; }
+    #aw-glass-preview .aw-node { position: absolute; left: -30px; top: -30px; width: 60px; height: 60px; transform: translate(var(--aw-x), var(--aw-y)); }
+    #aw-glass-preview .aw-motion { width: 100%; height: 100%; }
+    #aw-glass-preview .aw-action { border: 0; padding: 4px; width: 60px; height: 60px; background: transparent; color: #dde5ef; display: grid; place-items: center; border-radius: 20px; -webkit-tap-highlight-color: transparent; }
+    #aw-glass-preview .aw-face { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 17px; background: linear-gradient(145deg, #8795a51c, #111821b8 65%); border: 1px solid #e0eaff26; box-shadow: inset 0 1px 0 #ffffff0d, 0 7px 17px #00000032; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); transition: transform 110ms cubic-bezier(.2,.8,.2,1), background 110ms, border-color 110ms, box-shadow 110ms, opacity 110ms; transform: translate(calc(var(--aw-dx) * var(--aw-weight, 0)), calc(var(--aw-dy) * var(--aw-weight, 0))) scale(calc(1 + .08 * var(--aw-weight, 0))); border-color: rgba(var(--aw-tint), calc(.13 + var(--aw-weight, 0) * .5)); box-shadow: inset 0 1px 0 #ffffff0d, 0 7px 17px #00000032, 0 0 20px rgba(var(--aw-tint), calc(var(--aw-weight, 0) * .13)); }
+    #aw-glass-preview .aw-face svg { width: 21px; height: 21px; stroke-width: 1.6; }
+    #aw-glass-preview .aw-node[data-active="true"] .aw-face { color: #f4fbff; background: linear-gradient(145deg, rgba(var(--aw-tint), .23), #152329e6); }
+    #aw-glass-preview .aw-wheel[data-selected]:not([data-selected="0"]) .aw-node[data-active="false"] .aw-face { opacity: .68; }
+    #aw-glass-preview .aw-node.aw-center { width: 104px; height: 104px; top: -52px; left: -52px; transform: none; z-index: 2; }
+    #aw-glass-preview .aw-center-button { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 104px; height: 104px; padding: 10px 4px; border-radius: 30px; border: 1px solid #deedff29; color: #f2f6fc; background: linear-gradient(145deg, #5b6a7a39, #17202cda 70%); box-shadow: inset 0 1px 0 #ffffff12, 0 10px 30px #00000040; backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); }
+    #aw-glass-preview .aw-center-symbol { height: 22px; margin-bottom: 4px; color: rgb(var(--aw-accent)); }
+    #aw-glass-preview .aw-center-symbol svg { width: 18px; height: 18px; stroke-width: 1.5; }
+    #aw-glass-preview .aw-name { font-size: 15px; font-weight: 500; line-height: 21px; }
+    #aw-glass-preview .aw-en { font-size: 11px; line-height: 17px; color: #b4c2d3; }
+    #aw-glass-preview .aw-key { font-size: 11px; line-height: 15px; color: #a2b2c6; }
+    #aw-glass-preview .aw-wheel[data-closed="true"] { visibility: hidden; }
+    #aw-glass-preview .aw-pulse { position: absolute; left: -52px; top: -52px; width: 104px; height: 104px; border-radius: 30px; background: rgba(var(--aw-accent), .14); pointer-events: none; opacity: 0; }
+    #aw-glass-preview .aw-stage-label { position: absolute; left: 20px; bottom: 15px; color: #a4b3c7; font-size: 11px; letter-spacing: 1.2px; pointer-events: none; }
+    #aw-glass-preview .aw-controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: end; padding: 18px 24px; background: #171d26; }
+    #aw-glass-preview .aw-speed { flex: 1 1 210px; }
+    #aw-glass-preview .aw-control-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b9c6d7; font-size: 12px; margin-bottom: 8px; }
+    #aw-glass-preview output { color: #eff7ff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #aw-glass-preview .aw-range { width: 100%; height: 24px; display: block; accent-color: #9fdad6; margin: 0; }
+    #aw-glass-preview .aw-replay { min-height: 44px; padding: 10px 14px; border: 1px solid #dce7f42b; border-radius: 11px; color: #eef4fc; background: #303c49; white-space: nowrap; font-size: 12px; }
+    #aw-glass-preview .aw-slow { display: flex; align-items: center; gap: 7px; min-height: 44px; font-size: 12px; color: #bdc9d9; white-space: nowrap; }
+    #aw-glass-preview .aw-slow input { width: 17px; height: 17px; accent-color: #9fdad6; }
+    #aw-glass-preview .aw-status { min-height: 50px; padding: 12px 24px 16px; background: #171d26; color: #aebed1; font-size: 12px; border-top: 1px solid #ffffff07; overflow-wrap: anywhere; }
+    #aw-glass-preview .aw-status strong { color: #e1edf9; font-weight: 500; }
+    @media (max-width: 420px) {
+      #aw-glass-preview .aw-header { padding: 18px 18px 10px; }
+      #aw-glass-preview .aw-stage { height: 362px; }
+      #aw-glass-preview .aw-controls { padding: 16px 18px; gap: 8px 14px; }
+      #aw-glass-preview .aw-speed { flex-basis: 100%; }
+      #aw-glass-preview .aw-status { padding: 12px 18px 16px; }
+      #aw-glass-preview .aw-title span { display: block; margin-left: 0; margin-top: 2px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #aw-glass-preview .aw-face, #aw-glass-preview .aw-bearing { transition: none; }
+    }
+  </style>
+  <section class="aw-product" aria-label="悬浮玻璃 / Floating glass">
+    <header class="aw-header">
+      <div class="aw-brand"><span class="aw-brand-dot"></span>ACTION WHEEL</div>
+      <div class="aw-title">悬浮玻璃<span>Floating glass</span></div>
+    </header>
+    <div class="aw-stage" aria-label="交互预览区 / Interactive preview">
+      <div class="aw-scene" aria-hidden="true"><div class="aw-ghost"><i></i><i></i><i></i></div><div class="aw-landscape"></div><div class="aw-grid"></div></div>
+      <div class="aw-wheel" data-selected="0" data-closed="false">
+        <div class="aw-bearing" aria-hidden="true"></div>
+        <div class="aw-pulse" aria-hidden="true"></div>
+        <div class="aw-node" data-id="1"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="复制 / Copy · Ctrl+C"><span class="aw-face"><i data-lucide="copy" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="2"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="粘贴 / Paste · Ctrl+V"><span class="aw-face"><i data-lucide="clipboard-paste" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="3"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="主页 / Home"><span class="aw-face"><i data-lucide="house" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="4"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="截图 / Screenshot · 子菜单 / Group"><span class="aw-face"><i data-lucide="scan-line" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="5"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="设置 / Settings"><span class="aw-face"><i data-lucide="settings-2" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="6"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="任务视图 / Task view"><span class="aw-face"><i data-lucide="panels-top-left" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="7"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="文件 / Explorer"><span class="aw-face"><i data-lucide="folder-open" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node" data-id="8"><div class="aw-motion"><button type="button" class="aw-action cursor-interaction" aria-label="锁屏 / Lock screen"><span class="aw-face"><i data-lucide="lock-keyhole" aria-hidden="true"></i></span></button></div></div>
+        <div class="aw-node aw-center" data-id="0"><div class="aw-motion"><button type="button" class="aw-center-button cursor-interaction" aria-label="刷新 / Refresh"><span class="aw-center-symbol"><i data-lucide="rotate-cw" aria-hidden="true"></i></span><span class="aw-name">刷新</span><span class="aw-en">Refresh</span><span class="aw-key">松手 / Release</span></button></div></div>
+      </div>
+      <div class="aw-stage-label" aria-hidden="true">INTERACTION PREVIEW</div>
+    </div>
+    <div class="aw-controls">
+      <label class="aw-speed"><span class="aw-control-label"><span>展开速度 / Opening</span><output id="aw-duration-value">120 ms</output></span><input class="aw-range" type="range" min="80" max="280" step="10" value="120" aria-label="展开时长 / Opening duration" aria-describedby="aw-duration-value"></label>
+      <label class="aw-slow cursor-interaction"><input type="checkbox">慢放 / Slow ×4</label>
+      <button type="button" class="aw-replay cursor-interaction">重新展开 / Replay</button>
+    </div>
+    <div class="aw-status" role="status" aria-live="polite"><strong>预览就绪 / Ready</strong></div>
+  </section>
+  <script>
+    (() => {
+      const root = document.getElementById('aw-glass-preview');
+      const stage = root.querySelector('.aw-stage');
+      const wheel = root.querySelector('.aw-wheel');
+      const nodes = [...root.querySelectorAll('.aw-node')];
+      const range = root.querySelector('.aw-range');
+      const slow = root.querySelector('.aw-slow input');
+      const replay = root.querySelector('.aw-replay');
+      const output = root.querySelector('output');
+      const status = root.querySelector('.aw-status');
+      const name = root.querySelector('.aw-name');
+      const english = root.querySelector('.aw-en');
+      const shortcut = root.querySelector('.aw-key');
+      const pulse = root.querySelector('.aw-pulse');
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+      const actions = [
+        { zh: '刷新', en: 'Refresh', key: '松手 / Release', color: [143,218,211] },
+        { zh: '复制', en: 'Copy', key: 'Ctrl + C', color: [144,204,245] },
+        { zh: '粘贴', en: 'Paste', key: 'Ctrl + V', color: [153,220,188] },
+        { zh: '主页', en: 'Home', key: '打开 / Open', color: [174,177,242] },
+        { zh: '截图', en: 'Screenshot', key: '子菜单 / Group', color: [237,185,143] },
+        { zh: '设置', en: 'Settings', key: '打开 / Open', color: [161,189,220] },
+        { zh: '任务视图', en: 'Task view', key: '打开 / Open', color: [141,208,213] },
+        { zh: '文件', en: 'Explorer', key: '打开 / Open', color: [228,204,143] },
+        { zh: '锁屏', en: 'Lock screen', key: '锁定 / Lock', color: [211,164,196] }
+      ];
+      let selected = 0, phase = 'open', epoch = 0, animations = [], pointer = null;
+      let origin = { x: stage.clientWidth / 2, y: stage.clientHeight * .49 };
+      let radius = 116;
+      let angle = -Math.PI / 2;
+      const state = { duration: 120, slow: false };
+
+      function applySaved(saved) {
+        const value = saved?.privateContent;
+        if (!value || value.design !== 'floating-glass') return;
+        if (Number.isFinite(value.duration)) state.duration = Math.round(Math.max(80, Math.min(280, value.duration)) / 10) * 10;
+        state.slow = value.slow === true;
+        renderControls();
+      }
+      function renderControls() {
+        range.value = state.duration;
+        slow.checked = state.slow;
+        output.textContent = state.duration + ' ms' + (state.slow ? ' ×4' : '');
+        nodes.forEach(node => {
+          const face = node.querySelector('.aw-face');
+          if (face) face.style.transitionDuration = reduced.matches ? '0ms' : (state.slow ? '440ms' : '110ms');
+        });
+      }
+      function save() {
+        const snapshot = { design: 'floating-glass', duration: state.duration, slow: state.slow };
+        const result = window.openai?.setWidgetState?.({ modelContent: snapshot, privateContent: snapshot });
+        result?.catch?.(() => {});
+      }
+      function cancelAnimations() {
+        animations.forEach(animation => animation.cancel());
+        animations = [];
+      }
+      function animate(element, frames, options) {
+        const animation = element.animate(frames, options);
+        animations.push(animation);
+        return animation;
+      }
+      function timing(ms) { return reduced.matches ? 0 : ms * (state.slow ? 4 : 1); }
+      function setStatus(zh, en) {
+        status.replaceChildren();
+        const strong = document.createElement('strong');
+        strong.textContent = zh;
+        status.append(strong, document.createTextNode(' / ' + en));
+      }
+      function layout(recenter = false) {
+        radius = Math.min(116, Math.max(90, (stage.clientWidth - 86) / 2));
+        const margin = radius + 40;
+        origin.x = recenter ? stage.clientWidth / 2 : Math.max(margin, Math.min(stage.clientWidth - margin, origin.x));
+        origin.y = recenter ? stage.clientHeight * .49 : Math.max(margin, Math.min(stage.clientHeight - margin, origin.y));
+        wheel.style.left = origin.x + 'px';
+        wheel.style.top = origin.y + 'px';
+        nodes.forEach(node => {
+          const id = Number(node.dataset.id);
+          if (!id) return;
+          const a = (id - 1) * Math.PI / 4 - Math.PI / 2;
+          node.style.setProperty('--aw-x', Math.cos(a) * radius + 'px');
+          node.style.setProperty('--aw-y', Math.sin(a) * radius + 'px');
+          node.style.setProperty('--aw-dx', Math.cos(a) * 5 + 'px');
+          node.style.setProperty('--aw-dy', Math.sin(a) * 5 + 'px');
+          node.style.setProperty('--aw-tint', actions[id].color.join(','));
+        });
+      }
+      function select(id, direction = null) {
+        if (phase === 'closed' || phase === 'closing') return;
+        selected = id;
+        const action = actions[id];
+        name.textContent = action.zh;
+        english.textContent = action.en;
+        shortcut.textContent = action.key;
+        wheel.dataset.selected = id;
+        wheel.style.setProperty('--aw-accent', action.color.join(','));
+        if (id) {
+          const target = direction ?? ((id - 1) * Math.PI / 4 - Math.PI / 2);
+          angle += Math.atan2(Math.sin(target - angle), Math.cos(target - angle));
+          wheel.style.setProperty('--aw-angle', angle + 'rad');
+        }
+        nodes.forEach(node => {
+          const n = Number(node.dataset.id);
+          node.dataset.active = String(n === id);
+          let weight = 0;
+          if (n && id) {
+            const a = (n - 1) * Math.PI / 4 - Math.PI / 2;
+            const delta = Math.abs(Math.atan2(Math.sin(a - angle), Math.cos(a - angle)));
+            weight = Math.max(0, 1 - delta / (Math.PI / 3));
+          }
+          node.style.setProperty('--aw-weight', weight.toFixed(3));
+        });
+      }
+      function enableButtons(enabled) {
+        nodes.forEach(node => { node.querySelector('button').disabled = !enabled; });
+      }
+      function releaseCapture() {
+        const activePointer = pointer;
+        pointer = null;
+        if (activePointer !== null && stage.hasPointerCapture(activePointer)) stage.releasePointerCapture(activePointer);
+      }
+      async function open(recenter = true) {
+        const token = ++epoch;
+        releaseCapture();
+        cancelAnimations();
+        phase = 'opening';
+        wheel.dataset.closed = 'false';
+        enableButtons(true);
+        layout(recenter);
+        select(0);
+        setStatus('展开中', 'Opening');
+        const jobs = nodes.map(node => {
+          const id = Number(node.dataset.id);
+          const duration = timing(state.duration * (id ? .86 : .7));
+          const delay = timing(id ? state.duration * (.04 + (id - 1) * .014) : 0);
+          const x = id ? -parseFloat(node.style.getPropertyValue('--aw-x')) * .15 : 0;
+          const y = id ? -parseFloat(node.style.getPropertyValue('--aw-y')) * .15 : 0;
+          return animate(node.querySelector('.aw-motion'), [
+            { opacity: 0, transform: `translate(${x}px, ${y}px) scale(.85)` },
+            { opacity: 1, transform: 'translate(0px, 0px) scale(1)' }
+          ], { duration, delay, fill: 'both', easing: 'cubic-bezier(.16,1,.3,1)' }).finished.catch(() => {});
+        });
+        await Promise.all(jobs);
+        if (token !== epoch) return;
+        cancelAnimations();
+        phase = 'open';
+        setStatus('预览就绪', 'Ready');
+      }
+      async function close(cancel = false, keyboard = false) {
+        if (phase === 'closed' || phase === 'closing') return;
+        const token = ++epoch;
+        const chosen = selected;
+        const current = nodes.map(node => {
+          const style = getComputedStyle(node.querySelector('.aw-motion'));
+          return { opacity: style.opacity, transform: style.transform };
+        });
+        releaseCapture();
+        cancelAnimations();
+        phase = 'closing';
+        if (keyboard) replay.focus({ preventScroll: true });
+        enableButtons(false);
+        const action = actions[chosen];
+        setStatus(cancel ? '已取消' : '已预览：' + action.zh, cancel ? 'Cancelled' : 'Simulated: ' + action.en);
+        const jobs = nodes.map((node, index) => {
+          const id = Number(node.dataset.id);
+          const isChosen = !cancel && id === chosen;
+          const x = id ? -parseFloat(node.style.getPropertyValue('--aw-x')) * .10 : 0;
+          const y = id ? -parseFloat(node.style.getPropertyValue('--aw-y')) * .10 : 0;
+          const frames = isChosen ? [current[index], { opacity: .95, transform: 'scale(.88)', offset: .4 }, { opacity: 0, transform: 'scale(.94)' }] : [current[index], { opacity: 0, transform: `translate(${x}px, ${y}px) scale(.92)` }];
+          return animate(node.querySelector('.aw-motion'), frames, {
+            duration: timing(isChosen ? 150 : 110), fill: 'both', easing: 'cubic-bezier(.2,.7,.2,1)'
+          }).finished.catch(() => {});
+        });
+        if (!cancel && chosen === 0) {
+          jobs.push(animate(pulse, [{ opacity: .7, transform: 'scale(.8)' }, { opacity: 0, transform: 'scale(2.7)' }], { duration: timing(300), easing: 'ease-out' }).finished.catch(() => {}));
+        }
+        await Promise.all(jobs);
+        if (token !== epoch) return;
+        wheel.dataset.closed = 'true';
+        phase = 'closed';
+        cancelAnimations();
+      }
+      function point(event) {
+        const rect = stage.getBoundingClientRect();
+        const dx = event.clientX - rect.left - origin.x;
+        const dy = event.clientY - rect.top - origin.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 58) { select(0); return; }
+        const a = Math.atan2(dy, dx);
+        const id = Math.round((a + Math.PI / 2 + Math.PI * 2) / (Math.PI / 4)) % 8 + 1;
+        select(id, a);
+      }
+      stage.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || pointer !== null || event.target.closest('button')) return;
+        const rect = stage.getBoundingClientRect();
+        origin = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        open(false);
+        pointer = event.pointerId;
+        stage.setPointerCapture(pointer);
+        point(event);
+        event.preventDefault();
+      });
+      stage.addEventListener('pointermove', event => {
+        if (phase === 'closed' || phase === 'closing') return;
+        if (pointer !== null && pointer !== event.pointerId) return;
+        if (pointer === null && event.pointerType !== 'mouse') return;
+        point(event);
+      });
+      stage.addEventListener('pointerup', event => {
+        if (event.pointerId !== pointer) return;
+        point(event);
+        close(false);
+      });
+      stage.addEventListener('pointercancel', event => { if (event.pointerId === pointer) close(true); });
+      stage.addEventListener('lostpointercapture', event => { if (event.pointerId === pointer) close(true); });
+      stage.addEventListener('pointerleave', () => { if (pointer === null) select(0); });
+      nodes.forEach(node => {
+        const id = Number(node.dataset.id);
+        const button = node.querySelector('button');
+        button.addEventListener('pointerenter', () => { if (pointer === null) select(id); });
+        button.addEventListener('focus', () => select(id));
+        button.addEventListener('click', event => { select(id); close(false, event.detail === 0); });
+        button.addEventListener('keydown', event => {
+          const directions = { ArrowUp: 1, ArrowRight: 3, ArrowDown: 5, ArrowLeft: 7 };
+          if (directions[event.key]) {
+            event.preventDefault();
+            nodes.find(item => Number(item.dataset.id) === directions[event.key]).querySelector('button').focus();
+          }
+        });
+      });
+      window.addEventListener('keydown', event => {
+        // A held gesture can keep focus on the document rather than a button.
+        if (event.key === 'Escape' && (pointer !== null || root.contains(document.activeElement))) {
+          event.preventDefault();
+          close(true, true);
+        }
+      });
+      window.addEventListener('blur', () => { if (pointer !== null) close(true); });
+      replay.addEventListener('click', () => open());
+      range.addEventListener('input', () => { state.duration = Number(range.value); renderControls(); });
+      range.addEventListener('change', () => { save(); open(); });
+      slow.addEventListener('change', () => { state.slow = slow.checked; renderControls(); save(); open(); });
+      window.addEventListener('openai:set_globals', event => { if (event.detail?.globals?.widgetState) applySaved(event.detail.globals.widgetState); });
+      const observer = new ResizeObserver(() => layout());
+      observer.observe(stage);
+      reduced.addEventListener('change', () => { renderControls(); if (phase === 'opening' || phase === 'closing') open(); });
+      applySaved(window.openai?.widgetState);
+      renderControls();
+      layout(true);
+      select(0);
+    })();
+  </script>
+</div>
