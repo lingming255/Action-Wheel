@@ -1,0 +1,68 @@
+{
+  "name": "Action Wheel glass ring preview sounds",
+  "source": "https://kenney.nl/assets/interface-sounds",
+  "pack": "Kenney Interface Sounds 1.0",
+  "license": "CC0-1.0",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "measuredOn": "2026-11-12",
+  "selectionBasis": "Semantic original names plus offline duration, peak and spectral inspection; not auditioned on speakers. Final timbre remains user review.",
+  "processing": "Decode OGG to mono 48000 Hz PCM16 WAV; peak normalize each to 0.85. No trimming, fades, pitch/time change or filtering.",
+  "items": [
+    {
+      "event": "open",
+      "file": "open.wav",
+      "original": "Audio/open_001.ogg",
+      "durationMs": 147.792,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bytes": 14266,
+      "peak": 0.850006,
+      "rms": 0.165375,
+      "normalizationGain": 0.92405036,
+      "suggestedEventGain": 0.25,
+      "sha256": "d3f87402046cac44334004f7644179f313720b5d18c9f43e4a53f56f0fb3ca7e"
+    },
+    {
+      "event": "switch",
+      "file": "switch.wav",
+      "original": "Audio/click_003.ogg",
+      "durationMs": 7.125,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bytes": 762,
+      "peak": 0.850006,
+      "rms": 0.187244,
+      "normalizationGain": 1.00373531,
+      "suggestedEventGain": 0.1,
+      "sha256": "cafac6827732f8f7a8588c8c25173744beb00a2b18ff9c0a17c418be0d2b9ea6"
+    },
+    {
+      "event": "confirm",
+      "file": "confirm.wav",
+      "original": "Audio/confirmation_001.ogg",
+      "durationMs": 289.854,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bytes": 27904,
+      "peak": 0.850006,
+      "rms": 0.257123,
+      "normalizationGain": 0.94578001,
+      "suggestedEventGain": 0.22,
+      "sha256": "7e98beed7befbe2e1ffde9d1bbe1703cbaf7d0a0563c6b849869ae04a446f5af"
+    },
+    {
+      "event": "cancel",
+      "file": "cancel.wav",
+      "original": "Audio/back_002.ogg",
+      "durationMs": 91.438,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bytes": 8856,
+      "peak": 0.850006,
+      "rms": 0.13376,
+      "normalizationGain": 0.94929357,
+      "suggestedEventGain": 0.2,
+      "sha256": "2705340a02076e2eb9546f5e79f328091b8769387e8734b501f8626a4663b2bd"
+    }
+  ]
+}
