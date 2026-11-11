@@ -1,0 +1,76 @@
+{
+  "sourceProject": "D:\\creat\\LingMing的小世界\\10-项目\\点数博弈\\工程",
+  "sourceVersion": "a1472325a8906bd53c200dc6b7e0a16402d9f070",
+  "sourceScript": "public/casino-sfx.js",
+  "sourceScriptSha256": "153f57f0b5b47b7356ea6b9411201dc953348716c02470c0934422aba256d6b0",
+  "upstreamPack": "Kenney Casino Audio 1.1",
+  "upstreamUrl": "https://kenney.nl/assets/casino-audio",
+  "license": "CC0-1.0",
+  "sourceInputSha256": {
+    "pick.mp3": "c543ef1b7cb62bb1341fa69b69b3ddac610b9e708b664cfa34977f01a1782304",
+    "lock.mp3": "8fc73752c1c41034296dd5e7a6e2d37100f125b9b768d3f6eae37716d6d6ce85",
+    "reveal.mp3": "01b371846c454a66aea796ad3fe4b08d5f6998924bf0c5387a2532fba2df5812"
+  },
+  "sourceMasterGain": 0.5,
+  "nativeReferenceVolumePercent": 45,
+  "gainFormula": "nativeVolumePercent / 45 * referenceEffectiveGain",
+  "items": [
+    {
+      "event": "open",
+      "file": "open.wav",
+      "pointDuelAsset": "reveal.mp3",
+      "durationMs": 600.791667,
+      "bytes": 57754,
+      "referenceEffectiveGain": 0.3,
+      "processing": "decode MP3 to mono48kPCM16, no normalization",
+      "sha256": "66ffc09a767a3537726a5a8beba8d7ce2bde8a721e463572321979f9cecd8c19",
+      "peak": 0.73220825,
+      "rms": 0.03870393,
+      "peakAtDefault45": 0.21966247,
+      "peakAtMax100": 0.48813883
+    },
+    {
+      "event": "switch",
+      "file": "switch.wav",
+      "pointDuelAsset": "pick.mp3",
+      "durationMs": 70.0,
+      "bytes": 6798,
+      "referenceEffectiveGain": 0.08,
+      "processing": "decode/resample MP3 to mono48kPCM16; take first70ms with linear envelope 1 - sampleIndex / 3360; no normalization",
+      "sha256": "f0cb299e52c0d5b5950629a5d0fb48261d115fa518a0ee2e44453d5959e9c7e0",
+      "peak": 0.42687988,
+      "rms": 0.02782644,
+      "peakAtDefault45": 0.03415039,
+      "peakAtMax100": 0.07588976
+    },
+    {
+      "event": "confirm",
+      "file": "confirm.wav",
+      "pointDuelAsset": "lock.mp3",
+      "durationMs": 169.604167,
+      "bytes": 16360,
+      "referenceEffectiveGain": 0.375,
+      "processing": "decode MP3 to mono48kPCM16, no normalization",
+      "sha256": "32eb5626983ccc8f77f5224fe8810e814211a587b1cda3c5e5c4ce8adc9b52c4",
+      "peak": 0.77416992,
+      "rms": 0.04674047,
+      "peakAtDefault45": 0.29031372,
+      "peakAtMax100": 0.6451416
+    },
+    {
+      "event": "cancel",
+      "file": "cancel.wav",
+      "pointDuelAsset": "pick.mp3",
+      "durationMs": 70.0,
+      "bytes": 6798,
+      "referenceEffectiveGain": 0.08,
+      "processing": "decode/resample MP3 to mono48kPCM16; take first70ms with linear envelope 1 - sampleIndex / 3360; no normalization",
+      "sha256": "f0cb299e52c0d5b5950629a5d0fb48261d115fa518a0ee2e44453d5959e9c7e0",
+      "peak": 0.42687988,
+      "rms": 0.02782644,
+      "peakAtDefault45": 0.03415039,
+      "peakAtMax100": 0.07588976
+    }
+  ],
+  "mappingNote": "Open=reveal, Switch=hover, Confirm=lock, Cancel=hover (wheel mapping; game has no cancel event)."
+}

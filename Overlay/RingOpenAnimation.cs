@@ -159,7 +159,7 @@ namespace Action_Wheel.Overlay
                 RingAnimation.Converge => 1.06,
                 RingAnimation.Pop => .86,
                 RingAnimation.Radiate => .88,
-                _ => .92,
+                _ => .90,
             };
             double toScale = closing ? (confirmed ? .90 : .95) : 1;
             EasingFunctionBase easing = !closing && kind == RingAnimation.Pop
@@ -168,8 +168,30 @@ namespace Action_Wheel.Overlay
             Add(storyboard, container, "Opacity", closing ? container.Opacity : 0,
                 closing ? 0 : 1, 0, duration, 1, easing);
             foreach (string axis in new[] { "ScaleX", "ScaleY" })
-                Add(storyboard, container, $"(UIElement.RenderTransform).(CompositeTransform.{axis})",
-                    fromScale, toScale, 0, duration, 1, easing);
+            {
+                string path = $"(UIElement.RenderTransform).(CompositeTransform.{axis})";
+                if (closing)
+                    Add(storyboard, container, path, fromScale, toScale, 0, duration, 1, easing);
+                else
+                {
+                    var settle = new DoubleAnimationUsingKeyFrames();
+                    settle.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = TimeSpan.Zero, Value = fromScale });
+                    settle.KeyFrames.Add(new EasingDoubleKeyFrame
+                    {
+                        KeyTime = TimeSpan.FromMilliseconds(duration * .70),
+                        Value = fromScale < 1 ? 1.016 : .994,
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    });
+                    settle.KeyFrames.Add(new EasingDoubleKeyFrame
+                    {
+                        KeyTime = TimeSpan.FromMilliseconds(duration), Value = 1,
+                        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut },
+                    });
+                    Storyboard.SetTarget(settle, container);
+                    Storyboard.SetTargetProperty(settle, path);
+                    storyboard.Children.Add(settle);
+                }
+            }
             if (!closing && kind is RingAnimation.Sweep or RingAnimation.CounterSweep)
                 Add(storyboard, container, "(UIElement.RenderTransform).(CompositeTransform.Rotation)",
                     kind == RingAnimation.Sweep ? -8 : 8, 0, 0, duration, 1, easing);

@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "assertions": 23,
+  "actualSourceCommit": "a1472325a8906bd53c200dc6b7e0a16402d9f070",
+  "finitePCM": true,
+  "mono48kPCM16": true,
+  "hoverEnvelope70ms": true,
+  "sourceShaMatches": true,
+  "userSettingsChanged": false,
+  "speakersPlayed": false,
+  "sounds": [
+    {
+      "event": "open",
+      "durationMs": 600.791667,
+      "peak": 0.73220825,
+      "peakAtDefault45": 0.21966247,
+      "peakAtMax100": 0.48813883
+    },
+    {
+      "event": "switch",
+      "durationMs": 70.0,
+      "peak": 0.42687988,
+      "peakAtDefault45": 0.03415039,
+      "peakAtMax100": 0.07588976
+    },
+    {
+      "event": "confirm",
+      "durationMs": 169.604167,
+      "peak": 0.77416992,
+      "peakAtDefault45": 0.29031372,
+      "peakAtMax100": 0.6451416
+    },
+    {
+      "event": "cancel",
+      "durationMs": 70.0,
+      "peak": 0.42687988,
+      "peakAtDefault45": 0.03415039,
+      "peakAtMax100": 0.07588976
+    }
+  ],
+  "hoverEnvelopeMaxError": 4.375439789977727e-05,
+  "hoverEnvelopeMaxErrorPCMUnits": 1.4337441103799016,
+  "hoverEnvelopeTolerancePCMUnits": 2
+}

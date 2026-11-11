@@ -58,11 +58,12 @@ namespace Action_Wheel.Settings
                 Width = diameter,
                 Height = diameter,
                 CornerRadius = new CornerRadius(radius),
+                Opacity = .60,
                 IsHitTestVisible = false,
                 Background = new AcrylicBrush
                 {
                     TintColor = dark ? Color.FromArgb(255, 35, 51, 63) : Color.FromArgb(255, 232, 241, 246),
-                    TintOpacity = .46,
+                    TintOpacity = .20,
                     FallbackColor = dark ? Color.FromArgb(240, 35, 51, 63) : Color.FromArgb(240, 232, 241, 246),
                 },
             });

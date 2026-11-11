@@ -65,8 +65,9 @@
     <EmbeddedResource Include="Assets\RefreshReference\*.rgb.gz" LogicalName="ActionWheel.Refresh.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Assets\RefreshGpu.hlsl" LogicalName="ActionWheel.RefreshGpu.hlsl" />
     <!-- Small CC0 cues are embedded so single-file publishing has no working-directory dependency. -->
-    <EmbeddedResource Include="Doc\prototypes\wheel-sounds\*.wav" LogicalName="ActionWheel.WheelSounds.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\Sounds\Casino\*.wav" LogicalName="ActionWheel.WheelSounds.%(Filename)%(Extension)" />
     <Content Include="Doc\prototypes\wheel-sounds\License-Kenney.txt" Link="Licenses\Kenney-Interface-Sounds.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\Sounds\Casino\LICENSE.txt" Link="Licenses\Kenney-Casino-Audio.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Also ship the real application icon as content for the transparent custom title bars. -->
     <None Remove="icon.ico" />
     <Content Include="icon.ico" CopyToOutputDirectory="PreserveNewest" />

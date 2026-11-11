@@ -89,6 +89,7 @@ namespace Action_Wheel.Overlay
                 _directionArcs[tag] = arc;
                 ButtonsCanvas.Children.Add(arc);
             }
+            BuildGlassMotionAccents(centre, outer);
         }
 
         private void BeginGlassOpening()
@@ -99,6 +100,7 @@ namespace Action_Wheel.Overlay
                 kind: _appearance.Animation);
             _ringMotion.Completed += (_, _) => { if (!_closing) SettleAfterOpening(); };
             _ringMotion.Begin();
+            StartGlassAccents();
         }
 
         /// <summary>Keep the visual closing tail while immediately returning input to the desktop.</summary>
@@ -120,6 +122,8 @@ namespace Action_Wheel.Overlay
             {
                 ScaleX = scaleX, ScaleY = scaleY, Rotation = rotation,
             };
+            if (confirmed) StartGlassAccents(confirmed: true);
+            else StopGlassAccents();
             RootGrid.IsHitTestVisible = false;
             RefreshInputTransparency.Enable(_windowHandle);
             if (_appearance.Animation == RingAnimation.None || IsRefreshPlaying)

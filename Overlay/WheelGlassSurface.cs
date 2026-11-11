@@ -25,6 +25,10 @@ namespace Action_Wheel.Overlay
         // 17 enables CreateHostBackdropBrush on Win32 windows (Windows 11). Attribute 38 instead
         // assigns a material to the whole HWND, which would also affect the full-screen refresh.
         private const int DwmUseHostBackdropBrush = 17;
+        internal const double FrostedMaterialOpacity = 0.60;
+        internal const float FrostedBlurAmount = 18;
+        internal const byte DarkTintAlpha = 52;
+        internal const byte LightTintAlpha = 48;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeRect
@@ -45,6 +49,7 @@ namespace Action_Wheel.Overlay
 
         private readonly Border _host;
         private readonly IntPtr _hwnd;
+        private readonly bool _dark;
         private readonly Action<CompositionBrush?> _setBackdropBrush;
         private readonly CompositionBackdropBrush _desktopBrush;
         private readonly CompositionColorBrush _maskFill;
@@ -61,12 +66,14 @@ namespace Action_Wheel.Overlay
         // Kept in memory for the hidden probe; the application still writes no activity/error log.
         internal static string? LastAttachFailure { get; private set; }
         internal bool IsConnected { get; private set; }
+        internal double MaterialOpacity => FrostedMaterialOpacity;
         internal CompositionBrush Brush => _glassBrush;
         internal GlassMaskDiagnostics Diagnostics { get; private set; }
 
         internal readonly record struct GlassMaskDiagnostics(Vector2 ClientSize,
             Vector2 Center, Vector2 Radius, double DpiScale, double Opacity,
-            bool BrushChainConnected, string? FailureReason);
+            double MaterialOpacity, double MaskOpacity, bool BrushChainConnected,
+            string? FailureReason);
 
         /// <summary>
         /// Installs a masked live desktop brush without disconnecting the transparent system
@@ -76,12 +83,9 @@ namespace Action_Wheel.Overlay
             Compositor compositor, Action<CompositionBrush?> setBackdropBrush)
         {
             LastAttachFailure = null;
-            // Tint stays in the XAML sheet, so the dividers, icons, material and opening/closing
-            // animation share one coordinate system. This is intentionally modest: the desktop
-            // contributes the frosted texture rather than a nearly opaque paint layer.
-            host.Background = new SolidColorBrush(dark
-                ? Color.FromArgb(142, 21, 27, 37)
-                : Color.FromArgb(120, 242, 246, 251));
+            // Keep a readable fallback until the real material is connected. Tint belongs only
+            // to the sheet; the independent XAML dividers retain their own opacity and contrast.
+            ApplyTint(host, dark, materialAvailable: false);
 
             if (hwnd == IntPtr.Zero || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
             {
@@ -100,10 +104,11 @@ namespace Action_Wheel.Overlay
             WheelGlassSurface? surface = null;
             try
             {
-                surface = new WheelGlassSurface(host, hwnd, compositor, setBackdropBrush);
+                surface = new WheelGlassSurface(host, hwnd, dark, compositor, setBackdropBrush);
                 surface.UpdateMask();
                 setBackdropBrush(surface._glassBrush);
                 surface.IsConnected = true;
+                ApplyTint(host, dark, materialAvailable: true);
                 CompositionTarget.Rendering += surface.OnRendering;
                 host.Unloaded += surface.OnHostUnloaded;
                 return surface;
@@ -114,17 +119,20 @@ namespace Action_Wheel.Overlay
                 // transparent window and the readable tint instead of breaking the wheel.
                 LastAttachFailure = $"{exception.GetType().Name}: {exception.Message}";
                 surface?.Dispose();
+                ApplyTint(host, dark, materialAvailable: false);
                 return null;
             }
         }
 
         [SupportedOSPlatform("windows10.0.18362.0")]
-        private WheelGlassSurface(Border host, IntPtr hwnd, Compositor compositor,
+        private WheelGlassSurface(Border host, IntPtr hwnd, bool dark, Compositor compositor,
             Action<CompositionBrush?> setBackdropBrush)
         {
             _host = host;
             _hwnd = hwnd;
+            _dark = dark;
             _setBackdropBrush = setBackdropBrush;
+            Diagnostics = Diagnostics with { MaterialOpacity = FrostedMaterialOpacity };
             try
             {
                 _desktopBrush = Own(compositor.CreateHostBackdropBrush());
@@ -150,7 +158,7 @@ namespace Action_Wheel.Overlay
                 {
                     Name = "WheelFrost",
                     Source = new CompositionEffectSourceParameter("desktop"),
-                    BlurAmount = 18,
+                    BlurAmount = FrostedBlurAmount,
                     BorderMode = EffectBorderMode.Hard,
                 });
                 var maskEffect = Own(new AlphaMaskEffect
@@ -178,6 +186,16 @@ namespace Action_Wheel.Overlay
             return resource;
         }
 
+        private static void ApplyTint(Border host, bool dark, bool materialAvailable)
+        {
+            byte alpha = materialAvailable
+                ? dark ? DarkTintAlpha : LightTintAlpha
+                : dark ? (byte)142 : (byte)120;
+            host.Background = new SolidColorBrush(dark
+                ? Color.FromArgb(alpha, 21, 27, 37)
+                : Color.FromArgb(alpha, 242, 246, 251));
+        }
+
         private void OnRendering(object? sender, object args)
         {
             if (_disposed)
@@ -191,6 +209,7 @@ namespace Action_Wheel.Overlay
                 {
                     FailureReason = $"{exception.GetType().Name}: {exception.Message}"
                 };
+                ApplyTint(_host, _dark, materialAvailable: false);
                 Dispose();
             }
         }
@@ -208,7 +227,7 @@ namespace Action_Wheel.Overlay
                 !GetClientRect(_hwnd, out var client))
             {
                 _maskFill.Color = Colors.Transparent;
-                Diagnostics = Diagnostics with { Opacity = 0, FailureReason = "Waiting for XamlRoot/client area." };
+                Diagnostics = Diagnostics with { Opacity = 0, MaskOpacity = 0, FailureReason = "Waiting for XamlRoot/client area." };
                 return;
             }
 
@@ -226,7 +245,7 @@ namespace Action_Wheel.Overlay
             if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
             {
                 _maskFill.Color = Colors.Transparent;
-                Diagnostics = Diagnostics with { Opacity = 0, FailureReason = "Waiting for the glass sheet layout." };
+                Diagnostics = Diagnostics with { Opacity = 0, MaskOpacity = 0, FailureReason = "Waiting for the glass sheet layout." };
                 return;
             }
 
@@ -259,10 +278,14 @@ namespace Action_Wheel.Overlay
                 (float)(Distance(center, edgeY) * dpiScale));
             // Encode alpha in the shape itself: a VisualSurface may ignore transform/opacity on
             // its source root, whereas the rendered fill alpha is part of the captured content.
-            _maskFill.Color = Color.FromArgb((byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255),
+            // Material coverage is independent of the opening fade: the settled sheet mixes 60%
+            // frosted desktop with the live desktop beneath, while dividers remain untouched.
+            double ancestorOpacity = Math.Clamp(opacity, 0, 1);
+            double maskOpacity = ancestorOpacity * FrostedMaterialOpacity;
+            _maskFill.Color = Color.FromArgb((byte)Math.Round(maskOpacity * 255),
                 255, 255, 255);
             Diagnostics = new GlassMaskDiagnostics(clientSize, _ellipse.Center, _ellipse.Radius,
-                dpiScale, Math.Clamp(opacity, 0, 1),
+                dpiScale, ancestorOpacity, FrostedMaterialOpacity, maskOpacity,
                 _glassBrush.GetSourceParameter("desktop") == _desktopBrush &&
                 _glassBrush.GetSourceParameter("mask") == _maskSurfaceBrush,
                 null);

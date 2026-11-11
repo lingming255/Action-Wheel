@@ -24,7 +24,10 @@ namespace Action_Wheel.Services
             new BoundedChannelOptions(16) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
         private static WheelSoundSettings _settings = WheelSoundSettings.Default;
         private static int _started;
-        private static long _lastSwitch;
+        // Point Duel's hover cue has no time limit. Three reusable switch voices let every real
+        // direction entry sound even when the pointer crosses several sectors within 70 ms.
+        private static readonly WheelSound[] SoundForSlot =
+            { WheelSound.Open, WheelSound.Switch, WheelSound.Switch, WheelSound.Switch, WheelSound.Confirm, WheelSound.Cancel };
 
         public static void Configure(WheelSoundSettings? settings)
         {
@@ -40,14 +43,7 @@ namespace Action_Wheel.Services
         {
             var settings = Volatile.Read(ref _settings);
             if (!settings.Enabled || settings.VolumePercent <= 0) return;
-            long now = Stopwatch.GetTimestamp();
-            if (sound == WheelSound.Switch)
-            {
-                long previous = Volatile.Read(ref _lastSwitch);
-                if (Stopwatch.GetElapsedTime(previous, now).TotalMilliseconds < 60
-                    || Interlocked.CompareExchange(ref _lastSwitch, now, previous) != previous) return;
-            }
-            Requests.Writer.TryWrite(new Request(sound, now));
+            Requests.Writer.TryWrite(new Request(sound, Stopwatch.GetTimestamp()));
         }
 
         /// <summary>Stops active cues and releases devices asynchronously. A later Configure can resume.</summary>
@@ -55,7 +51,8 @@ namespace Action_Wheel.Services
 
         private static async Task ProcessAsync()
         {
-            Voice?[] voices = new Voice?[4];
+            Voice?[] voices = new Voice?[SoundForSlot.Length];
+            int nextSwitch = 0;
             await foreach (var request in Requests.Reader.ReadAllAsync())
             {
                 var settings = Volatile.Read(ref _settings);
@@ -69,13 +66,20 @@ namespace Action_Wheel.Services
                     if (request.Sound == null)
                     {
                         // Prepare without writing any audio. Enabling the option cannot emit a cue.
-                        for (int i = 0; i < voices.Length; i++) voices[i] ??= Voice.TryCreate((WheelSound)i);
+                        for (int i = 0; i < voices.Length; i++) voices[i] ??= Voice.TryCreate(SoundForSlot[i]);
                         continue;
                     }
                     // An unavailable/slow device must never play an old gesture after it has ended.
                     if (Stopwatch.GetElapsedTime(request.Timestamp).TotalMilliseconds > 250) continue;
-                    int index = (int)request.Sound.Value;
-                    if ((uint)index >= (uint)voices.Length) continue;
+                    int index = request.Sound.Value switch
+                    {
+                        WheelSound.Open => 0,
+                        WheelSound.Switch => 1 + nextSwitch++ % 3,
+                        WheelSound.Confirm => 4,
+                        WheelSound.Cancel => 5,
+                        _ => -1,
+                    };
+                    if (index < 0) continue;
                     var voice = voices[index] ??= Voice.TryCreate(request.Sound.Value);
                     if (voice == null) continue;
                     // A confirmation or cancellation supersedes the opening/switch cues.
@@ -84,14 +88,16 @@ namespace Action_Wheel.Services
                     // Settings can change while a driver is opening. Recheck before writing audio.
                     var current = Volatile.Read(ref _settings);
                     if (!current.Enabled || current.VolumePercent <= 0) continue;
-                    // Relative levels keep direction changes much quieter than deliberate actions.
-                    double gain = current.VolumePercent / 100.0 * (request.Sound.Value switch
+                    // These are Point Duel's master(0.5) * event gains. 45% is the reference level;
+                    // hover's 70 ms linear fade is baked into switch/cancel without normalization.
+                    double gain = current.VolumePercent / WheelSoundSettings.DefaultVolumePercent * (request.Sound.Value switch
                     {
-                        WheelSound.Open => 0.55,
-                        WheelSound.Switch => 0.22,
-                        WheelSound.Confirm => 0.50,
-                        _ => 0.45,
+                        WheelSound.Open => 0.30,
+                        WheelSound.Switch => 0.08,
+                        WheelSound.Confirm => 0.375,
+                        _ => 0.08,
                     });
+                    LimitVoices(voices, voice);
                     if (!voice.Play(gain))
                     {
                         voice.Dispose();
@@ -104,6 +110,21 @@ namespace Action_Wheel.Services
                     ReleaseVoices(voices);
                 }
             }
+        }
+
+        private static void LimitVoices(Voice?[] voices, Voice upcoming)
+        {
+            // Match the game's three concurrent sources, replacing the oldest when full.
+            long now = Stopwatch.GetTimestamp();
+            int active = 0;
+            Voice? oldest = null;
+            foreach (var voice in voices)
+            {
+                if (voice == null || ReferenceEquals(voice, upcoming) || !voice.IsPlaying(now)) continue;
+                active++;
+                if (oldest == null || voice.StartedAt < oldest.StartedAt) oldest = voice;
+            }
+            if (active >= 3) oldest?.Stop();
         }
 
         private static void ReleaseVoices(Voice?[] voices)
@@ -123,6 +144,7 @@ namespace Action_Wheel.Services
             private nint _samples;
             private nint _header;
             private bool _prepared;
+            internal long StartedAt { get; private set; }
             private static readonly uint HeaderSize = (uint)Marshal.SizeOf<WaveHeader>();
 
             private Voice(byte[] pcm) { _original = pcm; _scaled = new byte[pcm.Length]; }
@@ -180,7 +202,11 @@ namespace Action_Wheel.Services
             internal void Stop()
             {
                 if (_device != 0) waveOutReset(_device);
+                StartedAt = 0;
             }
+
+            internal bool IsPlaying(long now) => StartedAt != 0
+                && Stopwatch.GetElapsedTime(StartedAt, now).TotalSeconds < _original.Length / 96000.0;
 
             internal bool Play(double gain)
             {
@@ -191,7 +217,9 @@ namespace Action_Wheel.Services
                     BinaryPrimitives.WriteInt16LittleEndian(_scaled.AsSpan(i, 2), (short)Math.Round(sample * gain));
                 }
                 Marshal.Copy(_scaled, 0, _samples, _scaled.Length);
-                return waveOutWrite(_device, _header, HeaderSize) == 0;
+                bool started = waveOutWrite(_device, _header, HeaderSize) == 0;
+                if (started) StartedAt = Stopwatch.GetTimestamp();
+                return started;
             }
 
             public void Dispose()

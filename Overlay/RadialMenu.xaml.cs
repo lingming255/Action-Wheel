@@ -281,6 +281,7 @@ namespace Action_Wheel.Overlay
         {
             _closed = true;
             _ringMotion?.Stop();
+            StopGlassMotion();
             _glassSurface?.Dispose();
             _glassSurface = null;
             IsRefreshPlaying = false;
@@ -461,6 +462,7 @@ namespace Action_Wheel.Overlay
                 {
                     Data = CreateWedgeGeometry(centre, middle - 22.5, middle + 22.5),
                     StrokeThickness = 0,
+                    Opacity = 0,
                     Tag = tag.ToString(),
                 };
 
@@ -561,7 +563,7 @@ namespace Action_Wheel.Overlay
                 _buttonPainters[previous]?.Rest();
 
             _highlightedTag = tag;
-            if (tag is > 0) WheelSounds.Play(WheelSound.Switch);
+            AnnounceGlassSelection(tag);
 
             if (tag is int current)
             {
@@ -607,6 +609,7 @@ namespace Action_Wheel.Overlay
             }
             _highlightedChild = button;
             if (button == null) return;
+            WheelSounds.Play(WheelSound.Switch);
             // The trigger's events are swallowed by MouseHook; do not rely on WinUI hover routing.
             button.RenderTransformOrigin = new Point(0.5, 0.5);
             button.RenderTransform = new ScaleTransform { ScaleX = 1.1, ScaleY = 1.1 };
@@ -703,6 +706,7 @@ namespace Action_Wheel.Overlay
             };
             CenterBtn.Opacity = 0;
             CenterInfo.Visibility = Visibility.Visible;
+            AnimateGlassInfo();
         }
 
         private void HideSelectionInfo()
@@ -1289,12 +1293,11 @@ namespace Action_Wheel.Overlay
                 button.Foreground = hover ? hoverForeground : restForeground;
                 if (tag != 0 && _wedges[tag] is XamlPath wedge)
                 {
-                    wedge.Fill = new SolidColorBrush(hover
-                        ? GlassIsDark ? Color.FromArgb(pressed ? (byte)72 : (byte)42, 161, 214, 206)
-                            : Color.FromArgb(pressed ? (byte)90 : (byte)60, 235, 255, 252)
-                        : Colors.Transparent);
+                    wedge.Fill = new SolidColorBrush(GlassIsDark
+                        ? Color.FromArgb(pressed ? (byte)72 : (byte)42, 161, 214, 206)
+                        : Color.FromArgb(pressed ? (byte)90 : (byte)60, 235, 255, 252));
                     wedge.Stroke = null;
-                    if (_directionArcs[tag] is XamlPath arc) arc.Opacity = hover ? 1 : 0;
+                    UpdateGlassSelection(tag, hover, wedge);
                 }
                 var desiredContent = swapsTintedSvg
                     ? tinted ??= IconFactory.CreateIcon(action with { Foreground = IconFactory.ToHex(GlassInk) },
@@ -1362,6 +1365,7 @@ namespace Action_Wheel.Overlay
             PainterFor(sender)?.Hover();
             if (TagOf(sender) is int tag)
             {
+                AnnounceGlassSelection(tag);
                 ShowSelectionInfo(tag);
                 OnMainRingHover(tag);
             }
@@ -1376,10 +1380,15 @@ namespace Action_Wheel.Overlay
 
         private void OnButtonRest(object sender, PointerRoutedEventArgs e)
         {
-            if (_trackingGesture) return;
+            if (_trackingGesture || _closing) return;
             DisarmHold();
             PainterFor(sender)?.Rest();
             HideSelectionInfo();
+            var point = e.GetCurrentPoint(ButtonsCanvas).Position;
+            double dx = point.X - MenuSize / 2.0, dy = point.Y - MenuSize / 2.0;
+            if (dx * dx + dy * dy > GlassOuterRadius * GlassOuterRadius
+                || RingGeometry.TagForDirection(dx, dy) == null)
+                AnnounceGlassSelection(null);
         }
 
         private void InitializeWindow()
@@ -1705,6 +1714,7 @@ namespace Action_Wheel.Overlay
             if (_closed || _closing || IsRefreshPlaying) return;
             IsRefreshPlaying = true;
             _ringMotion?.Stop();
+            StopGlassMotion();
             _glassSurface?.Dispose();
             _glassSurface = null;
             DisarmHold();
