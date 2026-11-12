@@ -26,7 +26,7 @@ namespace Action_Wheel.Overlay
         // assigns a material to the whole HWND, which would also affect the full-screen refresh.
         private const int DwmUseHostBackdropBrush = 17;
         internal const double FrostedMaterialOpacity = 0.60;
-        internal const float FrostedBlurAmount = 18;
+        internal const float FrostedBlurAmount = 24;
         internal const byte DarkTintAlpha = 52;
         internal const byte LightTintAlpha = 48;
 
@@ -50,6 +50,7 @@ namespace Action_Wheel.Overlay
         private readonly Border _host;
         private readonly IntPtr _hwnd;
         private readonly bool _dark;
+        private readonly double _materialOpacity;
         private readonly Action<CompositionBrush?> _setBackdropBrush;
         private readonly CompositionBackdropBrush _desktopBrush;
         private readonly CompositionColorBrush _maskFill;
@@ -61,12 +62,16 @@ namespace Action_Wheel.Overlay
         private readonly CompositionEffectBrush _glassBrush;
         private readonly List<IDisposable> _ownedResources = new();
         private bool _disposed;
+        private SolidColorBrush? _tintBrush;
+        private Color _tintColor;
         private Vector2 _lastClientSize;
 
         // Kept in memory for the hidden probe; the application still writes no activity/error log.
         internal static string? LastAttachFailure { get; private set; }
         internal bool IsConnected { get; private set; }
-        internal double MaterialOpacity => FrostedMaterialOpacity;
+        internal double MaterialOpacity => _materialOpacity;
+        internal float BlurAmount => _glassBrush.Properties.TryGetScalar("WheelFrost.BlurAmount", out float value)
+            == CompositionGetValueStatus.Succeeded ? value : 0;
         internal CompositionBrush Brush => _glassBrush;
         internal GlassMaskDiagnostics Diagnostics { get; private set; }
 
@@ -80,7 +85,7 @@ namespace Action_Wheel.Overlay
         /// backdrop. Returning null leaves the ordinary tint in place on unsupported systems.
         /// </summary>
         internal static WheelGlassSurface? Attach(Border host, IntPtr hwnd, bool dark,
-            Compositor compositor, Action<CompositionBrush?> setBackdropBrush)
+            Compositor compositor, Action<CompositionBrush?> setBackdropBrush, double? materialOpacity = null)
         {
             LastAttachFailure = null;
             // Keep a readable fallback until the real material is connected. Tint belongs only
@@ -104,11 +109,14 @@ namespace Action_Wheel.Overlay
             WheelGlassSurface? surface = null;
             try
             {
-                surface = new WheelGlassSurface(host, hwnd, dark, compositor, setBackdropBrush);
+                surface = new WheelGlassSurface(host, hwnd, dark, compositor, setBackdropBrush,
+                    materialOpacity ?? FrostedMaterialOpacity);
                 surface.UpdateMask();
                 setBackdropBrush(surface._glassBrush);
                 surface.IsConnected = true;
                 ApplyTint(host, dark, materialAvailable: true);
+                surface._tintBrush = host.Background as SolidColorBrush;
+                surface._tintColor = surface._tintBrush?.Color ?? Colors.Transparent;
                 CompositionTarget.Rendering += surface.OnRendering;
                 host.Unloaded += surface.OnHostUnloaded;
                 return surface;
@@ -126,13 +134,14 @@ namespace Action_Wheel.Overlay
 
         [SupportedOSPlatform("windows10.0.18362.0")]
         private WheelGlassSurface(Border host, IntPtr hwnd, bool dark, Compositor compositor,
-            Action<CompositionBrush?> setBackdropBrush)
+            Action<CompositionBrush?> setBackdropBrush, double materialOpacity)
         {
             _host = host;
             _hwnd = hwnd;
             _dark = dark;
+            _materialOpacity = Math.Clamp(materialOpacity, 0, 1);
             _setBackdropBrush = setBackdropBrush;
-            Diagnostics = Diagnostics with { MaterialOpacity = FrostedMaterialOpacity };
+            Diagnostics = Diagnostics with { MaterialOpacity = _materialOpacity };
             try
             {
                 _desktopBrush = Own(compositor.CreateHostBackdropBrush());
@@ -157,7 +166,24 @@ namespace Action_Wheel.Overlay
                 var blurEffect = Own(new GaussianBlurEffect
                 {
                     Name = "WheelFrost",
-                    Source = new CompositionEffectSourceParameter("desktop"),
+                    Source = Own(new ArithmeticCompositeEffect
+                    {
+                        Name = "WheelPigment",
+                        Source1 = new CompositionEffectSourceParameter("desktop"),
+                        Source2 = Own(new ColorMatrixEffect
+                        {
+                            Source = new CompositionEffectSourceParameter("desktop"),
+                            ColorMatrix = new Matrix5x4
+                            {
+                                M11 = .30f, M12 = .30f, M13 = .30f,
+                                M21 = .59f, M22 = .59f, M23 = .59f,
+                                M31 = .11f, M32 = .11f, M33 = .11f, M44 = 1,
+                            },
+                            ClampOutput = true,
+                        }),
+                        MultiplyAmount = 0, Source1Amount = 1, Source2Amount = 0,
+                        Offset = 0, ClampOutput = true,
+                    }),
                     BlurAmount = FrostedBlurAmount,
                     BorderMode = EffectBorderMode.Hard,
                 });
@@ -166,8 +192,11 @@ namespace Action_Wheel.Overlay
                     Source = blurEffect,
                     AlphaMask = new CompositionEffectSourceParameter("mask"),
                 });
-                var effectFactory = Own(compositor.CreateEffectFactory(maskEffect));
+                var effectFactory = Own(compositor.CreateEffectFactory(maskEffect,
+                    new[] { "WheelFrost.BlurAmount", "WheelPigment.Source1Amount", "WheelPigment.Source2Amount" }));
                 _glassBrush = Own(effectFactory.CreateBrush());
+                _glassBrush.Properties.InsertScalar("WheelFrost.BlurAmount", FrostedBlurAmount);
+                ApplySaturation(1);
                 _glassBrush.SetSourceParameter("desktop", _desktopBrush);
                 _glassBrush.SetSourceParameter("mask", _maskSurfaceBrush);
             }
@@ -184,6 +213,27 @@ namespace Action_Wheel.Overlay
         {
             _ownedResources.Add(resource);
             return resource;
+        }
+
+        /// <summary>
+        /// Grade only the sampled material. HostBackdrop may omit the capture-excluded grey
+        /// desktop window; applying its saturation explicitly keeps the glass grey either way.
+        /// Independent XAML icons, selection and dividers are outside this effect graph.
+        /// </summary>
+        internal void ApplySaturation(float saturation)
+        {
+            if (_disposed) return;
+            if (!float.IsFinite(saturation)) throw new ArgumentOutOfRangeException(nameof(saturation));
+            saturation = Math.Clamp(saturation, 0, 1);
+            _glassBrush.Properties.InsertScalar("WheelPigment.Source1Amount", saturation);
+            _glassBrush.Properties.InsertScalar("WheelPigment.Source2Amount", 1 - saturation);
+            if (_tintBrush != null)
+            {
+                float grey = .30f * _tintColor.R + .59f * _tintColor.G + .11f * _tintColor.B;
+                byte Channel(byte color) => (byte)Math.Round(grey + (color - grey) * saturation);
+                _tintBrush.Color = Color.FromArgb(_tintColor.A,
+                    Channel(_tintColor.R), Channel(_tintColor.G), Channel(_tintColor.B));
+            }
         }
 
         private static void ApplyTint(Border host, bool dark, bool materialAvailable)
@@ -281,11 +331,11 @@ namespace Action_Wheel.Overlay
             // Material coverage is independent of the opening fade: the settled sheet mixes 60%
             // frosted desktop with the live desktop beneath, while dividers remain untouched.
             double ancestorOpacity = Math.Clamp(opacity, 0, 1);
-            double maskOpacity = ancestorOpacity * FrostedMaterialOpacity;
+            double maskOpacity = ancestorOpacity * _materialOpacity;
             _maskFill.Color = Color.FromArgb((byte)Math.Round(maskOpacity * 255),
                 255, 255, 255);
             Diagnostics = new GlassMaskDiagnostics(clientSize, _ellipse.Center, _ellipse.Radius,
-                dpiScale, ancestorOpacity, FrostedMaterialOpacity, maskOpacity,
+                dpiScale, ancestorOpacity, _materialOpacity, maskOpacity,
                 _glassBrush.GetSourceParameter("desktop") == _desktopBrush &&
                 _glassBrush.GetSourceParameter("mask") == _maskSurfaceBrush,
                 null);

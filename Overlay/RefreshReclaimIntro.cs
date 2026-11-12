@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
@@ -48,6 +49,10 @@ namespace Action_Wheel.Overlay
         private readonly Stopwatch _clock = new();
         private readonly DispatcherQueueTimer? _finishTimer;
         private ContainerVisual? _visual;
+        private ContainerVisual? _sourceVisual;
+        private CompositionVisualSurface? _sourceSurface;
+        private CompositionSurfaceBrush? _sourceBrush;
+        private CompositionEffectBrush? _gradeBrush;
         private XamlRoot? _xamlRoot;
         private nint _backgroundBrush;
         private bool _disposed, _shown, _promotedForPlayback;
@@ -58,6 +63,18 @@ namespace Action_Wheel.Overlay
         internal bool AlreadyCompleted => _disposed || _completion.Task.IsCompleted;
         internal double ElapsedMs => _clock.Elapsed.TotalMilliseconds;
         internal double RemainingMs => _disposed ? 0 : Math.Max(0, _durationMs - ElapsedMs);
+        internal nint WindowHandle => _hwnd;
+
+        /// <summary>Grades the whole animated pulse with two GPU coefficients, never per-block writes.</summary>
+        internal void ApplySaturation(float saturation)
+        {
+            if (_disposed || _gradeBrush == null) return;
+            if (!float.IsFinite(saturation)) throw new ArgumentOutOfRangeException(nameof(saturation));
+            saturation = Math.Clamp(saturation, 0, 1);
+            if (_promotedForPlayback && saturation < 1) return;
+            _gradeBrush.Properties.InsertScalar("ReclaimGrade.Source1Amount", saturation);
+            _gradeBrush.Properties.InsertScalar("ReclaimGrade.Source2Amount", 1 - saturation);
+        }
 
         /// <summary>
         /// Keeps an unfinished inward pulse visible above the outward playback's opaque cover.
@@ -69,6 +86,7 @@ namespace Action_Wheel.Overlay
             if (AlreadyCompleted) return false;
             try
             {
+                ApplySaturation(1);
                 RefreshInputTransparency.Enable(_hwnd);
                 if (!SetWindowPos(_hwnd, new nint(-1), 0, 0, 0, 0, 0x13)) // NOACTIVATE | NOMOVE | NOSIZE
                     throw new InvalidOperationException("The inward pulse could not remain above outward playback.");
@@ -203,7 +221,7 @@ namespace Action_Wheel.Overlay
         {
             var compositor = ElementCompositionPreview.GetElementVisual(_host).Compositor;
             var visual = compositor.CreateContainerVisual();
-            _visual = visual;
+            _sourceVisual = visual;
             _resources.Add(visual);
             visual.Size = new Vector2(_bounds.Width, _bounds.Height);
             var bands = new ContainerVisual[TimingBands];
@@ -255,7 +273,7 @@ namespace Action_Wheel.Overlay
             }
 
             // A few blocks share each opacity clock. Composition handles the scan off-thread;
-            // there is no per-frame UI loop, position interpolation or screenshot texture.
+            // there is no per-frame UI loop, position interpolation or desktop screenshot.
             for (int band = 0; band < bands.Length; band++)
             {
                 var pulse = compositor.CreateScalarKeyFrameAnimation();
@@ -269,7 +287,52 @@ namespace Action_Wheel.Overlay
                 bands[band].StartAnimation("Opacity", pulse);
                 _resources.Add(pulse);
             }
-            ElementCompositionPreview.SetElementChildVisual(_host, visual);
+            // Capture only our animated child tree, including its native opacity clocks and
+            // shadows. The source stays in physical pixels with unit scale; inverse DPI belongs
+            // solely to the displayed outer container, otherwise the surface is scaled twice.
+            _sourceSurface = compositor.CreateVisualSurface();
+            _resources.Add(_sourceSurface);
+            _sourceSurface.SourceVisual = visual;
+            _sourceSurface.SourceSize = visual.Size;
+            _sourceBrush = compositor.CreateSurfaceBrush(_sourceSurface);
+            _resources.Add(_sourceBrush);
+            _sourceBrush.Stretch = CompositionStretch.None;
+            _sourceBrush.HorizontalAlignmentRatio = 0;
+            _sourceBrush.VerticalAlignmentRatio = 0;
+            var gray = new ColorMatrixEffect
+            {
+                ColorMatrix = new Matrix5x4
+                {
+                    M11 = .30f, M12 = .30f, M13 = .30f,
+                    M21 = .59f, M22 = .59f, M23 = .59f,
+                    M31 = .11f, M32 = .11f, M33 = .11f, M44 = 1,
+                },
+                ClampOutput = true,
+                Source = new CompositionEffectSourceParameter("pulse"),
+            };
+            _resources.Add(gray);
+            var blend = new ArithmeticCompositeEffect
+            {
+                Name = "ReclaimGrade", Source1 = new CompositionEffectSourceParameter("pulse"), Source2 = gray,
+                MultiplyAmount = 0, Source1Amount = 1, Source2Amount = 0, Offset = 0, ClampOutput = true,
+            };
+            _resources.Add(blend);
+            var factory = compositor.CreateEffectFactory(blend,
+                new[] { "ReclaimGrade.Source1Amount", "ReclaimGrade.Source2Amount" });
+            _resources.Add(factory);
+            _gradeBrush = factory.CreateBrush();
+            _resources.Add(_gradeBrush);
+            _gradeBrush.SetSourceParameter("pulse", _sourceBrush);
+            ApplySaturation(1);
+            var output = compositor.CreateSpriteVisual();
+            _resources.Add(output);
+            output.Size = visual.Size;
+            output.Brush = _gradeBrush;
+            _visual = compositor.CreateContainerVisual();
+            _resources.Add(_visual);
+            _visual.Size = visual.Size;
+            _visual.Children.InsertAtTop(output);
+            ElementCompositionPreview.SetElementChildVisual(_host, _visual);
             SyncScale();
         }
 
@@ -337,6 +400,7 @@ namespace Action_Wheel.Overlay
                 try { _resources[index].Dispose(); } catch { }
             }
             _resources.Clear(); _blocks.Clear(); _visual = null;
+            _sourceVisual = null; _sourceSurface = null; _sourceBrush = null; _gradeBrush = null;
             if (_hwnd != 0) RemoveWindowSubclass(_hwnd, _backgroundSubclass, new UIntPtr(91));
             if (_backgroundBrush != 0) DeleteObject(_backgroundBrush);
             _backgroundBrush = 0;
@@ -390,9 +454,33 @@ namespace Action_Wheel.Overlay
             Require(intro._blocks.Count == count && intro._blocks.TrueForAll(block =>
                 block.Brush.Color.R == 200 && block.Brush.Color.G == 100 && block.Brush.Color.B == 20
                 && block.Brush.Color.Equals(block.Shadow.Color)), "The reclaim pigment differs from its original capture or glow.");
+            Require(intro._sourceVisual != null && intro._sourceVisual.Scale == Vector3.One
+                && intro._sourceSurface?.SourceVisual == intro._sourceVisual
+                && intro._sourceSurface.SourceSize == new Vector2(bounds.Width, bounds.Height)
+                && intro._sourceBrush?.Surface is CompositionVisualSurface sourceSurface
+                && sourceSurface == intro._sourceSurface
+                && intro._gradeBrush?.GetSourceParameter("pulse") == intro._sourceBrush
+                && intro._visual!.Children.Count == 1,
+                "The reclaim grade lost its animated source, effect chain or unit physical source scale.");
+            foreach (float saturation in new[] { 0f, .5f, 1f })
+            {
+                intro.ApplySaturation(saturation);
+                Require(intro._gradeBrush!.Properties.TryGetScalar("ReclaimGrade.Source1Amount", out float colorWeight)
+                    == CompositionGetValueStatus.Succeeded && colorWeight == saturation
+                    && intro._gradeBrush.Properties.TryGetScalar("ReclaimGrade.Source2Amount", out float grayWeight)
+                    == CompositionGetValueStatus.Succeeded && grayWeight == 1 - saturation
+                    && intro._blocks.TrueForAll(block => block.Brush.Color.R == 200
+                        && block.Brush.Color.G == 100 && block.Brush.Color.B == 20),
+                    "The reclaim grade changed native pigment instead of its two GPU coefficients.");
+            }
+            intro.ApplySaturation(0);
             Require(intro.PromoteForPlayback() && !intro.AlreadyCompleted && !IsWindowVisible(intro._hwnd)
                 && intro._blocks.Count == count && !intro.Completion.IsCompleted,
                 "Promoting a hidden inward pulse showed, completed or rebuilt it.");
+            intro.ApplySaturation(0);
+            Require(intro._gradeBrush!.Properties.TryGetScalar("ReclaimGrade.Source1Amount", out float promotedWeight)
+                == CompositionGetValueStatus.Succeeded && promotedWeight == 1,
+                "A late held-grade tick recolored the promoted inward pulse.");
             bool rejected = false;
             try { intro.UpdateCapture(new byte[3], bounds); } catch (ArgumentException) { rejected = true; }
             Require(rejected && !IsWindowVisible(intro._hwnd), "Invalid pigment was accepted or a hidden update showed the window.");
@@ -470,6 +558,8 @@ namespace Action_Wheel.Overlay
                 CompletionElapsedMs = intro.ElapsedMs, EarlyDisposeCompleted = true, PigmentAndShadowMatched = true,
                 OffscreenShown = offscreenShown, CreationMs = creation.Elapsed.TotalMilliseconds,
                 PlaybackPromotionVerified = playbackPromotionVerified,
+                ReclaimGradeChainAndWeightsVerified = true, PromotedPulseRetainsColor = true,
+                VisualSurfaceAnimationVerifiedOnScreen = false,
                 TimingBoundary = "Synthetic hidden window construction only; excludes real input, on-screen presentation and desktop capture. This does not measure input-to-visible latency." };
         }
 

@@ -32,6 +32,8 @@ namespace Action_Wheel.Overlay
                 RequireReleaseProbe(menu._glassSurface != null, "Live desktop glass was not installed: "
                     + WheelGlassSurface.LastAttachFailure);
                 menu._glassSurface!.RefreshDiagnostics();
+                RequireReleaseProbe(menu._glassSurface.BlurAmount == WheelGlassSurface.FrostedBlurAmount,
+                    "The live glass brush lost its Gaussian blur property.");
                 var mask = menu._glassSurface.Diagnostics;
                 RequireReleaseProbe(mask.BrushChainConnected && mask.Radius.X > 0
                     && Math.Abs(mask.Center.X - mask.ClientSize.X / 2) < 1
@@ -92,7 +94,8 @@ namespace Action_Wheel.Overlay
                 return new { LiveDesktopGlass = true, UnifiedSectorCount = 8, GroupExpansion = true,
                     SelectionDoesNotMove = true, ConfirmDispatchesOnce = true, ClosingInputTransparent = true,
                     GlassDisposedAtClose = true, AnimationNoneImmediate = true, HiddenWindow = true,
-                    MaterialOpacity = mask.MaterialOpacity, DividerLayerIndependent = true,
+                    MaterialOpacity = mask.MaterialOpacity, GaussianBlurAmount = WheelGlassSurface.FrostedBlurAmount,
+                    DividerLayerIndependent = true,
                     MotionAccents = true, AnimatedSelection = true };
             }
             finally { if (!menu._closed) menu.CloseMenu(); }

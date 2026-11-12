@@ -4,12 +4,25 @@ The native wheel now uses the continuous glass layout from `wheel-unified-glass-
 one circular desktop material, a centre divider, eight fine radial dividers, stationary icons,
 local selection tint and a short direction arc. The whole surface opens and closes together.
 
-`WheelGlassSurface` uses the OS compositor's host backdrop with a Win2D Gaussian blur and circular
+`WheelGlassSurface` uses the OS compositor's host backdrop with a 24-unit Win2D Gaussian blur and circular
 alpha mask. It samples the live desktop without a screenshot. The mask follows the XAML centre,
 scale, opacity and monitor DPI. The settled frost covers 60%, with a separate 20% tint; the dividers
 remain independent and retain their original stroke/opacity. Windows 11 host backdrop support is required for desktop blur;
 unsupported systems retain a readable translucent tint. Closing releases the effect graph; a
 centre refresh releases it before the overlay becomes a full-screen click-through animation.
+
+Held-screen desaturation uses separate 1:1 native magnifier windows below the interactive wheel.
+The glass material explicitly follows the same saturation (host backdrop sampling can omit the
+capture-excluded grey windows), while icons, hover tints and selection arcs retain their own
+colours. Its Gaussian sample and tint are graded independently of those foreground layers.
+The grey layers use the same Rec.601 weights as the refresh cover, without adding a
+Gaussian blur to the desktop. They cover attached monitors, pass input through, never activate,
+and are removed on cancellation, replacement, shutdown or the outward-cover handoff. This
+replaces the full-screen Magnification colour matrix, which also desaturated the wheel itself.
+Capture-excluded inward particles sit above the grey desktop layer and follow the same fade
+through one compositor effect over their animated visual tree. This keeps their screenshot
+exclusion and avoids writing every block's colour on each frame. Promotion for outward playback
+restores their colour and ignores late inward-grade updates.
 
 The current ring animation setting still controls duration and preset, interpreted as motion of
 the entire sheet. `None` stays immediate. Confirm/cancel tails last 65% of the opening duration,
@@ -22,7 +35,8 @@ These decorations do not delay input or action timing; `None` disables them, and
 stop them before releasing the glass.
 
 Optional CC0 interaction sounds are embedded. Settings expose a bilingual
-enable switch and volume control; the default is off and 45%. Audio device work runs on a
+enable switch, master volume and independent 0-200% hover volume; defaults are off, 45% master
+and 100% hover (the original hover level). Audio device work runs on a
 background consumer. Open uses a 205ms relay mechanism cue at 0.45 reference gain; direction entry retains Point Duel's 70ms fading chip collision,
 and confirm the chip placement. Cancel reuses the short hover cue. Direction changes have no
 fixed time throttle; at most three cues overlap, replacing the oldest. Exact sources, gains,
@@ -34,6 +48,12 @@ probe: desktop brush/mask connection and centre, eight sectors, stationary selec
 expansion/collapse, duplicate confirmation, closing input transparency and cleanup. It also
 retains the existing full refresh/reclaim/settings/presentation checks. These do not constitute
 visual acceptance; the user reviews the deployed wheel on the desktop.
+
+`--wheel-glass-smoke <absolute-report-path>` checks the glass effect, grade curve and hidden
+desktop-grade window lifecycle. `--wheel-glass-pixel-probe <absolute-report-path>` additionally
+shows a small synthetic test region and samples only that region to check that the grey layer
+preserves sharp background pixels and leaves the upper colour layer untouched. Neither check
+registers hooks, plays audio or saves user preferences.
 
 Mixed-DPI placement first migrates the hidden HWND to the target monitor, then uses
 `GetDpiForWindow` to set its physical position and size together around the gesture origin.

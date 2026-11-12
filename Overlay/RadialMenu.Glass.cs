@@ -14,6 +14,7 @@ namespace Action_Wheel.Overlay
     public sealed partial class RadialMenu
     {
         private WheelGlassSurface? _glassSurface;
+        private float _glassSaturation = 1;
         private Storyboard? _ringMotion;
         private bool _closing;
         internal bool IsClosing => _closing;
@@ -24,6 +25,12 @@ namespace Action_Wheel.Overlay
             ? Color.FromArgb(255, 233, 242, 243) : Color.FromArgb(255, 23, 49, 57);
         private double GlassOuterRadius => Math.Max(RingGeometry.InnerRadiusDip + 48,
             _appearance.OrbitRadius + _appearance.ButtonSize * 58 / 52);
+
+        internal void ApplyGlassSaturation(float saturation)
+        {
+            _glassSaturation = saturation;
+            _glassSurface?.ApplySaturation(saturation);
+        }
 
         private static Point GlassPolar(double centre, double radius, double degrees)
         {
@@ -47,6 +54,7 @@ namespace Action_Wheel.Overlay
             if (_transparentBackdrop != null)
                 _glassSurface = WheelGlassSurface.Attach(sheet, _windowHandle, GlassIsDark,
                     _transparentBackdrop.Compositor, _transparentBackdrop.SetBrush);
+            _glassSurface?.ApplySaturation(_glassSaturation);
 
             var edge = new SolidColorBrush(GlassIsDark
                 ? Color.FromArgb(64, 222, 239, 255) : Color.FromArgb(160, 255, 255, 255));

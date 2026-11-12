@@ -703,6 +703,7 @@ namespace Action_Wheel.Services
                 })) capturedOnUi.TrySetResult(false);
             }, cancellation.Token, settings: _refreshSettings);
             _refreshIntro = RefreshReclaimIntro.TryStart(position, WinRT.Interop.WindowNative.GetWindowHandle(menu), _reclaimSettings);
+            ScreenGrade.BindMenu(WinRT.Interop.WindowNative.GetWindowHandle(menu), _refreshIntro, menu.ApplyGlassSaturation);
             _ = PrepareRefreshPresentationAsync(menu, _refreshFrame);
         }
 
@@ -760,8 +761,8 @@ namespace Action_Wheel.Services
         /// </summary>
         /// <remarks>
         /// The screen stays grey until the menu has its grey still of the monitor on screen and
-        /// calls back. The colour matrix can only change the whole desktop at once; the cover
-        /// handoff hides that transition before block playback begins.
+        /// calls back. The live grey layers are then removed beneath the opaque cover before
+        /// block playback begins; the wheel's icon and hover layer stays outside the grade.
         /// If the menu closes first, its Closed handler restores colour instead.
         /// </remarks>
         private async void PlayRefresh(PointInt32 release)

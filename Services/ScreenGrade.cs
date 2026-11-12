@@ -1,20 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using Action_Wheel.Overlay;
 using Microsoft.UI.Dispatching;
 
 namespace Action_Wheel.Services
 {
     /// <summary>
-    /// Drains the colour out of every monitor while the wheel gesture is held, through the
-    /// Magnification API's full-screen colour matrix.
+    /// Drains the colour out of every monitor below the interactive wheel, through live
+    /// 1:1 native magnifier windows. The wheel's own icons and hover accents keep their colour.
     /// </summary>
     /// <remarks>
-    /// The matrix is applied by DWM to the composed desktop, so it covers every window - the ring
-    /// included - at no cost to this process and without a screenshot. Windows drops the effect
-    /// when the process that set it exits, so a crash cannot leave the user's screen grey.
+    /// The effect lives in input-transparent windows below the wheel, rather than a final-screen
+    /// matrix. Its glass still samples the grey scene beneath. No cached screenshot or global colour
+    /// setting is installed; closing these windows restores the desktop, including after a crash.
     ///
     /// UI thread only: LauncherService starts this only after the raw colour capture succeeds.
     /// Its dispatcher orders the transition against cancellation and the grey-cover handoff.
@@ -27,10 +27,6 @@ namespace Action_Wheel.Services
         // Rec. 601 luma.
         public const float LumR = 0.30f, LumG = 0.59f, LumB = 0.11f;
 
-        [DllImport("Magnification.dll")] private static extern bool MagInitialize();
-        [DllImport("Magnification.dll")] private static extern bool MagUninitialize();
-        [DllImport("Magnification.dll")] private static extern bool MagSetFullscreenColorEffect(float[] matrix);
-
         private static readonly float[] Identity =
         {
             1, 0, 0, 0, 0,
@@ -40,10 +36,22 @@ namespace Action_Wheel.Services
             0, 0, 0, 0, 1,
         };
 
-        private static bool _initialized;
+        private static nint _menuHwnd;
+        private static RefreshReclaimIntro? _intro;
+        private static Action<float>? _applyGlassSaturation;
+        private static ScreenGradeSurface? _surface;
         private static readonly Transition Grade = new(ApplySaturation);
         private static readonly Stopwatch TransitionClock = new();
         private static DispatcherQueueTimer? _transitionTimer;
+
+        /// <summary>Orders this gesture's live grey layer below its interactive menu.</summary>
+        internal static void BindMenu(nint menuHwnd, RefreshReclaimIntro? intro, Action<float> applyGlassSaturation)
+        {
+            Restore();
+            _menuHwnd = menuHwnd;
+            _intro = intro;
+            _applyGlassSaturation = applyGlassSaturation;
+        }
 
         /// <summary>Desaturates every monitor.</summary>
         public static void Lower()
@@ -64,8 +72,8 @@ namespace Action_Wheel.Services
             if (Grade.IsTransitioning || Grade.IsLowered)
                 return Grade.Begin(duration.TotalMilliseconds);
 
-            // The native colour matrix is not a Composition animatable property. A UI timer
-            // keeps all native calls ordered with Restore; elapsed time avoids accumulated drift.
+            // Keep updates ordered with cancellation and the outward-cover handoff. Elapsed
+            // time avoids accumulated drift when a busy UI tick arrives late.
             DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
             if (queue == null)
                 return Task.FromResult(false);
@@ -96,17 +104,26 @@ namespace Action_Wheel.Services
         {
             StopTransitionTimer();
             Grade.Restore();
+            _surface?.Dispose();
+            _surface = null;
+            _menuHwnd = 0;
+            ApplyIntroSaturation(1);
+            _intro = null;
+            ApplyGlassSaturation(1);
+            _applyGlassSaturation = null;
         }
 
         public static void Shutdown()
         {
             StopTransitionTimer();
             Grade.Shutdown();
-            if (_initialized)
-            {
-                MagUninitialize();
-                _initialized = false;
-            }
+            _surface?.Dispose();
+            _surface = null;
+            _menuHwnd = 0;
+            ApplyIntroSaturation(1);
+            _intro = null;
+            ApplyGlassSaturation(1);
+            _applyGlassSaturation = null;
         }
 
         private static void OnTransitionTick(DispatcherQueueTimer sender, object args)
@@ -132,18 +149,43 @@ namespace Action_Wheel.Services
         }
 
         private static bool ApplySaturation(float saturation)
-            => EnsureInitialized() && MagSetFullscreenColorEffect(
-                saturation == 1 ? Identity : BuildMatrix(saturation));
-
-        private static bool EnsureInitialized()
         {
-            if (!_initialized)
+            ApplyIntroSaturation(saturation);
+            ApplyGlassSaturation(saturation);
+            if (saturation == 1)
             {
-                try { _initialized = MagInitialize(); }
-                catch (DllNotFoundException) { _initialized = false; }
-                catch (EntryPointNotFoundException) { _initialized = false; }
+                _surface?.Dispose();
+                _surface = null;
+                return true;
             }
-            return _initialized;
+            if (_menuHwnd == 0) return false;
+            _surface ??= ScreenGradeSurface.TryCreate(_menuHwnd);
+            _surface?.SetDecorationAnchor(_intro is { AlreadyCompleted: false } ? _intro.WindowHandle : 0);
+            if (_surface?.Apply(saturation) == true) return true;
+            _surface?.Dispose();
+            _surface = null;
+            return false;
+        }
+
+        private static void ApplyIntroSaturation(float saturation)
+        {
+            try { _intro?.ApplySaturation(saturation); }
+            catch (Exception)
+            {
+                // A lost particle effect must never interrupt desktop colour restoration.
+                try { _intro?.Dispose(); } catch (Exception) { }
+                _intro = null;
+            }
+        }
+
+        private static void ApplyGlassSaturation(float saturation)
+        {
+            try { _applyGlassSaturation?.Invoke(saturation); }
+            catch (Exception)
+            {
+                // A lost material must not prevent removing the desktop grade windows.
+                _applyGlassSaturation = null;
+            }
         }
 
         /// <summary>Pure smoothstep curve from colour to the exact held-screen saturation.</summary>

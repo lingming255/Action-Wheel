@@ -40,8 +40,14 @@ namespace Action_Wheel
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
             // Explicit hidden diagnostics run before single-instance registration and hooks.
-            // They do not save settings, play audio, capture the desktop or show visible windows.
+            // They never save settings or play audio. Only the explicit pixel probe displays
+            // and samples a small synthetic test region; the ordinary smoke checks stay hidden.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] is "--wheel-glass-smoke" or "--wheel-glass-pixel-probe")
+            {
+                WheelGlassSmoke.Run(command[2], command[1] == "--wheel-glass-pixel-probe", Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--settings-smoke")
             {
                 SettingsSmoke.Run(command[2], Exit);
