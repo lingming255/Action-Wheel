@@ -20,6 +20,14 @@ namespace Action_Wheel.ViewModels
 
         public string WheelSoundVolumeText => $"{_soundSettings.VolumePercent:0}%";
 
+        public double WheelHoverVolumePercent
+        {
+            get => _soundSettings.HoverVolumePercent;
+            set => ApplySoundSettings(_soundSettings with { HoverVolumePercent = value });
+        }
+
+        public string WheelHoverVolumeText => $"{_soundSettings.HoverVolumePercent:0}%";
+
         private void ApplySoundSettings(WheelSoundSettings requested)
         {
             var next = requested.Normalised();
@@ -35,6 +43,8 @@ namespace Action_Wheel.ViewModels
             Raise(nameof(WheelSoundsEnabled));
             Raise(nameof(WheelSoundVolumePercent));
             Raise(nameof(WheelSoundVolumeText));
+            Raise(nameof(WheelHoverVolumePercent));
+            Raise(nameof(WheelHoverVolumeText));
         }
     }
 }

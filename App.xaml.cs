@@ -39,9 +39,14 @@ namespace Action_Wheel
         /// <param name="args">Details about the launch request and process.</param>
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
-            // Explicit, hidden diagnostic: exercise the real WinUI Composition interop without
-            // registering hooks, touching settings, capturing the desktop or showing a window.
+            // Explicit hidden diagnostics run before single-instance registration and hooks.
+            // They do not save settings, play audio, capture the desktop or show visible windows.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--settings-smoke")
+            {
+                SettingsSmoke.Run(command[2], Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--wheel-position-smoke")
             {
                 WheelPositionSmoke.Run(command[2], Exit);

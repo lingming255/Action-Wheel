@@ -855,7 +855,12 @@
                                         IsEnabled="{Binding WheelSoundsEnabled, Mode=OneWay}"/>
                                 <TextBlock Text="{Binding WheelSoundVolumeText, Mode=OneWay}" FontSize="12"
                                            HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <TextBlock Text="默认关闭。保存后下次打开轮盘生效；方向切换声比确认声轻。 / Off by default. Save to apply on the next opening; direction changes are quieter than confirmation."
+                                <Slider Header="悬停音量&#x0a;Hover volume" Minimum="0" Maximum="200" StepFrequency="1"
+                                        Value="{Binding WheelHoverVolumePercent, Mode=TwoWay}"
+                                        IsEnabled="{Binding WheelSoundsEnabled, Mode=OneWay}"/>
+                                <TextBlock Text="{Binding WheelHoverVolumeText, Mode=OneWay}" FontSize="12"
+                                           HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Text="默认关闭。保存后下次打开轮盘生效。悬停100%为原响度，0%仅关闭悬停声；其他声音由音效音量控制。 / Off by default. Save to apply on the next opening. Hover 100% is the original level; 0% mutes hover only. Sound volume controls all cues."
                                            TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                             </StackPanel>
                         </Border>

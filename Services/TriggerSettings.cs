@@ -93,6 +93,7 @@ namespace Action_Wheel.Services
                     writer.WriteStartObject("wheelSounds");
                     writer.WriteBoolean("enabled", sounds.Enabled);
                     writer.WriteNumber("volumePercent", sounds.VolumePercent);
+                    writer.WriteNumber("hoverVolumePercent", sounds.HoverVolumePercent);
                     writer.WriteEndObject();
                     writer.WriteEndObject();
                 }
@@ -157,6 +158,7 @@ namespace Action_Wheel.Services
             {
                 Enabled = value.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.True,
                 VolumePercent = ReadDouble(value, "volumePercent", WheelSoundSettings.DefaultVolumePercent),
+                HoverVolumePercent = ReadDouble(value, "hoverVolumePercent", WheelSoundSettings.DefaultHoverVolumePercent),
             }.Normalised();
         }
 

@@ -43,6 +43,7 @@ namespace Action_Wheel.Services
         {
             var settings = Volatile.Read(ref _settings);
             if (!settings.Enabled || settings.VolumePercent <= 0) return;
+            if (sound == WheelSound.Switch && settings.HoverVolumePercent <= 0) return;
             Requests.Writer.TryWrite(new Request(sound, Stopwatch.GetTimestamp()));
         }
 
@@ -88,12 +89,13 @@ namespace Action_Wheel.Services
                     // Settings can change while a driver is opening. Recheck before writing audio.
                     var current = Volatile.Read(ref _settings);
                     if (!current.Enabled || current.VolumePercent <= 0) continue;
+                    if (request.Sound == WheelSound.Switch && current.HoverVolumePercent <= 0) continue;
                     // 45% is the reference level. The relay opening cue is independently stronger;
-                    // Point Duel's other gains and baked 70 ms hover fade remain unchanged.
+                    // hover scales independently, preserving the cue's baked 70 ms fade.
                     double gain = current.VolumePercent / WheelSoundSettings.DefaultVolumePercent * (request.Sound.Value switch
                     {
                         WheelSound.Open => 0.45,
-                        WheelSound.Switch => 0.08,
+                        WheelSound.Switch => 0.08 * current.HoverVolumePercent / 100,
                         WheelSound.Confirm => 0.375,
                         _ => 0.08,
                     });
