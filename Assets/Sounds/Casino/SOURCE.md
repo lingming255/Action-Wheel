@@ -1,5 +1,9 @@
 # Casino cues borrowed from Point Duel
 
+Current opening override: `../Relay/open.wav` replaces the card slide in the active application.
+The original `open.wav` and the manifest below remain as the complete earlier Casino source set.
+Switch/confirm/cancel and their reference gains are still active and unchanged.
+
 Source project: the owner's Point Duel, commit `a1472325a8906bd53c200dc6b7e0a16402d9f070`.
 Read-only source: `public/casino-sfx.js` and `public/audio/casino/`.
 The source audio/script files matched that commit when copied on 2026-11-12; the game project was not modified.

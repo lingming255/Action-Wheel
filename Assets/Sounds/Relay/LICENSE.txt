@@ -1,0 +1,13 @@
+Relay 2 by JoontheFloof
+Source: https://freesound.org/people/JoontheFloof/sounds/740252/
+
+The source recording is marked Creative Commons 0 (CC0 1.0) on its original page.
+https://creativecommons.org/publicdomain/zero/1.0/
+Legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Source-page license summary:
+You can copy, modify, distribute and perform the sound, even for commercial
+purposes, all without the need of asking permission to the author.
+
+The original recording and a trimmed/processed derivative are included.
+Processing and checksums are documented in SOURCE.md and manifest.json.

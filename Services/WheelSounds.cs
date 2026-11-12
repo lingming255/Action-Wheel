@@ -88,11 +88,11 @@ namespace Action_Wheel.Services
                     // Settings can change while a driver is opening. Recheck before writing audio.
                     var current = Volatile.Read(ref _settings);
                     if (!current.Enabled || current.VolumePercent <= 0) continue;
-                    // These are Point Duel's master(0.5) * event gains. 45% is the reference level;
-                    // hover's 70 ms linear fade is baked into switch/cancel without normalization.
+                    // 45% is the reference level. The relay opening cue is independently stronger;
+                    // Point Duel's other gains and baked 70 ms hover fade remain unchanged.
                     double gain = current.VolumePercent / WheelSoundSettings.DefaultVolumePercent * (request.Sound.Value switch
                     {
-                        WheelSound.Open => 0.30,
+                        WheelSound.Open => 0.45,
                         WheelSound.Switch => 0.08,
                         WheelSound.Confirm => 0.375,
                         _ => 0.08,

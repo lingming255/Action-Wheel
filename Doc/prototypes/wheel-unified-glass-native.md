@@ -21,12 +21,12 @@ Selection tint/arc fade in and out, centre text rises gently, and confirmation g
 These decorations do not delay input or action timing; `None` disables them, and refresh/close
 stop them before releasing the glass.
 
-Optional Kenney CC0 open/switch/confirm/cancel sounds borrowed from Point Duel are embedded. Settings expose a bilingual
+Optional CC0 interaction sounds are embedded. Settings expose a bilingual
 enable switch and volume control; the default is off and 45%. Audio device work runs on a
-background consumer. Open borrows the card slide, direction entry a 70ms fading chip collision,
+background consumer. Open uses a 205ms relay mechanism cue at 0.45 reference gain; direction entry retains Point Duel's 70ms fading chip collision,
 and confirm the chip placement. Cancel reuses the short hover cue. Direction changes have no
 fixed time throttle; at most three cues overlap, replacing the oldest. Exact sources, gains,
-CC0 license and offline checks live in `Assets/Sounds/Casino/`; original preview cues remain in
+CC0 license and offline checks live in `Assets/Sounds/Casino/` and `Assets/Sounds/Relay/`; original preview cues remain in
 `wheel-sounds/`. Installing the update does not change the user's enabled/volume settings.
 
 The opt-in `--refresh-gpu-smoke <absolute-report-path>` check includes a hidden native glass
