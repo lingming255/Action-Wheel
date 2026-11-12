@@ -30,6 +30,18 @@ namespace Action_Wheel.Overlay
         internal const double DurationMs = ReclaimAnimationSettings.DefaultDurationMs;
         private const int MaximumBlocks = 600;
         private const int TimingBands = 40;
+        // Exactly one idle bundle is retained. Each playback gets a fresh lease object, so an
+        // old outward/Closed callback can never dispose a later gesture using the same HWND.
+        private static RefreshReclaimIntro? _preparedCache;
+        private static int _cacheGeneration, _activeCacheLeases;
+        private readonly int _generation;
+        private readonly ReclaimAnimationSettings _profile;
+        private readonly nint _monitor;
+        private readonly uint _preparedDpi;
+        private readonly ContainerVisual[] _bands = new ContainerVisual[TimingBands];
+        private readonly ScalarKeyFrameAnimation[] _pulses = new ScalarKeyFrameAnimation[TimingBands];
+        private bool _cacheEligible, _ownsResources = true, _countedLease;
+        private double _clearRadius;
         private readonly double _durationMs, _pulseMs;
         private readonly double _densityScale;
         private readonly int _maximumBlocks;
@@ -57,7 +69,7 @@ namespace Action_Wheel.Overlay
         private nint _backgroundBrush;
         private bool _disposed, _shown, _promotedForPlayback;
 
-        private sealed record BlockVisual(int X, int Y, CompositionColorBrush Brush, DropShadow Shadow);
+        private sealed record BlockVisual(int X, int Y, CompositionColorBrush Brush, DropShadow Shadow, SpriteVisual Visual);
 
         internal Task Completion => _completion.Task;
         internal bool AlreadyCompleted => _disposed || _completion.Task.IsCompleted;
@@ -108,11 +120,17 @@ namespace Action_Wheel.Overlay
             RefreshReclaimIntro? intro = null;
             try
             {
-                nint monitor = MonitorFromPoint(new NativePoint(origin.X, origin.Y), 2);
-                var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-                if (!GetMonitorInfo(monitor, ref info)) return null;
-                intro = new RefreshReclaimIntro(new RectInt32(info.Monitor.Left, info.Monitor.Top,
-                    info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top), origin, menuHwnd, false, settings);
+                if (!TryResolve(origin, out var bounds, out nint monitor)) return null;
+                var profile = (settings ?? ReclaimAnimationSettings.Default).Normalised();
+                var prepared = _preparedCache;
+                _preparedCache = null;
+                if (prepared != null && prepared.Matches(bounds, monitor, profile))
+                    intro = new RefreshReclaimIntro(prepared, origin, menuHwnd);
+                else
+                {
+                    prepared?.ReleaseResources();
+                    intro = new RefreshReclaimIntro(bounds, origin, menuHwnd, false, profile);
+                }
                 return intro;
             }
             catch
@@ -122,15 +140,62 @@ namespace Action_Wheel.Overlay
             }
         }
 
+        /// <summary>UI-thread idle work only: prepares one hidden bundle without starting any scan.</summary>
+        internal static bool WarmAt(PointInt32 origin, ReclaimAnimationSettings? settings = null)
+        {
+            // Never build a second speculative bundle while a gesture/outward pulse owns one.
+            if (_activeCacheLeases != 0) return false;
+            try
+            {
+                if (!TryResolve(origin, out var bounds, out nint monitor)) return false;
+                var profile = (settings ?? ReclaimAnimationSettings.Default).Normalised();
+                if (_preparedCache?.Matches(bounds, monitor, profile) == true) return true;
+                ClearCache();
+                _preparedCache = new RefreshReclaimIntro(bounds, origin, 0, false, profile, prepareOnly: true);
+                return true;
+            }
+            catch { ClearCache(); return false; }
+        }
+
+        /// <summary>Releases idle resources and prevents already-active older leases from recaching.</summary>
+        internal static void ClearCache()
+        {
+            _cacheGeneration++;
+            var prepared = _preparedCache;
+            _preparedCache = null;
+            prepared?.ReleaseResources();
+        }
+
+        private static bool TryResolve(PointInt32 origin, out RectInt32 bounds, out nint monitor)
+        {
+            monitor = MonitorFromPoint(new NativePoint(origin.X, origin.Y), 2);
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            bool found = GetMonitorInfo(monitor, ref info);
+            bounds = found ? new RectInt32(info.Monitor.Left, info.Monitor.Top,
+                info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top) : default;
+            return found;
+        }
+
+        private bool Matches(RectInt32 bounds, nint monitor, ReclaimAnimationSettings profile)
+            => _ownsResources && _disposed && _generation == _cacheGeneration && _bounds.Equals(bounds)
+            && _monitor == monitor && _profile == profile && IsWindow(_hwnd)
+            && _preparedDpi != 0 && GetDpiForWindow(_hwnd) == _preparedDpi
+            && GetClientRect(_hwnd, out var client) && client.Right == bounds.Width && client.Bottom == bounds.Height
+            && GetWindowDisplayAffinity(_hwnd, out uint affinity) && affinity == 0x11;
+
         /// <summary>Creates only a never-shown synthetic decoration for integration diagnostics.</summary>
         internal static RefreshReclaimIntro CreateHiddenForProbe(RectInt32 bounds, PointInt32 origin, nint menuHwnd,
             ReclaimAnimationSettings? settings = null)
             => new(bounds, origin, menuHwnd, hidden: true, settings: settings);
 
         private RefreshReclaimIntro(RectInt32 bounds, PointInt32 origin, nint menuHwnd, bool hidden,
-            ReclaimAnimationSettings? settings = null)
+            ReclaimAnimationSettings? settings = null, bool prepareOnly = false)
         {
             var profile = (settings ?? ReclaimAnimationSettings.Default).Normalised();
+            _profile = profile;
+            _generation = _cacheGeneration;
+            _cacheEligible = !hidden;
+            _monitor = MonitorFromPoint(new NativePoint(origin.X, origin.Y), 2);
             _durationMs = profile.DurationMs;
             _pulseMs = profile.PixelDurationMs;
             _maximumBlocks = (int)Math.Round(MaximumBlocks * profile.DensityPercent / 100);
@@ -157,18 +222,72 @@ namespace Action_Wheel.Overlay
                 ConfigureNativeWindow();
                 _captureExcluded = SetWindowDisplayAffinity(_hwnd, 0x11)
                     && GetWindowDisplayAffinity(_hwnd, out uint affinity) && affinity == 0x11;
+                _preparedDpi = GetDpiForWindow(_hwnd);
                 BuildVisuals();
-                _clock.Start();
-                _finishTimer.Start();
-                // A failed capture-exclusion request must not paint into the raw desktop grab.
-                // UpdateCapture may reveal this window only after that grab is safely complete.
-                if (_captureExcluded) Show();
+                if (prepareOnly)
+                {
+                    if (!_captureExcluded) throw new InvalidOperationException("Prepared reclaim resources must retain capture exclusion.");
+                    _disposed = true;
+                    StopAndHide();
+                    _completion.TrySetResult();
+                }
+                else StartLease(resetPigment: false);
             }
             catch
             {
+                _cacheEligible = false;
                 Dispose();
+                ReleaseResources();
                 throw;
             }
+        }
+
+        private RefreshReclaimIntro(RefreshReclaimIntro prepared, PointInt32 origin, nint menuHwnd)
+        {
+            _profile = prepared._profile; _generation = _cacheGeneration; _cacheEligible = true;
+            _durationMs = prepared._durationMs; _pulseMs = prepared._pulseMs;
+            _densityScale = prepared._densityScale; _maximumBlocks = prepared._maximumBlocks;
+            _glowOpacity = prepared._glowOpacity; _clearRadius = prepared._clearRadius;
+            _bounds = prepared._bounds; _origin = origin; _menuHwnd = menuHwnd; _hidden = prepared._hidden;
+            _monitor = prepared._monitor; _preparedDpi = prepared._preparedDpi;
+            _window = prepared._window; _host = prepared._host; _hwnd = prepared._hwnd;
+            _captureExcluded = prepared._captureExcluded; _backgroundBrush = prepared._backgroundBrush;
+            _backgroundSubclass = ClearNativeBackground;
+            _resources = prepared._resources; _blocks = prepared._blocks;
+            _bands = prepared._bands; _pulses = prepared._pulses;
+            _visual = prepared._visual; _sourceVisual = prepared._sourceVisual;
+            _sourceSurface = prepared._sourceSurface; _sourceBrush = prepared._sourceBrush; _gradeBrush = prepared._gradeBrush;
+            // Transfer sole ownership before any step that could throw; old callbacks stay inert.
+            prepared._ownsResources = false;
+            prepared._backgroundBrush = 0;
+            try
+            {
+                _finishTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+                _finishTimer.IsRepeating = false;
+                _finishTimer.Interval = TimeSpan.FromMilliseconds(_durationMs);
+                _finishTimer.Tick += Finish;
+                _window.Closed += OnClosed;
+                _host.Loaded += OnLoaded;
+                if (!SetWindowSubclass(_hwnd, _backgroundSubclass, new UIntPtr(91), UIntPtr.Zero))
+                    throw new InvalidOperationException("The cached reclaim window could not bind its new owner.");
+                SyncScale();
+                StartLease(resetPigment: false);
+            }
+            catch { _cacheEligible = false; Dispose(); throw; }
+        }
+
+        private void StartLease(bool resetPigment)
+        {
+            if (_visual != null) _visual.Offset = Vector3.Zero;
+            RetargetBlocks(resetPigment);
+            ApplySaturation(1);
+            for (int band = 0; band < TimingBands; band++)
+                _bands[band].StartAnimation("Opacity", _pulses[band]);
+            _clock.Restart();
+            _finishTimer!.Start();
+            if (_cacheEligible) { _activeCacheLeases++; _countedLease = true; }
+            // Capture-exclusion failure retains the original delayed-show fallback.
+            if (_captureExcluded) Show();
         }
 
         private void ConfigureNativeWindow()
@@ -224,7 +343,7 @@ namespace Action_Wheel.Overlay
             _sourceVisual = visual;
             _resources.Add(visual);
             visual.Size = new Vector2(_bounds.Width, _bounds.Height);
-            var bands = new ContainerVisual[TimingBands];
+            var bands = _bands;
             for (int band = 0; band < bands.Length; band++)
             {
                 var container = compositor.CreateContainerVisual();
@@ -240,19 +359,13 @@ namespace Action_Wheel.Overlay
                 Math.Sqrt((double)_bounds.Width * _bounds.Height / _maximumBlocks));
             int columns = Math.Max(1, (int)Math.Floor(_bounds.Width / step));
             int rows = Math.Max(1, (int)Math.Floor(_bounds.Height / step));
-            double dx = Math.Max(_origin.X - _bounds.X, _bounds.X + _bounds.Width - 1 - _origin.X);
-            double dy = Math.Max(_origin.Y - _bounds.Y, _bounds.Y + _bounds.Height - 1 - _origin.Y);
-            double farthest = Math.Max(1, Math.Sqrt(dx * dx + dy * dy));
-            double clearRadius = cell * 1.7;
+            _clearRadius = cell * 1.7;
             for (int row = 0; row < rows; row++)
             for (int column = 0; column < columns; column++)
             {
                 int x = (int)Math.Round((column + .5) * _bounds.Width / columns);
                 int y = (int)Math.Round((row + .5) * _bounds.Height / rows);
-                double ox = x - (_origin.X - _bounds.X), oy = y - (_origin.Y - _bounds.Y);
-                double distance = Math.Sqrt(ox * ox + oy * oy);
-                if (distance < clearRadius || _blocks.Count >= _maximumBlocks) continue;
-                int band = Math.Clamp((int)Math.Floor((1 - Math.Min(1, distance / farthest)) * (TimingBands - 1)), 0, TimingBands - 1);
+                if (_blocks.Count >= _maximumBlocks) continue;
                 // Tint is an immediate placeholder. The raw capture can replace pigment later
                 // without touching either this fixed position or the already-running scan.
                 Color colour = Color.FromArgb(255, 75, 132, 157);
@@ -267,8 +380,8 @@ namespace Action_Wheel.Overlay
                 block.Offset = new Vector3(x - block.Size.X / 2, y - block.Size.Y / 2, 0);
                 block.Brush = brush;
                 block.Shadow = shadow;
-                bands[band].Children.InsertAtTop(block);
-                _blocks.Add(new BlockVisual(x, y, brush, shadow));
+                bands[0].Children.InsertAtTop(block);
+                _blocks.Add(new BlockVisual(x, y, brush, shadow, block));
                 _resources.Add(brush); _resources.Add(shadow); _resources.Add(block);
             }
 
@@ -284,7 +397,7 @@ namespace Action_Wheel.Overlay
                 pulse.Duration = TimeSpan.FromMilliseconds(_pulseMs);
                 pulse.DelayTime = TimeSpan.FromMilliseconds(band / (double)(TimingBands - 1) * (_durationMs - _pulseMs));
                 pulse.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
-                bands[band].StartAnimation("Opacity", pulse);
+                _pulses[band] = pulse;
                 _resources.Add(pulse);
             }
             // Capture only our animated child tree, including its native opacity clocks and
@@ -336,6 +449,30 @@ namespace Action_Wheel.Overlay
             SyncScale();
         }
 
+        private void RetargetBlocks(bool resetPigment)
+        {
+            foreach (var band in _bands)
+            {
+                band.StopAnimation("Opacity");
+                band.Opacity = 0;
+                band.Children.RemoveAll();
+            }
+            double originX = _origin.X - _bounds.X, originY = _origin.Y - _bounds.Y;
+            double dx = Math.Max(originX, _bounds.Width - 1 - originX);
+            double dy = Math.Max(originY, _bounds.Height - 1 - originY);
+            double farthest = Math.Max(1, Math.Sqrt(dx * dx + dy * dy));
+            Color placeholder = Color.FromArgb(255, 75, 132, 157);
+            foreach (var block in _blocks)
+            {
+                double ox = block.X - originX, oy = block.Y - originY;
+                double distance = Math.Sqrt(ox * ox + oy * oy);
+                int band = Math.Clamp((int)Math.Floor((1 - Math.Min(1, distance / farthest)) * (TimingBands - 1)), 0, TimingBands - 1);
+                block.Visual.Opacity = distance < _clearRadius ? 0 : 1;
+                _bands[band].Children.InsertAtTop(block.Visual);
+                if (resetPigment) { block.Brush.Color = placeholder; block.Shadow.Color = placeholder; }
+            }
+        }
+
         /// <summary>Applies original desktop pigment after the raw grab, without restarting animation.</summary>
         internal void UpdateCapture(byte[] bgra, RectInt32 bounds)
         {
@@ -378,12 +515,40 @@ namespace Action_Wheel.Overlay
         }
 
         private void Finish(DispatcherQueueTimer sender, object args) => Dispose();
-        private void OnClosed(object sender, WindowEventArgs args) => Dispose();
+        private void OnClosed(object sender, WindowEventArgs args)
+        {
+            _cacheEligible = false; // A Window already entering Closed is never a reusable bundle.
+            Dispose();
+        }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            StopAndHide();
+            _completion.TrySetResult();
+            try
+            {
+                if (_cacheEligible && _ownsResources && _generation == _cacheGeneration
+                    && TryResolve(_origin, out var bounds, out nint monitor) && Matches(bounds, monitor, _profile))
+                {
+                    // A promoted pulse reaches this path only on its own finish/cancellation.
+                    if (_preparedCache == null)
+                    {
+                        // Reset while hidden, outside the next Show critical path.
+                        Color placeholder = Color.FromArgb(255, 75, 132, 157);
+                        foreach (var block in _blocks) { block.Brush.Color = placeholder; block.Shadow.Color = placeholder; }
+                        _preparedCache = this;
+                        return;
+                    }
+                }
+            }
+            catch { /* A lost device invalidates the prepared bundle, never the gesture cleanup. */ }
+            ReleaseResources();
+        }
+
+        private void StopAndHide()
+        {
             _clock.Stop();
             _finishTimer?.Stop();
             if (_finishTimer != null) _finishTimer.Tick -= Finish;
@@ -394,6 +559,22 @@ namespace Action_Wheel.Overlay
             _host.Loaded -= OnLoaded;
             if (_xamlRoot != null) _xamlRoot.Changed -= OnRootChanged;
             _xamlRoot = null;
+            if (_hwnd != 0) RemoveWindowSubclass(_hwnd, _backgroundSubclass, new UIntPtr(91));
+            foreach (var band in _bands)
+            {
+                if (band == null) continue;
+                try { band.StopAnimation("Opacity"); band.Opacity = 0; } catch { }
+            }
+            _shown = false;
+            if (_countedLease) { _countedLease = false; _activeCacheLeases--; }
+        }
+
+        private void ReleaseResources()
+        {
+            if (!_ownsResources) return;
+            _ownsResources = false;
+            _disposed = true;
+            StopAndHide();
             try { ElementCompositionPreview.SetElementChildVisual(_host, null); } catch { }
             for (int index = _resources.Count - 1; index >= 0; index--)
             {
@@ -401,7 +582,6 @@ namespace Action_Wheel.Overlay
             }
             _resources.Clear(); _blocks.Clear(); _visual = null;
             _sourceVisual = null; _sourceSurface = null; _sourceBrush = null; _gradeBrush = null;
-            if (_hwnd != 0) RemoveWindowSubclass(_hwnd, _backgroundSubclass, new UIntPtr(91));
             if (_backgroundBrush != 0) DeleteObject(_backgroundBrush);
             _backgroundBrush = 0;
             try { _window.Close(); } catch { }
@@ -630,6 +810,60 @@ namespace Action_Wheel.Overlay
                 UsedDesktopCapture = false, DisplayedEffect = false };
         }
 
+        /// <summary>Hidden resource reuse and stale-owner checks; no desktop capture or visible scan.</summary>
+        internal static Task<object> RunPreparedCacheProbeAsync()
+        {
+            ClearCache();
+            try
+            {
+                Require(TryResolve(new PointInt32(0, 0), out var bounds, out _), "No monitor for the hidden cache probe.");
+                var origin = new PointInt32(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+                var profile = ReclaimAnimationSettings.Default with { DurationMs = 1500 };
+                using var ready = new RefreshReclaimIntro(bounds, origin, 0, true, profile, prepareOnly: true);
+                Require(ready._disposed && !ready._clock.IsRunning && !ready._finishTimer!.IsRunning
+                    && !IsWindowVisible(ready._hwnd), "Preparation started a clock or showed a window.");
+                int resourceCount = ready._resources.Count;
+                var resourceList = ready._resources;
+                var leaseClock = Stopwatch.StartNew();
+                using var first = new RefreshReclaimIntro(ready, origin, 0);
+                leaseClock.Stop();
+                Require(!ready._ownsResources && ReferenceEquals(resourceList, first._resources)
+                    && first._resources.Count == resourceCount && first._clock.IsRunning,
+                    "The first lease rebuilt resources or retained two owners.");
+                Task oldCompletion = first.Completion;
+                first.Dispose();
+                Require(oldCompletion.IsCompletedSuccessfully && ReferenceEquals(_preparedCache, first)
+                    && first._resources.Count == resourceCount && !IsWindowVisible(first._hwnd),
+                    "A completed lease was not returned hidden to the single slot.");
+                _preparedCache = null;
+                var nextOrigin = new PointInt32(bounds.X + bounds.Width / 3, bounds.Y + bounds.Height / 3);
+                using var second = new RefreshReclaimIntro(first, nextOrigin, 0);
+                first.Dispose(); first.ApplySaturation(0); first.UpdateCapture(Array.Empty<byte>(), bounds);
+                Require(!second.AlreadyCompleted && !second.Completion.IsCompleted && oldCompletion.IsCompleted
+                    && ReferenceEquals(resourceList, second._resources) && !first._ownsResources
+                    && second._gradeBrush!.Properties.TryGetScalar("ReclaimGrade.Source1Amount", out float weight)
+                        == CompositionGetValueStatus.Succeeded && weight == 1,
+                    "An old lease changed the later lease's completion or color.");
+                foreach (var block in second._blocks)
+                {
+                    double dx = block.X - (nextOrigin.X - bounds.X), dy = block.Y - (nextOrigin.Y - bounds.Y);
+                    Require(block.Visual.Opacity == (Math.Sqrt(dx * dx + dy * dy) < second._clearRadius ? 0 : 1),
+                        "A cached block retained the previous origin's clear hole.");
+                }
+                Require(second.PromoteForPlayback() && !WarmAt(nextOrigin, profile)
+                    && !IsWindowVisible(second._hwnd), "Warmup stole or displayed a promoted lease.");
+                ClearCache();
+                second.Dispose();
+                Require(_preparedCache == null && second._resources.Count == 0 && _activeCacheLeases == 0,
+                    "A cleared generation recached an in-flight lease or retained native resources.");
+                return Task.FromResult<object>(new { Passed = true, ResourceCount = resourceCount,
+                    FirstRentMs = leaseClock.Elapsed.TotalMilliseconds, DistinctLeaseOwners = true,
+                    OriginRetargeted = true, PromotedLeaseNotStolen = true, ClearInvalidatesInFlight = true,
+                    UsedDesktopCapture = false, DisplayedEffect = false });
+            }
+            finally { ClearCache(); }
+        }
+
         private static bool IsAboveInZOrder(nint upper, nint lower)
         {
             int remaining = 2048;
@@ -655,6 +889,7 @@ namespace Action_Wheel.Overlay
         [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
         [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int command);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
+        [DllImport("user32.dll")] private static extern bool IsWindow(nint hwnd);
         [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
         [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
         [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);

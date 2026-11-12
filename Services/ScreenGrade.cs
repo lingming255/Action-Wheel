@@ -104,7 +104,7 @@ namespace Action_Wheel.Services
         {
             StopTransitionTimer();
             Grade.Restore();
-            _surface?.Dispose();
+            _surface?.ReturnToCache();
             _surface = null;
             _menuHwnd = 0;
             ApplyIntroSaturation(1);
@@ -124,6 +124,7 @@ namespace Action_Wheel.Services
             _intro = null;
             ApplyGlassSaturation(1);
             _applyGlassSaturation = null;
+            ScreenGradeSurface.ShutdownCache();
         }
 
         private static void OnTransitionTick(DispatcherQueueTimer sender, object args)
@@ -154,7 +155,7 @@ namespace Action_Wheel.Services
             ApplyGlassSaturation(saturation);
             if (saturation == 1)
             {
-                _surface?.Dispose();
+                _surface?.ReturnToCache();
                 _surface = null;
                 return true;
             }

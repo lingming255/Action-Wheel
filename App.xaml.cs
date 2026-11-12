@@ -43,6 +43,11 @@ namespace Action_Wheel
             // They never save settings or play audio. Only the explicit pixel probe displays
             // and samples a small synthetic test region; the ordinary smoke checks stay hidden.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--wheel-opening-smoke")
+            {
+                WheelOpeningSmoke.Run(command[2], Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] is "--wheel-glass-smoke" or "--wheel-glass-pixel-probe")
             {
                 WheelGlassSmoke.Run(command[2], command[1] == "--wheel-glass-pixel-probe", Exit);

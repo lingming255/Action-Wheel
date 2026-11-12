@@ -64,6 +64,7 @@ namespace Action_Wheel.Overlay
         private bool _disposed;
         private SolidColorBrush? _tintBrush;
         private Color _tintColor;
+        private Color _lastMaskColor = Colors.Transparent;
         private Vector2 _lastClientSize;
 
         // Kept in memory for the hidden probe; the application still writes no activity/error log.
@@ -276,7 +277,7 @@ namespace Action_Wheel.Overlay
             if (_host.XamlRoot?.Content is not UIElement root ||
                 !GetClientRect(_hwnd, out var client))
             {
-                _maskFill.Color = Colors.Transparent;
+                SetMaskColor(Colors.Transparent);
                 Diagnostics = Diagnostics with { Opacity = 0, MaskOpacity = 0, FailureReason = "Waiting for XamlRoot/client area." };
                 return;
             }
@@ -294,7 +295,7 @@ namespace Action_Wheel.Overlay
             double height = _host.ActualHeight > 0 ? _host.ActualHeight : _host.Height;
             if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
             {
-                _maskFill.Color = Colors.Transparent;
+                SetMaskColor(Colors.Transparent);
                 Diagnostics = Diagnostics with { Opacity = 0, MaskOpacity = 0, FailureReason = "Waiting for the glass sheet layout." };
                 return;
             }
@@ -323,17 +324,19 @@ namespace Action_Wheel.Overlay
             Point center = transform.TransformPoint(new Point(width / 2, height / 2));
             Point edgeX = transform.TransformPoint(new Point(width, height / 2));
             Point edgeY = transform.TransformPoint(new Point(width / 2, height));
-            _ellipse.Center = new Vector2((float)(center.X * dpiScale), (float)(center.Y * dpiScale));
-            _ellipse.Radius = new Vector2((float)(Distance(center, edgeX) * dpiScale),
+            var maskCenter = new Vector2((float)(center.X * dpiScale), (float)(center.Y * dpiScale));
+            var maskRadius = new Vector2((float)(Distance(center, edgeX) * dpiScale),
                 (float)(Distance(center, edgeY) * dpiScale));
+            if (Diagnostics.Center != maskCenter) _ellipse.Center = maskCenter;
+            if (Diagnostics.Radius != maskRadius) _ellipse.Radius = maskRadius;
             // Encode alpha in the shape itself: a VisualSurface may ignore transform/opacity on
             // its source root, whereas the rendered fill alpha is part of the captured content.
             // Material coverage is independent of the opening fade: the settled sheet mixes 60%
             // frosted desktop with the live desktop beneath, while dividers remain untouched.
             double ancestorOpacity = Math.Clamp(opacity, 0, 1);
             double maskOpacity = ancestorOpacity * _materialOpacity;
-            _maskFill.Color = Color.FromArgb((byte)Math.Round(maskOpacity * 255),
-                255, 255, 255);
+            var maskColor = Color.FromArgb((byte)Math.Round(maskOpacity * 255), 255, 255, 255);
+            SetMaskColor(maskColor);
             Diagnostics = new GlassMaskDiagnostics(clientSize, _ellipse.Center, _ellipse.Radius,
                 dpiScale, ancestorOpacity, _materialOpacity, maskOpacity,
                 _glassBrush.GetSourceParameter("desktop") == _desktopBrush &&
@@ -346,6 +349,13 @@ namespace Action_Wheel.Overlay
             double x = a.X - b.X;
             double y = a.Y - b.Y;
             return Math.Sqrt(x * x + y * y);
+        }
+
+        private void SetMaskColor(Color color)
+        {
+            if (_lastMaskColor == color) return;
+            _maskFill.Color = color;
+            _lastMaskColor = color;
         }
 
         private void OnHostUnloaded(object sender, RoutedEventArgs args) => Dispose();

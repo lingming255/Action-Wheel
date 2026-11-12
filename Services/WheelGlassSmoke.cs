@@ -22,6 +22,7 @@ namespace Action_Wheel.Services
                 object transition = await ScreenGrade.RunTransitionProbeAsync();
                 object surface = await ScreenGradeSurface.RunHiddenProbeAsync();
                 object intro = await RefreshReclaimIntro.RunHiddenProbeAsync(verifyOffscreenShow: true);
+                object introCache = await RefreshReclaimIntro.RunPreparedCacheProbeAsync();
                 object parallel = await RadialMenu.RunParallelIntroProbeAsync();
                 object? pixels = verifyPixels ? await ScreenGradePixelProbe.RunAsync() : null;
                 object? glassPixels = verifyPixels ? await ScreenGradePixelProbe.RunGlassSourceProbeAsync() : null;
@@ -32,7 +33,7 @@ namespace Action_Wheel.Services
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(new
                 {
                     Passed = passed, Glass = glass, GradeTransition = transition, GradeSurface = surface,
-                    Reclaim = intro, ParallelIntro = parallel,
+                    Reclaim = intro, ReclaimCache = introCache, ParallelIntro = parallel,
                     Pixels = pixels, GlassPixels = glassPixels, DisplayedSyntheticTest = verifyPixels, AudioPlayed = false,
                     SavedUserConfiguration = false,
                 }, new JsonSerializerOptions { WriteIndented = true }));

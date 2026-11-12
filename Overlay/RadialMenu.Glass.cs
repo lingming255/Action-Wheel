@@ -14,6 +14,8 @@ namespace Action_Wheel.Overlay
     public sealed partial class RadialMenu
     {
         private WheelGlassSurface? _glassSurface;
+        private Border? _glassSheet;
+        private bool _glassStartedHidden;
         private float _glassSaturation = 1;
         private Storyboard? _ringMotion;
         private bool _closing;
@@ -51,10 +53,7 @@ namespace Action_Wheel.Overlay
             Canvas.SetTop(sheet, centre - outer);
             Canvas.SetZIndex(sheet, -10);
             ButtonsCanvas.Children.Add(sheet);
-            if (_transparentBackdrop != null)
-                _glassSurface = WheelGlassSurface.Attach(sheet, _windowHandle, GlassIsDark,
-                    _transparentBackdrop.Compositor, _transparentBackdrop.SetBrush);
-            _glassSurface?.ApplySaturation(_glassSaturation);
+            _glassSheet = sheet;
 
             var edge = new SolidColorBrush(GlassIsDark
                 ? Color.FromArgb(64, 222, 239, 255) : Color.FromArgb(160, 255, 255, 255));
@@ -100,10 +99,24 @@ namespace Action_Wheel.Overlay
             BuildGlassMotionAccents(centre, outer);
         }
 
+        private void ConnectGlassMaterial()
+        {
+            if (_glassSheet != null && _transparentBackdrop != null)
+                _glassSurface = WheelGlassSurface.Attach(_glassSheet, _windowHandle, GlassIsDark,
+                    _transparentBackdrop.Compositor, _transparentBackdrop.SetBrush);
+            _glassSurface?.ApplySaturation(_glassSaturation);
+            _glassStartedHidden = _glassSurface?.Diagnostics.MaskOpacity == 0;
+        }
+
         private void BeginGlassOpening()
         {
             foreach (var button in AllButtons) button.Opacity = 1;
-            if (_appearance.Animation == RingAnimation.None) { SettleAfterOpening(); return; }
+            if (_appearance.Animation == RingAnimation.None)
+            {
+                MenuContainer.Opacity = 1;
+                SettleAfterOpening();
+                return;
+            }
             _ringMotion = RingOpenAnimation.BuildUnified(MenuContainer, _appearance.AnimationDurationMs,
                 kind: _appearance.Animation);
             _ringMotion.Completed += (_, _) => { if (!_closing) SettleAfterOpening(); };

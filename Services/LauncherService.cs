@@ -19,6 +19,7 @@ namespace Action_Wheel.Services
         private readonly DispatcherQueue _dispatcherQueue;
         private readonly ConfigWatcher _configWatcher;
         private readonly DispatcherQueueTimer _hookHealthTimer;
+        private DispatcherQueueTimer? _openingPreparationTimer;
         private RadialMenu? _currentMenu;
         private readonly HashSet<RadialMenu> _playingRefreshes = new();
         private long _menuRequestGeneration;
@@ -113,6 +114,9 @@ namespace Action_Wheel.Services
         public LauncherStatus Start()
         {
             _stopped = false;
+            // Build the bounded hidden native/particle resources before installing low-level
+            // hooks. Their cold allocations must never block a wheel's first visible frames.
+            PrepareOpeningResources();
             string error = string.Empty;
             bool mouse = TryStart(_mouseHook.Start, "mouse", ref error);
             bool keyboard = TryStart(_keyboardHook.Start, "keyboard", ref error);
@@ -169,14 +173,50 @@ namespace Action_Wheel.Services
             _mouseHook.Stop();
             _keyboardHook.Stop();
             _hookHealthTimer.Stop();
+            _openingPreparationTimer?.Stop();
             Status = LauncherStatus.NotStarted;
             StatusChanged?.Invoke(this, EventArgs.Empty);
             CloseCurrentMenu();
+            // Also restore if a failed/late window close never raises the expected Closed event.
+            _ = EndGrade();
             // Finished gestures are independent decorative windows. Only service shutdown,
             // their own timer or a rendering failure may end their remaining playback.
             foreach (var menu in new List<RadialMenu>(_playingRefreshes))
                 CloseMenu(menu);
             _playingRefreshes.Clear();
+            RefreshReclaimIntro.ClearCache();
+            ScreenGradeSurface.ShutdownCache();
+        }
+
+        private void PrepareOpeningResources()
+        {
+            if (_stopped || _currentMenu != null || _playingRefreshes.Count != 0) return;
+            ScreenGradeSurface.Warm();
+            if (MouseHook.TryGetCursorPosition(out var cursor))
+                RefreshReclaimIntro.WarmAt(cursor, _reclaimSettings);
+        }
+
+        private void ScheduleOpeningPreparation()
+        {
+            if (_stopped) return;
+            _openingPreparationTimer ??= _dispatcherQueue.CreateTimer();
+            _openingPreparationTimer.Stop();
+            _openingPreparationTimer.IsRepeating = false;
+            _openingPreparationTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _openingPreparationTimer.Tick -= OnOpeningPreparation;
+            _openingPreparationTimer.Tick += OnOpeningPreparation;
+            _openingPreparationTimer.Start();
+        }
+
+        private void OnOpeningPreparation(DispatcherQueueTimer sender, object args)
+        {
+            if (_stopped) return;
+            if (_currentMenu != null || _playingRefreshes.Count != 0)
+            {
+                ScheduleOpeningPreparation();
+                return;
+            }
+            PrepareOpeningResources();
         }
 
         private void CheckHookHealth(DispatcherQueueTimer sender, object args)
@@ -233,6 +273,7 @@ namespace Action_Wheel.Services
             _actions = Configuration.Actions;
             ReloadQuickInfo();
             ActiveProfileLabel = ActiveProfileSettings.Load();
+            ScheduleOpeningPreparation();
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -398,6 +439,7 @@ namespace Action_Wheel.Services
                         // cancel, Esc, a fired hold or an action can never leave the screen grey.
                         if (ReferenceEquals(_gradedMenu, menu))
                             EndGrade();
+                        ScheduleOpeningPreparation();
                     };
 
                     menu.ActionInvoked += OnActionInvoked;

@@ -24,6 +24,26 @@ through one compositor effect over their animated visual tree. This keeps their 
 exclusion and avoids writing every block's colour on each frame. Promotion for outward playback
 restores their colour and ignores late inward-grade updates.
 
+Opening resources are now bounded and reused: one native desktop-grade group across monitors
+and one idle reclaim bundle for the current monitor/settings. Startup prepares them before hook
+installation; completed gestures hide and return them, and idle preparation updates stale settings.
+Monitor bounds/DPI and the capture policy are checked before reuse. Reclaim playback leases have
+independent timers/completion tasks, so an old callback cannot close a new gesture using the bundle.
+Cancellation/stop/shutdown clear active ownership and release the idle resources on exit.
+
+The grey desktop is sampled independently every 33ms (about 30fps); saturation still updates on
+the original 16ms transition timer. A saturation tick no longer shows, reorders and resamples all
+monitors. Show occurs once per gesture and z-order only changes with its anchor. The glass starts
+with a transparent mask and is attached after foreground construction, so it cannot expose an
+opaque blurred disk while the icons are still being prepared. Stable mask values are not rewritten.
+
+`--wheel-opening-smoke <absolute-report-path>` reads current appearance/reclaim settings and
+measures cloaked component construction, native cache acquisition/return and dispatcher intervals.
+It verifies reuse of the same HWNDs, no allocation during acquisition and no repeated show/z-order
+calls while held. Cold preallocation is reported separately; it is moved before interaction, not
+eliminated. These synthetic checks do not establish real input-to-visible latency or screen-frame
+synchronization. The deployed visual result still requires user review.
+
 The current ring animation setting still controls duration and preset, interpreted as motion of
 the entire sheet. `None` stays immediate. Confirm/cancel tails last 65% of the opening duration,
 clamped to 70–160ms, and pass input through immediately. Actions dispatch after the tail using

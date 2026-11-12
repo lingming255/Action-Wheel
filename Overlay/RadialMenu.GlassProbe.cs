@@ -31,6 +31,8 @@ namespace Action_Wheel.Overlay
                 await Task.Delay(220);
                 RequireReleaseProbe(menu._glassSurface != null, "Live desktop glass was not installed: "
                     + WheelGlassSurface.LastAttachFailure);
+                RequireReleaseProbe(menu._glassStartedHidden,
+                    "The OS glass became visible before foreground preparation finished.");
                 menu._glassSurface!.RefreshDiagnostics();
                 RequireReleaseProbe(menu._glassSurface.BlurAmount == WheelGlassSurface.FrostedBlurAmount,
                     "The live glass brush lost its Gaussian blur property.");
@@ -96,6 +98,7 @@ namespace Action_Wheel.Overlay
                     GlassDisposedAtClose = true, AnimationNoneImmediate = true, HiddenWindow = true,
                     MaterialOpacity = mask.MaterialOpacity, GaussianBlurAmount = WheelGlassSurface.FrostedBlurAmount,
                     DividerLayerIndependent = true,
+                    GlassHiddenUntilForegroundPrepared = true,
                     MotionAccents = true, AnimatedSelection = true };
             }
             finally { if (!menu._closed) menu.CloseMenu(); }

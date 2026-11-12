@@ -20,16 +20,32 @@ namespace Action_Wheel.Overlay
         private static readonly List<ScreenGradeSurface> ActiveGroups = new();
         private static ushort _hostClass;
         private static int _sessionUsers;
+        private static ScreenGradeSurface? _idleGroup;
+        private static long _initializeCalls, _uninitializeCalls, _createHostCalls, _createMagnifierCalls;
+        private static long _setColorCalls, _setSourceCalls, _invalidateCalls, _showCalls, _hideCalls;
+        private static long _setWindowPosCalls, _setFilterCalls, _cacheRents, _cacheReturns, _cacheWarms;
         private readonly List<MonitorSurface> _surfaces = new();
-        private readonly nint _menuHwnd;
+        private nint _menuHwnd;
         private nint _decorationHwnd;
-        private readonly bool _canShow;
+        private readonly bool _canShow, _cacheEligible;
         private DispatcherQueueTimer? _timer;
-        private bool _disposed, _sessionOwned, _registered, _filtersDirty;
+        private bool _disposed, _sessionOwned, _registered, _filtersDirty, _presented;
 
         internal static string? LastFailure { get; private set; }
         internal IReadOnlyList<nint> WindowHandles { get; private set; } = Array.Empty<nint>();
         internal IReadOnlyList<RectInt32> Bounds { get; private set; } = Array.Empty<RectInt32>();
+
+        // UI-thread snapshots only. Counters stay in memory; diagnostics compare before/after deltas.
+        internal readonly record struct NativeCallDiagnostics(long Initialize, long Uninitialize,
+            long CreateHost, long CreateMagnifier, long SetColorEffect, long SetWindowSource,
+            long Invalidate, long ShowWindow, long HideWindow, long SetWindowPos, long SetFilterList,
+            long CacheRents, long CacheReturns, long CacheWarms, int SessionUsers, bool HasIdleGroup);
+
+        internal static NativeCallDiagnostics GetNativeCallDiagnostics()
+            => new(_initializeCalls, _uninitializeCalls, _createHostCalls, _createMagnifierCalls,
+                _setColorCalls, _setSourceCalls, _invalidateCalls, _showCalls, _hideCalls,
+                _setWindowPosCalls, _setFilterCalls, _cacheRents, _cacheReturns, _cacheWarms,
+                _sessionUsers, _idleGroup is { _disposed: false });
 
         // Capture-excluded inward particles cannot be sampled by a magnifier. Keep their
         // independently graded layer above this surface while the interactive wheel stays on top.
@@ -50,30 +66,124 @@ namespace Action_Wheel.Overlay
             {
                 if (menuHwnd == 0 || !IsWindow(menuHwnd))
                     throw new InvalidOperationException("Live grading requires a valid menu window.");
-                var bounds = new List<RectInt32>();
-                MonitorCallback callback = (nint monitor, nint dc, ref NativeRect rect, nint data) =>
+                var bounds = ReadMonitorBounds();
+                var idle = _idleGroup;
+                _idleGroup = null;
+                if (idle != null)
                 {
-                    if (rect.Right > rect.Left && rect.Bottom > rect.Top)
-                        bounds.Add(new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top));
-                    return true;
-                };
-                Check(EnumDisplayMonitors(0, 0, callback, 0) && bounds.Count > 0, "Read monitor bounds");
-                return new ScreenGradeSurface(bounds, menuHwnd, show: true, captureExcluded: true);
+                    if (!idle._disposed && idle.MatchesBounds(bounds))
+                    {
+                        idle._menuHwnd = menuHwnd;
+                        idle._decorationHwnd = 0;
+                        idle._filtersDirty = true;
+                        _cacheRents++;
+                        return idle;
+                    }
+                    idle.Dispose();
+                }
+                return new ScreenGradeSurface(bounds, menuHwnd, show: true, captureExcluded: true, cacheEligible: true);
             }
             catch (Exception exception) { LastFailure = Describe(exception); return null; }
+        }
+
+        /// <summary>
+        /// Builds at most one hidden production group on the menu dispatcher during idle time.
+        /// No source timer or grading window is shown until a later successful Apply.
+        /// </summary>
+        internal static bool Warm()
+        {
+            try
+            {
+                var bounds = ReadMonitorBounds();
+                if (_idleGroup is { _disposed: false } idle && idle.MatchesBounds(bounds)) return true;
+                ShutdownCache();
+                // An in-use group can be returned when the gesture ends; avoid a duplicate warm.
+                foreach (var group in ActiveGroups)
+                    if (group._cacheEligible && !group._disposed && group._menuHwnd != 0
+                        && group.MatchesBounds(bounds)) return true;
+                _idleGroup = new ScreenGradeSurface(bounds, 0, show: true, captureExcluded: true, cacheEligible: true);
+                _cacheWarms++;
+                return true;
+            }
+            catch (Exception exception) { LastFailure = Describe(exception); return false; }
+        }
+
+        /// <summary>Normal gesture cleanup. Failures and diagnostic groups must use real disposal.</summary>
+        internal void ReturnToCache()
+        {
+            if (_disposed || ReferenceEquals(_idleGroup, this)) return;
+            if (!_cacheEligible) { Dispose(); return; }
+            try
+            {
+                _timer?.Stop();
+                foreach (var surface in _surfaces) surface.Hide();
+                _presented = false;
+                _menuHwnd = 0;
+                _decorationHwnd = 0;
+                var retired = _idleGroup;
+                _idleGroup = null;
+                retired?.Dispose();
+                // Remove the retired menu/decoration HWNDs before either can be reused by Windows.
+                RefreshFilters();
+                _filtersDirty = false;
+                _idleGroup = this;
+                _cacheReturns++;
+            }
+            catch (Exception exception) { LastFailure = Describe(exception); Dispose(); }
+        }
+
+        /// <summary>Destroys the single idle group on the same dispatcher that created it.</summary>
+        internal static void ShutdownCache()
+        {
+            var idle = _idleGroup;
+            _idleGroup = null;
+            idle?.Dispose();
+        }
+
+        private static List<RectInt32> ReadMonitorBounds()
+        {
+            var bounds = new List<RectInt32>();
+            MonitorCallback callback = (nint monitor, nint dc, ref NativeRect rect, nint data) =>
+            {
+                if (rect.Right > rect.Left && rect.Bottom > rect.Top)
+                    bounds.Add(new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top));
+                return true;
+            };
+            Check(EnumDisplayMonitors(0, 0, callback, 0) && bounds.Count > 0, "Read monitor bounds");
+            return bounds;
+        }
+
+        private bool MatchesBounds(IReadOnlyList<RectInt32> bounds)
+        {
+            if (Bounds.Count != bounds.Count || _surfaces.Count != bounds.Count) return false;
+            for (int index = 0; index < bounds.Count; index++)
+            {
+                var existing = Bounds[index];
+                var candidate = bounds[index];
+                if (existing.X != candidate.X || existing.Y != candidate.Y
+                    || existing.Width != candidate.Width || existing.Height != candidate.Height
+                    || !IsWindow(_surfaces[index].Host) || !IsWindow(_surfaces[index].Child)) return false;
+            }
+            return true;
         }
 
         /// <summary>Only this synthetic ROI is used by diagnostics. Hidden until a successful Apply.</summary>
         internal static ScreenGradeSurface CreateForProbe(RectInt32 bounds, nint menuHwnd, bool show, bool captureExcluded)
             => new(new[] { bounds }, menuHwnd, show, captureExcluded);
 
-        private ScreenGradeSurface(IReadOnlyList<RectInt32> bounds, nint menuHwnd, bool show, bool captureExcluded)
+        private ScreenGradeSurface(IReadOnlyList<RectInt32> bounds, nint menuHwnd, bool show, bool captureExcluded,
+            bool cacheEligible = false)
         {
             _menuHwnd = menuHwnd;
             _canShow = show;
+            _cacheEligible = cacheEligible;
             try
             {
-                if (_sessionUsers == 0) Check(MagInitialize(), "Initialize magnifier controls");
+                if (_sessionUsers == 0)
+                {
+                    _initializeCalls++;
+                    Check(MagInitialize(), "Initialize magnifier controls");
+                }
                 _sessionUsers++;
                 _sessionOwned = true;
                 EnsureHostClass();
@@ -94,7 +204,8 @@ namespace Action_Wheel.Overlay
                 var queue = DispatcherQueue.GetForCurrentThread()
                     ?? throw new InvalidOperationException("Live grading requires the menu dispatcher.");
                 _timer = queue.CreateTimer();
-                _timer.Interval = TimeSpan.FromMilliseconds(16);
+                // Keep live desktop sampling separate from the 60 Hz saturation animation.
+                _timer.Interval = TimeSpan.FromMilliseconds(33);
                 _timer.IsRepeating = true;
                 _timer.Tick += OnTick;
             }
@@ -107,15 +218,19 @@ namespace Action_Wheel.Overlay
             try
             {
                 if (!float.IsFinite(saturation)) throw new ArgumentOutOfRangeException(nameof(saturation));
-                if (_filtersDirty) { RefreshFilters(); _filtersDirty = false; }
+                SynchronizeLayer();
                 var matrix = new ColorEffect { Values = ScreenGrade.BuildMatrix(Math.Clamp(saturation, 0, 1)) };
                 foreach (var surface in _surfaces) surface.SetColor(ref matrix);
-                RefreshSources();
-                if (_canShow)
+                if (!_presented)
                 {
-                    foreach (var surface in _surfaces) surface.ShowBelow(LayerAnchor);
+                    // Initial sampling must finish before showing any host. Subsequent saturation
+                    // updates touch only the colour matrix; the independent timer owns resampling.
+                    RefreshSources();
+                    if (_canShow)
+                        foreach (var surface in _surfaces) surface.ShowBelow(LayerAnchor);
+                    _presented = true;
                     // The endpoint remains live even after ScreenGrade's transition timer stops.
-                    _timer!.Start();
+                    if (_canShow) _timer!.Start();
                 }
                 return true;
             }
@@ -124,28 +239,42 @@ namespace Action_Wheel.Overlay
 
         private void OnTick(DispatcherQueueTimer sender, object args)
         {
-            if (_disposed || !ReferenceEquals(sender, _timer)) return;
-            try { RefreshSources(); }
+            if (_disposed || !_presented || !_canShow || !ReferenceEquals(sender, _timer)) return;
+            try { SynchronizeLayer(); RefreshSources(); }
             catch (Exception exception) { LastFailure = Describe(exception); Dispose(); }
         }
 
-        private void RefreshSources()
+        private void SynchronizeLayer()
         {
             if (_menuHwnd != 0 && !IsWindow(_menuHwnd))
                 throw new InvalidOperationException("The grading layer's menu no longer exists.");
             if (_decorationHwnd != 0 && !IsWindow(_decorationHwnd))
             {
                 _decorationHwnd = 0;
-                RefreshFilters();
+                _filtersDirty = true;
             }
-            foreach (var surface in _surfaces)
-            {
-                surface.RefreshSource();
-                if (_canShow) surface.OrderBelow(LayerAnchor);
-            }
+            if (_filtersDirty) { RefreshFilters(); _filtersDirty = false; }
+            if (_canShow && _presented)
+                foreach (var surface in _surfaces) surface.OrderBelow(LayerAnchor);
+        }
+
+        private void RefreshSources()
+        {
+            foreach (var surface in _surfaces) surface.RefreshSource();
         }
 
         private static void RefreshFilters()
+        {
+            var handles = BuildExcludedWindowHandles();
+            foreach (var group in ActiveGroups)
+                foreach (var surface in group._surfaces)
+                {
+                    _setFilterCalls++;
+                    Check(MagSetWindowFilterList(surface.Child, 0, handles.Length, handles), "Exclude grading layers and wheel from magnifier source");
+                }
+        }
+
+        private static nint[] BuildExcludedWindowHandles()
         {
             var excluded = new HashSet<nint>();
             foreach (var group in ActiveGroups)
@@ -156,15 +285,14 @@ namespace Action_Wheel.Overlay
             }
             var handles = new nint[excluded.Count];
             excluded.CopyTo(handles);
-            foreach (var group in ActiveGroups)
-                foreach (var surface in group._surfaces)
-                    Check(MagSetWindowFilterList(surface.Child, 0, handles.Length, handles), "Exclude grading layers and wheel from magnifier source");
+            return handles;
         }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            if (ReferenceEquals(_idleGroup, this)) _idleGroup = null;
             var timer = _timer; _timer = null;
             if (timer != null) { timer.Stop(); timer.Tick -= OnTick; }
             foreach (var surface in _surfaces) surface.Hide();
@@ -175,12 +303,18 @@ namespace Action_Wheel.Overlay
             // and remove retired HWNDs from every remaining control's exclusion list.
             try { if (ActiveGroups.Count > 0) RefreshFilters(); }
             catch (Exception exception) { LastFailure = Describe(exception); }
-            if (_sessionOwned) { _sessionOwned = false; if (--_sessionUsers == 0) MagUninitialize(); }
+            if (_sessionOwned)
+            {
+                _sessionOwned = false;
+                if (--_sessionUsers == 0) { _uninitializeCalls++; MagUninitialize(); }
+            }
         }
 
         private sealed class MonitorSurface : IDisposable
         {
             private readonly NativeRect _source;
+            private bool _shown, _hasOrder;
+            private nint _orderedAnchor;
             internal nint Host { get; private set; }
             internal nint Child { get; private set; }
 
@@ -192,10 +326,12 @@ namespace Action_Wheel.Overlay
                 {
                     // The app is PerMonitorV2: these are physical pixels, with no XAML/DIP scale.
                     const uint exStyle = 0x080800A8; // NOACTIVATE | LAYERED | TOOLWINDOW | TRANSPARENT | TOPMOST
+                    _createHostCalls++;
                     Host = CreateWindowEx(exStyle, HostClass, "Action Wheel Desktop Grade", 0x82000000,
                         bounds.X, bounds.Y, bounds.Width, bounds.Height, 0, 0, GetModuleHandle(null), 0);
                     Check(Host != 0, "Create native grading host");
                     Check(SetLayeredWindowAttributes(Host, 0, 255, 2), "Set grading host opacity");
+                    _createMagnifierCalls++;
                     Child = CreateWindowEx(0x20, "Magnifier", null, 0x50000000,
                         0, 0, bounds.Width, bounds.Height, Host, 0, GetModuleHandle(null), 0);
                     Check(Child != 0, "Create 1:1 magnifier control");
@@ -213,26 +349,49 @@ namespace Action_Wheel.Overlay
             }
 
             internal void SetColor(ref ColorEffect color)
-                => Check(MagSetColorEffect(Child, ref color), "Set Rec601 grading matrix");
+            {
+                _setColorCalls++;
+                Check(MagSetColorEffect(Child, ref color), "Set Rec601 grading matrix");
+            }
 
             internal void RefreshSource()
             {
                 // MagSetWindowSource takes RECT by value. Its unchanged 1:1 rectangle must still
                 // be refreshed independently, so underlying content keeps moving at saturation 0.
+                _setSourceCalls++;
                 Check(MagSetWindowSource(Child, _source), "Refresh live magnifier source");
+                _invalidateCalls++;
                 Check(InvalidateRect(Child, 0, false), "Invalidate live grading pixels");
             }
 
             internal void ShowBelow(nint menuHwnd)
             {
+                if (_shown) { OrderBelow(menuHwnd); return; }
                 OrderBelow(menuHwnd);
+                _showCalls++;
                 ShowWindow(Host, 4); // SW_SHOWNOACTIVATE; all sources/matrices/filters are ready.
+                _shown = true;
+                // Showing can change z-order. Reassert once, then retain it until the anchor changes.
+                _hasOrder = false;
                 OrderBelow(menuHwnd);
             }
 
             internal void OrderBelow(nint menuHwnd)
-                => Check(SetWindowPos(Host, menuHwnd != 0 ? menuHwnd : new nint(-1), 0, 0, 0, 0, 0x13), "Keep live grade below the wheel");
-            internal void Hide() { if (Host != 0) ShowWindow(Host, 0); }
+            {
+                nint anchor = menuHwnd != 0 ? menuHwnd : new nint(-1);
+                if (_hasOrder && _orderedAnchor == anchor) return;
+                _setWindowPosCalls++;
+                Check(SetWindowPos(Host, anchor, 0, 0, 0, 0, 0x13), "Keep live grade below the wheel");
+                _orderedAnchor = anchor;
+                _hasOrder = true;
+            }
+
+            internal void Hide()
+            {
+                if (Host != 0 && _shown) { _hideCalls++; ShowWindow(Host, 0); }
+                _shown = false;
+                _hasOrder = false;
+            }
             public void Dispose()
             {
                 Hide();
@@ -284,8 +443,11 @@ namespace Action_Wheel.Overlay
                 "Native grading bounds are not 1:1 physical pixels.");
             Require((GetWindowLong(hwnd, -20) & 0x080800A0) == 0x080800A0, "The native grading host is not click-through.");
             Require(GetWindowDisplayAffinity(hwnd, out uint affinity) && affinity == 0x11, "The grading host could contaminate capture.");
-            var excluded = new nint[2];
-            Require(MagGetWindowFilterList(child, out uint mode, excluded.Length, excluded) == 2 && mode == 0
+            // Production may already own a hidden idle group. Probes retain their own resources
+            // and still verify their host/child are excluded without assuming process ownership.
+            var expectedExcluded = BuildExcludedWindowHandles();
+            var excluded = new nint[expectedExcluded.Length];
+            Require(MagGetWindowFilterList(child, out uint mode, excluded.Length, excluded) == expectedExcluded.Length && mode == 0
                 && Array.IndexOf(excluded, hwnd) >= 0 && Array.IndexOf(excluded, child) >= 0,
                 "The magnifier source includes its own grading windows.");
             using (var peer = CreateForProbe(bounds, 0, show: false, captureExcluded: true))

@@ -232,6 +232,9 @@ namespace Action_Wheel.Overlay
             _backgroundSubclass = TransparentWindowProc;
 
             InitializeComponent();
+            // The OS backdrop can commit before the first XAML foreground frame. Keep the
+            // complete sheet hidden until icons, dividers and the opening animation are ready.
+            MenuContainer.Opacity = 0;
             InitializeWindow();
 
             _holdTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
@@ -338,6 +341,7 @@ namespace Action_Wheel.Overlay
             AlignMenuToAnchor();
             BuildWedges();
             ApplyActions();
+            ConnectGlassMaterial();
             BeginGlassOpening();
             WheelSounds.Play(WheelSound.Open);
         }
