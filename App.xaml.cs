@@ -42,6 +42,11 @@ namespace Action_Wheel
             // Explicit, hidden diagnostic: exercise the real WinUI Composition interop without
             // registering hooks, touching settings, capturing the desktop or showing a window.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--wheel-position-smoke")
+            {
+                WheelPositionSmoke.Run(command[2], Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--refresh-gpu-smoke")
             {
                 GpuRefreshSmoke.Run(command[2], Exit);

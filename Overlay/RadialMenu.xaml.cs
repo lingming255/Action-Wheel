@@ -89,6 +89,9 @@ namespace Action_Wheel.Overlay
         private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
 
         [DllImport("user32.dll")]
+        private static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
+
+        [DllImport("user32.dll")]
         private static extern int FillRect(IntPtr hDC, ref RECT rect, IntPtr brush);
 
         [DllImport("gdi32.dll")]
@@ -121,6 +124,7 @@ namespace Action_Wheel.Overlay
         }
         private const uint DWM_BB_ENABLE = 0x1;
         private const uint WM_ERASEBKGND = 0x0014;
+        private const uint WM_DPICHANGED = 0x02E0;
         private static readonly UIntPtr BackgroundSubclassId = new(1);
 
         [DllImport("user32.dll")]
@@ -210,6 +214,10 @@ namespace Action_Wheel.Overlay
 
         /// <summary>The window's position on screen, used to tell whether a click landed on the menu.</summary>
         private PointInt32 _screenOrigin;
+        private PointInt32? _menuAnchor;
+        private XamlRoot? _menuDpiRoot;
+        private bool _menuPlacementQueued;
+        private bool _updatingMenuPlacement;
 
         /// <summary>
         /// Raised when one of the buttons is clicked. The menu closes itself first, so the handler
@@ -271,6 +279,7 @@ namespace Action_Wheel.Overlay
         /// </remarks>
         public void CloseMenu()
         {
+            StopMenuPlacement();
             if (_windowHandle != IntPtr.Zero)
                 ShowWindow(_windowHandle, SW_HIDE);
 
@@ -280,6 +289,7 @@ namespace Action_Wheel.Overlay
         private void RadialMenu_Closed(object sender, WindowEventArgs args)
         {
             _closed = true;
+            StopMenuPlacement();
             _ringMotion?.Stop();
             StopGlassMotion();
             _glassSurface?.Dispose();
@@ -324,6 +334,8 @@ namespace Action_Wheel.Overlay
             // has to subtract a radius that is already the one the button will actually be drawn at.
             ApplySizes();
             UpdateButtonPositions(_appearance.OrbitRadius);
+            WatchMenuDpi();
+            AlignMenuToAnchor();
             BuildWedges();
             ApplyActions();
             BeginGlassOpening();
@@ -583,6 +595,11 @@ namespace Action_Wheel.Overlay
         private (double X, double Y, double Scale) GestureOffset(PointInt32 point)
         {
             double scale = RootGrid.XamlRoot?.RasterizationScale ?? _rasterizationScale;
+            // The XAML container is centred in the actual client area. A cached DIP size can
+            // disagree with that area during a per-monitor DPI transition.
+            if (TryGetScreenClientBounds(out var bounds))
+                return (point.X - bounds.left - (bounds.right - bounds.left) / 2.0,
+                    point.Y - bounds.top - (bounds.bottom - bounds.top) / 2.0, scale);
             return (point.X - _screenOrigin.X - MenuSize * scale / 2,
                 point.Y - _screenOrigin.Y - MenuSize * scale / 2, scale);
         }
@@ -1549,7 +1566,12 @@ namespace Action_Wheel.Overlay
             if (message == WM_ERASEBKGND && ClearNativeBackground(hwnd, wParam))
                 return new IntPtr(1);
 
-            return DefSubclassProc(hwnd, message, wParam, lParam);
+            var result = DefSubclassProc(hwnd, message, wParam, lParam);
+            // WinUI must consume the new DPI first. Its suggested size can supersede the
+            // previous physical bounds, so reconcile after this native message has returned.
+            if (message == WM_DPICHANGED)
+                QueueMenuPlacement();
+            return result;
         }
 
         private bool ClearNativeBackground(IntPtr hwnd, IntPtr hdc)
@@ -1712,6 +1734,7 @@ namespace Action_Wheel.Overlay
         internal void BeginRefreshFeedback(PointInt32 release)
         {
             if (_closed || _closing || IsRefreshPlaying) return;
+            StopMenuPlacement();
             IsRefreshPlaying = true;
             _ringMotion?.Stop();
             StopGlassMotion();
@@ -1848,6 +1871,7 @@ namespace Action_Wheel.Overlay
 
             PrepareRefreshPresentation(frame);
             _fullRefreshStarted = true;
+            StopMenuPlacement();
 
             var bounds = frame.Bounds;
             IsRefreshPlaying = true;
@@ -1994,78 +2018,127 @@ namespace Action_Wheel.Overlay
         }
 
         /// <summary>
-        /// Re-reads the DPI of whichever monitor <paramref name="point"/> is actually on, and
-        /// resizes the physical window if that turns out to differ from the scale
-        /// <see cref="InitializeWindow"/> cached when the HWND was first created.
+        /// Moves the still-hidden window onto the target monitor before calculating its size.
         /// </summary>
         /// <remarks>
-        /// The window is always constructed (and its size set from
-        /// <c>GetDpiForWindow</c>) before <see cref="ShowAtPosition"/> ever runs - see
-        /// <c>LauncherService.OpenMenuAt</c>, which builds the <c>RadialMenu</c> first and moves it
-        /// to the cursor second. On a single-monitor or same-DPI setup that first read is already
-        /// correct and this is a no-op. On a mixed-DPI multi-monitor setup it can belong to the
-        /// wrong monitor entirely: a new top-level window is placed by Windows before anyone has
-        /// told it where it is going, so opening the ring on a secondary display sized differently
-        /// from the primary one would otherwise leave the native HWND sized for the wrong scale
-        /// while XAML - which WinUI keeps in sync with whatever monitor the window is really on -
-        /// lays the ring out at the correct one, clipping the ring or leaving dead transparent space
-        /// around it.
+        /// Resizing for the destination while the HWND still belongs to its initial monitor makes
+        /// WinUI scale that size a second time during the move (630px becomes 756px for 125% to
+        /// 150%). Migrate using the existing size first. The monitor centre is only a hidden
+        /// staging position; all later corrections preserve the original pointer anchor.
         /// </remarks>
-        private void RefreshDpiForTarget(PointInt32 point)
+        private void MoveToTargetMonitor(PointInt32 point)
         {
-            var pt = new POINT(point.X, point.Y);
-            var hMonitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-            if (hMonitor == IntPtr.Zero
-                || GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, out uint dpiX, out _) != 0
-                || dpiX == 0)
+            var monitor = MonitorFromPoint(new POINT(point.X, point.Y), MONITOR_DEFAULTTONEAREST);
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return;
+            var size = _appWindow!.Size;
+            int x = info.rcMonitor.left + (info.rcMonitor.right - info.rcMonitor.left - size.Width) / 2;
+            int y = info.rcMonitor.top + (info.rcMonitor.bottom - info.rcMonitor.top - size.Height) / 2;
+            SetWindowPos(_windowHandle, IntPtr.Zero, x, y, 0, 0,
+                SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+        }
+
+        private void WatchMenuDpi()
+        {
+            if (_menuAnchor == null || RootGrid.XamlRoot is not XamlRoot root
+                || ReferenceEquals(root, _menuDpiRoot)) return;
+            if (_menuDpiRoot != null) _menuDpiRoot.Changed -= OnMenuDpiChanged;
+            _menuDpiRoot = root;
+            root.Changed += OnMenuDpiChanged;
+        }
+
+        private void OnMenuDpiChanged(XamlRoot sender, XamlRootChangedEventArgs args) => QueueMenuPlacement();
+
+        private void StopMenuPlacement()
+        {
+            _menuAnchor = null;
+            if (_menuDpiRoot != null) _menuDpiRoot.Changed -= OnMenuDpiChanged;
+            _menuDpiRoot = null;
+        }
+
+        private void QueueMenuPlacement()
+        {
+            if (_menuPlacementQueued || _updatingMenuPlacement || _menuAnchor == null
+                || _closed || _closing || IsRefreshPlaying) return;
+            _menuPlacementQueued = true;
+            if (!DispatcherQueue.TryEnqueue(() =>
             {
-                return;
+                _menuPlacementQueued = false;
+                AlignMenuToAnchor();
+            })) _menuPlacementQueued = false;
+        }
+
+        private void AlignMenuToAnchor()
+        {
+            if (_updatingMenuPlacement || _menuAnchor is not PointInt32 anchor
+                || _closed || _closing || IsRefreshPlaying || _windowHandle == IntPtr.Zero) return;
+            _updatingMenuPlacement = true;
+            try
+            {
+                // A ring spanning a seam may belong to the adjacent monitor. Follow the HWND's
+                // actual DPI rather than repeatedly forcing the cursor-monitor scale.
+                for (int pass = 0; pass < 3; pass++)
+                {
+                    uint dpi = GetDpiForWindow(_windowHandle);
+                    if (dpi != 0) _rasterizationScale = RingGeometry.ScaleFromDpi(dpi);
+                    int size = PhysicalMenuSize;
+                    int left = anchor.X - (int)Math.Round(size / 2.0);
+                    int top = anchor.Y - (int)Math.Round(size / 2.0);
+                    if (!TryGetScreenClientBounds(out var bounds)
+                        || bounds.left != left || bounds.top != top
+                        || bounds.right - bounds.left != size || bounds.bottom - bounds.top != size)
+                    {
+                        // Set position and size together, after WinUI has processed the DPI move.
+                        SetWindowPos(_windowHandle, HWND_TOPMOST, left, top, size, size, SWP_NOACTIVATE);
+                    }
+                    _screenOrigin = TryGetScreenClientBounds(out bounds)
+                        ? new PointInt32(bounds.left, bounds.top) : new PointInt32(left, top);
+                    if (GetDpiForWindow(_windowHandle) == dpi) break;
+                }
             }
+            finally { _updatingMenuPlacement = false; }
+        }
 
-            double scale = RingGeometry.ScaleFromDpi(dpiX);
-            if (scale == _rasterizationScale)
-                return;
-
-            _rasterizationScale = scale;
-            _appWindow?.Resize(new SizeInt32(PhysicalMenuSize, PhysicalMenuSize));
+        // Also called from the input hook thread: use only native geometry, never XAML/AppWindow.
+        private bool TryGetScreenClientBounds(out RECT bounds)
+        {
+            bounds = default;
+            var hwnd = _windowHandle;
+            var origin = new POINT(0, 0);
+            if (hwnd == IntPtr.Zero || !GetClientRect(hwnd, out var client)
+                || !ClientToScreen(hwnd, ref origin)) return false;
+            bounds = new RECT { left = origin.x, top = origin.y,
+                right = origin.x + client.right - client.left,
+                bottom = origin.y + client.bottom - client.top };
+            return true;
         }
 
         public void ShowAtPosition(PointInt32 position)
         {
-            if (_appWindow == null) return;
-
-            RefreshDpiForTarget(position);
-
-            // Place center button at cursor position.
-            // Center button is at (MenuSize/2, MenuSize/2) in window coordinates, so the window's
-            // top-left goes at cursor - half the window size. Every calculation here uses physical
-            // pixels because AppWindow.Move/Resize and the monitor's work area are both physical.
-            int size = PhysicalMenuSize;
-            // Keep the logical centre at the pointer. At screen edges the window is clipped;
-            // drawing and hit-testing therefore share the same centre instead of being clamped
-            // to a different one.
-            var target = new PointInt32(
-                position.X - (int)Math.Round(size / 2.0),
-                position.Y - (int)Math.Round(size / 2.0));
-            _screenOrigin = target;
+            if (_appWindow == null || _closed || _closing) return;
+            _menuAnchor = position;
+            // Only a new hidden window needs the staging move. Repositioning an already-shown
+            // wheel must never expose the monitor-centre staging position.
+            if (_menuDpiRoot == null) MoveToTargetMonitor(position);
+            AlignMenuToAnchor();
 
             // Position is set BEFORE Activate() so the menu does not flash somewhere else, but it
             // has to be set AGAIN afterwards: the first Activate() is when the window is actually
             // shown, and Win32 applies the default position (CW_USEDEFAULT/cascade) reserved for
             // the window, overwriting the earlier Move - which is why the menu used to pop up in a
             // corner of the screen instead of right under the cursor.
-            _appWindow.Move(target);
             Activate();
-            _appWindow.Move(target);
-            // Activation can change z-order; explicitly restore topmost after the window is shown.
-            SetWindowPos(_windowHandle, HWND_TOPMOST, target.X, target.Y, 0, 0,
-                SWP_NOSIZE | SWP_NOACTIVATE);
 
             // Same reason the Move is repeated: showing the window is when the frame is finally
             // realised, and WinUI puts WS_DLGFRAME/WS_EX_WINDOWEDGE back. Stripping them once in
             // the constructor leaves the outline visible on the menu the user actually sees.
             RemoveWindowFrame(_windowHandle);
-
+            AlignMenuToAnchor();
+            // Activation can change z-order even when the native bounds already match.
+            SetWindowPos(_windowHandle, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            WatchMenuDpi();
+            QueueMenuPlacement();
         }
 
         private void UpdateButtonPositions(double radius)
@@ -2154,9 +2227,8 @@ namespace Action_Wheel.Overlay
         /// True if the point (screen coordinates) falls within the menu's window bounds.
         /// LauncherService uses this to tell a click on the menu apart from a click elsewhere on screen.
         /// </summary>
-        public bool ContainsScreenPoint(PointInt32 point) => RingGeometry.Contains(
-            new ScreenPoint(_screenOrigin.X, _screenOrigin.Y),
-            PhysicalMenuSize,
-            new ScreenPoint(point.X, point.Y));
+        public bool ContainsScreenPoint(PointInt32 point) => TryGetScreenClientBounds(out var bounds)
+            && point.X >= bounds.left && point.X < bounds.right
+            && point.Y >= bounds.top && point.Y < bounds.bottom;
     }
 }
