@@ -61,9 +61,105 @@ foreach (var (trigger, firstDown, firstUp, secondDown, secondUp) in new[] {
     Require(!Send(hook, firstUp), $"{trigger}: normal first UP must pass");
     Require(opened == 1 && released == 1 && canceled == 0, $"{trigger}: normal complete chord must fire once");
 }
-Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { Passed = true, Checks = checks, LinkedActualMouseHook = true, InstalledHooks = false, UsedSendInput = false }));
+// Ownership ends independently from button/key release. A dismissal DOWN must never expose
+// its UP to the underlying application after the menu has returned the foreground.
+{
+    bool owns = true;
+    using var hook = new MouseHook { OwnsInput = () => owns, InterceptButtonDown = _ => owns };
+    Require(Send(hook, 0x20a) && Send(hook, 0x20e), "Both scroll axes stay in the interactive wheel");
+    Require(Send(hook, 0x201), "Outside left DOWN is consumed");
+    owns = false;
+    Require(Send(hook, 0x202), "Outside left UP stays consumed after dismissal");
+    Require(!Send(hook, 0x202), "Duplicate outside UP passes");
+    Require(!Send(hook, 0x20a), "Decoration restores normal scrolling");
+    Require(!Send(hook, 0x201) && !Send(hook, 0x202), "Normal left pair resumes after dismissal");
+    owns = true;
+    hook.InterceptButtonDown = _ => false;
+    Require(!Send(hook, 0x201) && !Send(hook, 0x202), "Inside clicks remain available to XAML buttons");
+}
+{
+    bool owns = true;
+    using var hook = new MouseHook { Trigger = MouseTrigger.HoldLeftPressRight, InterceptButtonDown = _ => owns };
+    int opened = 0;
+    hook.MiddleClick += (_, _) => opened++;
+    Require(Send(hook, 0x201), "A dismissal first DOWN is isolated");
+    owns = false;
+    Require(!Send(hook, 0x204) && opened == 0, "An isolated dismissal DOWN cannot seed a new chord");
+    Send(hook, 0x205);
+    Require(Send(hook, 0x202), "The isolated dismissal UP remains consumed after another button pair");
+}
+foreach (var (trigger, firstDown, firstUp, secondDown, secondUp) in new[] {
+    (MouseTrigger.HoldLeftPressRight, 0x201, 0x202, 0x204, 0x205),
+    (MouseTrigger.HoldRightPressLeft, 0x204, 0x205, 0x201, 0x202) })
+foreach (bool cancel in new[] { false, true })
+{
+    using var hook = new MouseHook { Trigger = trigger, RedirectChordFirstButtonUp = true };
+    int delivered = 0;
+    hook.ButtonTargetAt = _ => (nint)42;
+    hook.SendButtonRelease = (target, message, _) =>
+    {
+        Require(target == 42 && message == firstUp, "Only the original first button is returned to its original HWND");
+        delivered++;
+        return true;
+    };
+    Require(!Send(hook, firstDown) && Send(hook, secondDown), "Chord preserves first DOWN and consumes trigger DOWN");
+    Require(Send(hook, cancel ? firstUp : secondUp), "First physical release is consumed or redirected");
+    Require(Send(hook, cancel ? secondUp : firstUp), "Second physical release balances its destination");
+    Require(delivered == 1, "Original target receives exactly one matching UP");
+    Require(!Send(hook, firstUp) && delivered == 1, "Duplicate UP is not redirected");
+}
+{
+    using var hook = new MouseHook { Trigger = MouseTrigger.HoldLeftPressRight, RedirectChordFirstButtonUp = true };
+    hook.ButtonTargetAt = _ => (nint)42;
+    hook.SendButtonRelease = (_, _, _) => false;
+    Send(hook, 0x201); Send(hook, 0x204); Send(hook, 0x205);
+    Require(!Send(hook, 0x202), "Failed targeted delivery falls back to the physical first UP");
+}
+
+var keyDispatch = typeof(KeyboardHook).GetMethod("Dispatch", BindingFlags.Instance | BindingFlags.NonPublic)!;
+bool SendKey(KeyboardHook hook, int message, uint key, nint marker = default)
+{
+    var data = new TestKeyData { Key = key, ExtraInfo = marker };
+    nint memory = Marshal.AllocHGlobal(Marshal.SizeOf<TestKeyData>());
+    try { Marshal.StructureToPtr(data, memory, false); return (bool)keyDispatch.Invoke(hook, new object[] { 0, (nint)message, memory })!; }
+    finally { Marshal.FreeHGlobal(memory); }
+}
+{
+    bool owns = true;
+    int callbacks = 0;
+    using var hook = new KeyboardHook { IsKeyDown = _ => false };
+    hook.MenuKeyPressed = _ => { callbacks++; return owns; };
+    Require(SendKey(hook, 0x100, 0x41), "Menu key DOWN is consumed");
+    owns = false;
+    Require(SendKey(hook, 0x100, 0x41) && callbacks == 1, "Held key repeats never trigger a second command or leak");
+    Require(SendKey(hook, 0x101, 0x41), "Menu key UP stays consumed after dismissal");
+    Require(!SendKey(hook, 0x101, 0x41), "Duplicate key UP passes");
+    Require(!SendKey(hook, 0x100, 0x42) && !SendKey(hook, 0x101, 0x42), "Normal typing resumes after ownership ends");
+    owns = true;
+    Require(SendKey(hook, 0x104, 0x5b) && SendKey(hook, 0x105, 0x5b), "System-key pair is isolated too");
+    Require(!SendKey(hook, 0x101, 0x11), "Modifier DOWN predating the wheel has an unconsumed UP");
+    Require(!SendKey(hook, 0x100, 0x56, InputInjection.Marker), "Own injected shortcut bypasses isolation");
+}
+{
+    bool open = true;
+    using var hook = new KeyboardHook { IsKeyDown = _ => false };
+    hook.EscapePressed = () => { bool wasOpen = open; open = false; return wasOpen; };
+    Require(SendKey(hook, 0x100, 0x1b), "Esc DOWN dismisses the menu");
+    Require(SendKey(hook, 0x100, 0x1b) && SendKey(hook, 0x101, 0x1b), "Esc repeat and UP cannot reach the original app");
+    Require(!SendKey(hook, 0x100, 0x1b), "Esc works normally after its paired release");
+}
+{
+    int opened = 0, released = 0;
+    using var hook = new KeyboardHook { IsKeyDown = _ => true };
+    hook.EmergencyTriggerPressed = () => { opened++; return true; };
+    hook.EmergencyTriggerReleased = () => { released++; return true; };
+    Require(SendKey(hook, 0x100, 0x20) && SendKey(hook, 0x100, 0x20), "QuickInfo Space and its repeats stay consumed");
+    Require(SendKey(hook, 0x101, 0x20) && opened == 1 && released == 1, "QuickInfo still completes once on Space UP");
+}
+Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { Passed = true, Checks = checks, LinkedActualMouseHook = true, LinkedActualKeyboardHook = true, InstalledHooks = false, UsedSendInput = false }));
 
 [StructLayout(LayoutKind.Sequential)] struct TestMouseData { public int X, Y; public uint MouseData, Flags, Time; public nuint ExtraInfo; }
+[StructLayout(LayoutKind.Sequential)] struct TestKeyData { public uint Key, Scan, Flags, Time; public nint ExtraInfo; }
 namespace Windows.Graphics { public readonly record struct PointInt32(int X, int Y); }
 namespace Action_Wheel.Services { public enum MouseTrigger { MiddleButton, HoldRightPressLeft, HoldLeftPressRight, MouseButton4, MouseButton5 } }
 

@@ -14,6 +14,8 @@ namespace Action_Wheel
     {
         private MainWindow? _window;
         private SettingsWindow? _settingsWindow;
+        private QuickAddWindow? _quickAddWindow;
+        private NoteBoardWindow? _noteBoardWindow;
         private LauncherService? _launcherService;
         private TrayIcon? _trayIcon;
         private bool _exiting;
@@ -39,10 +41,30 @@ namespace Action_Wheel
         /// <param name="args">Details about the launch request and process.</param>
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
-            // Explicit hidden diagnostics run before single-instance registration and hooks.
-            // They never save settings or play audio. Only the explicit pixel probe displays
-            // and samples a small synthetic test region; the ordinary smoke checks stay hidden.
+            // Explicit diagnostics run before single-instance registration and hooks. UI previews
+            // save only isolated copies; the input/pixel probes briefly show disposable windows.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--input-smoke-report")
+            {
+                WheelInputSmoke.Run(command[2], Exit);
+                return;
+            }
+            if (command.Length == 2 && command[1] == "--quick-add-preview")
+            {
+                // Explicit UI verification uses an isolated config and installs no global hooks.
+                _quickAddWindow = new QuickAddWindow(preview: true);
+                _quickAddWindow.Closed += (s, e) => Exit();
+                ActivateToolWindow(_quickAddWindow);
+                return;
+            }
+            if (command.Length == 3 && command[1] == "--note-board-preview")
+            {
+                if (!System.IO.Path.IsPathFullyQualified(command[2])) { Exit(); return; }
+                _noteBoardWindow = new NoteBoardWindow(command[2]);
+                _noteBoardWindow.Closed += (s, e) => Exit();
+                ActivateToolWindow(_noteBoardWindow);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--wheel-opening-smoke")
             {
                 WheelOpeningSmoke.Run(command[2], Exit);
@@ -94,6 +116,8 @@ namespace Action_Wheel
             {
                 _launcherService = new LauncherService();
                 _launcherService.SettingsRequested += (s, e) => ShowSettings();
+                _launcherService.QuickAddRequested += OnQuickAddRequested;
+                _launcherService.NoteBoardRequested += OnNoteBoardRequested;
                 _launcherService.Start();
             }
             catch (Exception)
@@ -110,6 +134,8 @@ namespace Action_Wheel
             viewModel.SettingsRequested += (s, e) => ShowSettings();
 
             _window = new MainWindow(viewModel);
+            ActionDispatcher.QuickAddRequested += OnQuickAddRequested;
+            ActionDispatcher.NoteBoardRequested += OnNoteBoardRequested;
             _window.Activate();
 
             SetUpTrayIcon();
@@ -162,6 +188,8 @@ namespace Action_Wheel
             _trayIcon = new TrayIcon();
             _trayIcon.ShowRequested += (s, e) => ShowMainWindow();
             _trayIcon.SettingsRequested += (s, e) => ShowSettings();
+            _trayIcon.QuickAddRequested += (s, e) => ShowQuickAdd();
+            _trayIcon.NoteBoardRequested += (s, e) => ShowNoteBoard();
             _trayIcon.ReloadRequested += (s, e) => _launcherService?.ReloadActions();
             _trayIcon.StartupChanged += (s, e) => _window?.ViewModel.RefreshStartup();
             _trayIcon.ExitRequested += (s, e) => ExitApp();
@@ -210,6 +238,13 @@ namespace Action_Wheel
         /// </summary>
         private void ShowSettings()
         {
+            // Only one action editor may exist: its in-memory snapshot would otherwise replace
+            // changes just saved by the quick adder.
+            if (_quickAddWindow != null)
+            {
+                try { ActivateToolWindow(_quickAddWindow); return; }
+                catch (Exception) { _quickAddWindow = null; }
+            }
             // Reusing the existing window can throw if it has already been torn down - the Closed
             // event is not guaranteed to have cleared the field by the time this runs. Falling back
             // to a fresh window is the difference between "Settings stops working after you close
@@ -258,12 +293,113 @@ namespace Action_Wheel
             }
         }
 
+        private void OnQuickAddRequested(object? sender, IntPtr targetWindow) =>
+            _window?.DispatcherQueue.TryEnqueue(() => ShowQuickAdd(targetWindow));
+
+        private void OnNoteBoardRequested(object? sender, EventArgs e) =>
+            _window?.DispatcherQueue.TryEnqueue(ShowNoteBoard);
+
+        private async void ShowQuickAdd(IntPtr targetWindow = default)
+        {
+            try
+            {
+                if (_quickAddWindow != null)
+                {
+                    try { ActivateToolWindow(_quickAddWindow); return; }
+                    catch (Exception) { _quickAddWindow = null; }
+                }
+                if (_settingsWindow != null)
+                {
+                    if (_settingsWindow.ViewModel.HasUnsavedChanges)
+                    {
+                        _settingsWindow.Activate();
+                        var root = (_settingsWindow.Content as FrameworkElement)?.XamlRoot;
+                        if (root != null)
+                        {
+                            await new Microsoft.UI.Xaml.Controls.ContentDialog
+                            {
+                                XamlRoot = root,
+                                Title = "请先保存设置中的修改",
+                                Content = "保存或撤销当前修改后，再打开快捷添加，避免覆盖你正在编辑的内容。",
+                                CloseButtonText = "返回设置",
+                            }.ShowAsync();
+                        }
+                        return;
+                    }
+                    _settingsWindow.ForceClose();
+                    _settingsWindow = null;
+                }
+                var quickAdd = new QuickAddWindow(targetWindow);
+                _quickAddWindow = quickAdd;
+                quickAdd.ActionsSaved += (s, e) =>
+                {
+                    _launcherService?.SuppressConfigWatcher();
+                    _launcherService?.ReloadActions();
+                };
+                quickAdd.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_quickAddWindow, quickAdd)) _quickAddWindow = null;
+                };
+                ActivateToolWindow(quickAdd);
+            }
+            catch (Exception error)
+            {
+                ReportFeatureError("无法打开快捷添加", error);
+            }
+        }
+
+        private void ShowNoteBoard()
+        {
+            try
+            {
+                if (_noteBoardWindow == null)
+                {
+                    var board = new NoteBoardWindow();
+                    _noteBoardWindow = board;
+                    board.Closed += (s, e) =>
+                    {
+                        if (ReferenceEquals(_noteBoardWindow, board)) _noteBoardWindow = null;
+                    };
+                }
+                ActivateToolWindow(_noteBoardWindow);
+                _noteBoardWindow.FocusEditor();
+            }
+            catch (Exception error)
+            {
+                ReportFeatureError("无法打开笔记板", error);
+            }
+        }
+
+        private static void ActivateToolWindow(Window window)
+        {
+            window.Activate();
+            window.AppWindow.Show();
+            WindowInputFocus.TryActivate(WinRT.Interop.WindowNative.GetWindowHandle(window));
+        }
+
+        private void ReportFeatureError(string title, Exception error)
+        {
+            if (_window == null) return;
+            _window.ViewModel.ActionError = $"{title}：{error.Message}";
+            ShowMainWindow();
+        }
+
         private void ExitApp()
         {
             if (_exiting)
                 return;
 
+            if (_noteBoardWindow?.TrySave() == false)
+            {
+                ShowNoteBoard();
+                return;
+            }
+
             _exiting = true;
+            ActionDispatcher.QuickAddRequested -= OnQuickAddRequested;
+            ActionDispatcher.NoteBoardRequested -= OnNoteBoardRequested;
+            _quickAddWindow?.Close();
+            _noteBoardWindow?.Close();
             RefreshRenderWarmup.Cancel();
             // Close the idle device cache before asynchronous capture disposal can return to it.
             GpuRefreshDevice.ShutdownPool();

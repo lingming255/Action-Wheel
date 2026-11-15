@@ -145,6 +145,9 @@ namespace Action_Wheel.Services
         /// <summary>Raised when the built-in Action Settings function is selected.</summary>
         public static event EventHandler? SettingsRequested;
 
+        public static event EventHandler<IntPtr>? QuickAddRequested;
+        public static event EventHandler? NoteBoardRequested;
+
         /// <summary>Raised when the active configuration should be read again.</summary>
         public static event EventHandler? ReloadRequested;
 
@@ -431,6 +434,14 @@ namespace Action_Wheel.Services
 
                 case WindowsFunctions.ActionSettings:
                     SettingsRequested?.Invoke(null, EventArgs.Empty);
+                    break;
+
+                case WindowsFunctions.QuickAdd:
+                    QuickAddRequested?.Invoke(null, targetWindow);
+                    break;
+
+                case WindowsFunctions.NoteBoard:
+                    NoteBoardRequested?.Invoke(null, EventArgs.Empty);
                     break;
 
                 case WindowsFunctions.ActionReload:

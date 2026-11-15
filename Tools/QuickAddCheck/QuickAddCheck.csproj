@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\ActionWheel.Core\ActionWheel.Core.csproj" />
+    <Compile Include="..\..\GlobalUsings.cs" Link="GlobalUsings.cs" />
+    <Compile Include="..\..\Services\QuickAddObsidian.cs" Link="QuickAddObsidian.cs" />
+    <Compile Include="..\..\Services\QuickAddSession.cs" Link="QuickAddSession.cs" />
+    <Compile Include="..\..\Services\ActiveProfileSettings.cs" Link="ActiveProfileSettings.cs" />
+    <Compile Include="..\..\Services\ProfileLibrary.cs" Link="ProfileLibrary.cs" />
+  </ItemGroup>
+</Project>

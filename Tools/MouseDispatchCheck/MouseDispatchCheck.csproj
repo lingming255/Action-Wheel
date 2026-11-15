@@ -8,6 +8,7 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="../../Services/MouseHook.cs" Link="MouseHook.cs" />
+        <Compile Include="../../Services/KeyboardHook.cs" Link="KeyboardHook.cs" />
         <Compile Include="../../Services/InputInjection.cs" Link="InputInjection.cs" />
         <Compile Include="../../ActionWheel.Core/ChordGate.cs" Link="ChordGate.cs" />
         <Compile Include="../../GlobalUsings.cs" Link="GlobalUsings.cs" />

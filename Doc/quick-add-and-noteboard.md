@@ -1,0 +1,31 @@
+# Quick Add and Note Board
+
+Open the main wheel with the existing gesture, then press **A** for Quick Add or **N** for the Note Board. The centre of the wheel displays these keys. Quick Info keeps its existing gesture. Both tools are also available from the tray menu and as built-in Function actions.
+
+## Quick Add
+
+- **Web page:** paste or type an HTTP/HTTPS address. An explicit supported link already in the clipboard is filled in automatically without changing the clipboard. Bare domains may be typed manually. Standard `obsidian://open` links are also supported.
+- **Obsidian note:** choose an automatically discovered vault, search by note name or relative path, and select the note. This searches file names only and generates the Obsidian URI directly; opening Obsidian and copying a URI is unnecessary.
+- **Note Board:** bind the built-in board to a wheel button.
+
+Choose a main button, an existing group with room, or a specific group child. The destination has no default selection. Replacing an occupied button, a group, or a button with a hold action requires explicit confirmation. The normal configuration still has exactly nine main entries.
+
+Saving updates the active JSON and its existing saved profile. A changed configuration or profile invalidates the session instead of overwriting the newer version. Individual replacements are atomic, and ordinary failures roll back the profile when safe. This does not provide a transaction journal across the two files for a power failure.
+
+## Note Board
+
+The board is a single plain-text scratch pad. Input is saved after 500 ms of inactivity and before closing. **Save to…** chooses a TXT or Markdown working file; subsequent automatic saves and future launches use that location. The previous file remains available. The default file is `%LOCALAPPDATA%\ActionWheel\noteboard.txt`; the chosen location is stored in `noteboard-location.json` beside it.
+
+A failed read disables editing instead of replacing the file with an empty draft. A failed save keeps the window and text. External changes are detected before normal saves. A recovery action saves a separate copy before reloading. Escape closes the board after saving, while an Escape already used by the text editor/IME is left to that editor.
+
+## Input ownership
+
+The interactive wheel acquires the foreground. Ordinary keys, wheel scrolling, and an outside dismissal click do not operate the application underneath. Consumed key/click releases remain consumed after the wheel closes. The chord's first mouse-down may already have reached the original application before the chord is recognised; its matching release is returned to that original child window.
+
+Closing or cancelling restores the original foreground only while the wheel still owns it. A user-initiated intervening focus change is preserved. Actions that send shortcuts verify the original window before dispatch. The released refresh animation remains a non-activating, click-through decoration.
+
+## Verification
+
+`Tools/QuickAddCheck`, `Tools/NoteBoardCheck`, `Tools/MouseDispatchCheck`, `Tools/ChordGateCheck`, and `Tools/RingGestureTests` exercise persistence, replacement, input pairing and geometry. Run `--input-smoke-report <absolute-json-path>` for a brief native-window focus check using disposable windows without global hooks or simulated input.
+
+`--quick-add-preview` opens the real editor against temporary config copies. `--note-board-preview <absolute-note-path>` opens an isolated board without changing the remembered working location.

@@ -66,6 +66,8 @@ namespace Action_Wheel.Services
 
         /// <summary>Raised on the UI thread when a menu button requests Action Settings.</summary>
         public event EventHandler? SettingsRequested;
+        public event EventHandler<IntPtr>? QuickAddRequested;
+        public event EventHandler? NoteBoardRequested;
 
         public LauncherService()
         {
@@ -76,6 +78,9 @@ namespace Action_Wheel.Services
             ActiveProfileLabel = ActiveProfileSettings.Load();
 
             _mouseHook = new MouseHook();
+            _mouseHook.RedirectChordFirstButtonUp = true;
+            _mouseHook.OwnsInput = OwnsWheelInput;
+            _mouseHook.InterceptButtonDown = InterceptOutsideClick;
             // Before the cover handoff finishes it still owns the grading transition.
             // A second trigger passes through during that short interval instead of
             // replacing the window and cancelling its animation.
@@ -90,6 +95,7 @@ namespace Action_Wheel.Services
             _keyboardHook = new KeyboardHook { EscapePressed = OnEscapePressed };
             _keyboardHook.EmergencyTriggerPressed = OnEmergencyTrigger;
             _keyboardHook.EmergencyTriggerReleased = OnEmergencyTriggerReleased;
+            _keyboardHook.MenuKeyPressed = OnMenuKeyPressed;
 
             _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
             _hookHealthTimer = _dispatcherQueue.CreateTimer();
@@ -403,7 +409,8 @@ namespace Action_Wheel.Services
         {
             if (_stopped) return;
             long requestGeneration = ++_menuRequestGeneration;
-            var targetWindow = ActionDispatcher.CaptureTargetWindow();
+            var targetWindow = _currentMenu?.OwnsInput == true
+                ? _currentMenu.ActionTargetWindow : ActionDispatcher.CaptureTargetWindow();
 
             // Closing and opening both have to happen in the same UI-thread turn. Closing the old
             // menu right here (on the hook's callback) would touch the window from off the UI thread.
@@ -423,7 +430,11 @@ namespace Action_Wheel.Services
                         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
                     }
 
-                    var menu = new RadialMenu(actions, _appearance) { ActionTargetWindow = targetWindow };
+                    var menu = new RadialMenu(actions, _appearance)
+                    {
+                        ActionTargetWindow = targetWindow,
+                        IsQuickInfo = quickInfo,
+                    };
                     _currentMenu = menu;
 
                     // Only clear the reference if it still points at this exact menu. The old menu's
@@ -542,10 +553,8 @@ namespace Action_Wheel.Services
         }
 
         /// <summary>
-        /// Dismisses the menu when the user clicks anywhere outside of it. The overlay is
-        /// WS_EX_NOACTIVATE and never gets focus, so it receives no deactivation event of its own -
-        /// without this, a click past the window edge would leave the menu hanging on screen until
-        /// the next middle click.
+        /// Dismisses the menu on a click outside its HWND. The mouse hook consumes that complete
+        /// click pair, so returning foreground focus does not also activate the application below.
         /// </summary>
         private void OnAnyButtonDown(object? sender, PointInt32 position)
         {
@@ -563,6 +572,38 @@ namespace Action_Wheel.Services
                 if (ReferenceEquals(_currentMenu, menu) && !menu.IsRefreshPlaying)
                     CloseCurrentMenu();
             });
+        }
+
+        private bool OwnsWheelInput() => _currentMenu?.OwnsInput
+            ?? (_gestureActive || _keyboardGestureActive);
+
+        private bool InterceptOutsideClick(PointInt32 position)
+        {
+            var menu = _currentMenu;
+            if (menu?.OwnsInput != true || menu.ContainsScreenPoint(position)) return false;
+            OnAnyButtonDown(this, position);
+            return true;
+        }
+
+        private bool OnMenuKeyPressed(uint key)
+        {
+            if (!OwnsWheelInput()) return false;
+            var menu = _currentMenu;
+            if (menu?.OwnsInput == true && !menu.IsQuickInfo && key is 0x41 or 0x4E)
+            {
+                _gestureActive = _keyboardGestureActive = false;
+                _mouseHook.TrackMovement = false;
+                _dispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!ReferenceEquals(_currentMenu, menu) || !menu.OwnsInput) return;
+                    CloseCurrentMenu();
+                    if (key == 0x41) QuickAddRequested?.Invoke(this, menu.ActionTargetWindow);
+                    else NoteBoardRequested?.Invoke(this, EventArgs.Empty);
+                });
+            }
+            // The hook pairs every consumed DOWN with its UP, including when A/N/Esc closes
+            // the menu before release. Ordinary typing and shell shortcuts stay in the wheel.
+            return true;
         }
 
         /// <summary>
@@ -588,6 +629,8 @@ namespace Action_Wheel.Services
         private async void OnActionInvoked(object? sender, ActionItem action)
         {
             if (_stopped) return;
+            _gestureActive = _keyboardGestureActive = false;
+            _mouseHook.TrackMovement = false;
             var targetWindow = (sender as RadialMenu)?.ActionTargetWindow ?? IntPtr.Zero;
             if (action.Kind == ActionKind.Function && action.Value == QuickInfoCatalog.NextPage)
             {
@@ -604,11 +647,23 @@ namespace Action_Wheel.Services
             // alone is not enough: teardown can continue in the compositor after the UI queue is
             // empty, causing occasional shortcuts to land while the overlay is disappearing.
             await Task.Delay(40).ConfigureAwait(false);
+            if (NeedsOriginalForeground(action)
+                && !WindowInputFocus.TryActivate(targetWindow))
+            {
+                _dispatcherQueue.TryEnqueue(() => ActionFailed?.Invoke(this,
+                    "The original window is no longer available; the shortcut was not sent."));
+                return;
+            }
             if (action.Kind == ActionKind.CopyText)
                 _dispatcherQueue.TryEnqueue(() => ActionDispatcher.Execute(action));
             else
                 ActionDispatcher.Execute(action, targetWindow);
         }
+
+        private static bool NeedsOriginalForeground(ActionItem action) => action.Kind == ActionKind.Keys
+            || (action.Kind == ActionKind.Function && action.Value is WindowsFunctions.TaskView
+                or WindowsFunctions.ShowDesktop or WindowsFunctions.SnapLeft or WindowsFunctions.SnapRight
+                or WindowsFunctions.RunDialog or WindowsFunctions.ClipboardHistory or WindowsFunctions.MediaPlayPause);
 
         /// <summary>
         /// Ring size and opening animation, re-read whenever the trigger settings are.

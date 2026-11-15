@@ -282,6 +282,7 @@ namespace Action_Wheel.Overlay
         /// </remarks>
         public void CloseMenu()
         {
+            ReturnInputFocus();
             StopMenuPlacement();
             if (_windowHandle != IntPtr.Zero)
                 ShowWindow(_windowHandle, SW_HIDE);
@@ -734,6 +735,7 @@ namespace Action_Wheel.Overlay
         {
             CenterInfo.Visibility = Visibility.Collapsed;
             CenterBtn.Opacity = 1;
+            ShowIdleInputHint();
         }
 
         private static string Truncate(string value, int max) =>
@@ -1439,7 +1441,8 @@ namespace Action_Wheel.Overlay
                 //
                 // Measured, comparing the resulting window styles rather than guessing: dropping
                 // both blocks takes this method from 46 ms to 1.5 ms and leaves GWL_EXSTYLE
-                // byte-identical (0x08000088 = TOOLWINDOW|NOACTIVATE|TOPMOST), with GWL_STYLE
+                // otherwise identical; interactive activation is now established explicitly,
+                // with GWL_STYLE
                 // differing only in WS_MINIMIZEBOX|WS_MAXIMIZEBOX - two bits that cannot draw
                 // anything without WS_CAPTION, which is cleared.
                 _appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
@@ -1740,6 +1743,7 @@ namespace Action_Wheel.Overlay
             if (_closed || _closing || IsRefreshPlaying) return;
             StopMenuPlacement();
             IsRefreshPlaying = true;
+            ReturnInputFocus();
             _ringMotion?.Stop();
             StopGlassMotion();
             _glassSurface?.Dispose();
@@ -2132,6 +2136,7 @@ namespace Action_Wheel.Overlay
             // the window, overwriting the earlier Move - which is why the menu used to pop up in a
             // corner of the screen instead of right under the cursor.
             Activate();
+            AcquireInputFocus();
 
             // Same reason the Move is repeated: showing the window is when the frame is finally
             // realised, and WinUI puts WS_DLGFRAME/WS_EX_WINDOWEDGE back. Stripping them once in

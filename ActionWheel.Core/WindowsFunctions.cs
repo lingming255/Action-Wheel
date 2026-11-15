@@ -40,6 +40,8 @@ namespace Action_Wheel.Core
             WindowsFunctions.Sleep or WindowsFunctions.SignOut or WindowsFunctions.Restart or WindowsFunctions.Shutdown
                 => "执行前会弹出确认框 / System action with a confirmation dialog.",
             WindowsFunctions.ActionSettings => "打开按钮和触发设置 / Open Action Wheel button and trigger settings.",
+            WindowsFunctions.QuickAdd => "直接添加网页、Obsidian 笔记或笔记板 / Quickly add a web page, Obsidian note or note board.",
+            WindowsFunctions.NoteBoard => "唤出自动保存的本地笔记板 / Open the automatically saved local note board.",
             WindowsFunctions.ActionReload => "无需重启即可重载 actions.json / Reload actions.json without restarting Action Wheel.",
             WindowsFunctions.QuickInfo => "打开存放日程、参考图和笔记的本地 QuickInfo 文件夹 / Open the local QuickInfo folder for schedules, reference images and notes.",
             WindowsFunctions.ActionSwitchProfile => "切换到下一个已保存配置 / Switch to the next saved profile.",
@@ -85,6 +87,8 @@ namespace Action_Wheel.Core
         public const string Restart = "system.restart";
         public const string Shutdown = "system.shutdown";
         public const string ActionSettings = "action-wheel.settings";
+        public const string QuickAdd = "action-wheel.quick-add";
+        public const string NoteBoard = "action-wheel.note-board";
         public const string ActionReload = "action-wheel.reload";
         public const string ActionProfiles = "action-wheel.profiles";
         public const string QuickInfo = "action-wheel.quick-info";
@@ -135,6 +139,8 @@ namespace Action_Wheel.Core
             new WindowsFunction(EventViewer, "开发 · 事件查看器 / Developer · Event Viewer"),
             new WindowsFunction(MediaPlayPause, "媒体 · 播放／暂停 / Media · Play / Pause"),
             new WindowsFunction(ActionSettings, "Action Wheel · 设置 / Action Wheel · Settings"),
+            new WindowsFunction(QuickAdd, "Action Wheel · 快捷添加 / Action Wheel · Quick Add"),
+            new WindowsFunction(NoteBoard, "Action Wheel · 笔记板 / Action Wheel · Note Board"),
             new WindowsFunction(ActionReload, "Action Wheel · 重载配置 / Action Wheel · Reload Configuration"),
             new WindowsFunction(ActionSwitchProfile, "Action Wheel · 切换配置 / Action Wheel · Switch Profile"),
             new WindowsFunction(ActionProfiles, "Action Wheel · 打开配置文件夹 / Action Wheel · Open Profiles Folder"),

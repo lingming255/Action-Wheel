@@ -23,6 +23,8 @@ namespace Action_Wheel.Services
         private const int WM_MBUTTONUP = 0x0208;
         private const int WM_XBUTTONDOWN = 0x020B;
         private const int WM_XBUTTONUP = 0x020C;
+        private const int WM_MOUSEWHEEL = 0x020A;
+        private const int WM_MOUSEHWHEEL = 0x020E;
 
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -42,6 +44,11 @@ namespace Action_Wheel.Services
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
+        [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
+        [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT
@@ -71,11 +78,22 @@ namespace Action_Wheel.Services
         private ChordTrigger _activeChord;
         private bool _swallowMiddleUp;
         private int _swallowXButtonUp;
+        private int _isolatedButtonUps;
+        private IntPtr _leftForwardedTarget, _rightForwardedTarget, _redirectLeftUp, _redirectRightUp;
         public long LastCallbackTick { get; private set; }
 
         public MouseTrigger Trigger { get; set; } = MouseTrigger.MiddleButton;
         /// <summary>A declined trigger forwards its complete button pair to the app underneath.</summary>
         public Func<bool>? CanTrigger { get; set; }
+        /// <summary>Wheel ownership also blocks inactive-window scrolling outside its HWND.</summary>
+        public Func<bool>? OwnsInput { get; set; }
+        /// <summary>Returns true for an outside dismissal click whose complete pair is consumed.</summary>
+        public Func<PointInt32, bool>? InterceptButtonDown { get; set; }
+        /// <summary>Return the chord's already-forwarded first button release to its original HWND.</summary>
+        public bool RedirectChordFirstButtonUp { get; set; }
+        internal Func<PointInt32, IntPtr> ButtonTargetAt { get; set; } = at =>
+            WindowFromPoint(new POINT { X = at.X, Y = at.Y });
+        internal Func<IntPtr, int, PointInt32, bool> SendButtonRelease { get; set; } = DeliverButtonRelease;
 
         public int ChordTimeoutMs
         {
@@ -95,9 +113,8 @@ namespace Action_Wheel.Services
         public event EventHandler<PointInt32>? MiddleClick;
 
         /// <summary>
-        /// Raised when any mouse button is pressed, with the cursor position. Used to dismiss an
-        /// open menu when the user clicks somewhere else on the screen - the menu window is
-        /// WS_EX_NOACTIVATE, so it never gets a "deactivated" notification of its own.
+        /// Raised when a normal mouse button is pressed. The focused menu uses this global
+        /// observation to dismiss when a click falls outside its HWND.
         /// </summary>
         public event EventHandler<PointInt32>? AnyButtonDown;
 
@@ -161,6 +178,8 @@ namespace Action_Wheel.Services
             _activeChord = ChordTrigger.None;
             _swallowMiddleUp = false;
             _swallowXButtonUp = 0;
+            _isolatedButtonUps = 0;
+            _leftForwardedTarget = _rightForwardedTarget = _redirectLeftUp = _redirectRightUp = IntPtr.Zero;
             if (_hookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_hookID);
@@ -251,6 +270,22 @@ namespace Action_Wheel.Services
 
                 var at = new PointInt32(data.Point.X, data.Point.Y);
 
+                if (msg is WM_MOUSEWHEEL or WM_MOUSEHWHEEL && OwnsInput?.Invoke() == true)
+                    return true;
+
+                int isolatedUp = msg switch
+                {
+                    WM_LBUTTONUP => 1, WM_RBUTTONUP => 2, WM_MBUTTONUP => 4,
+                    WM_XBUTTONUP => 8 << ((int)(data.MouseData >> 16) - 1), _ => 0,
+                };
+                if (isolatedUp != 0 && (_isolatedButtonUps & isolatedUp) != 0)
+                {
+                    _isolatedButtonUps &= ~isolatedUp;
+                    if (msg == WM_LBUTTONUP) _chordGate.OnLeftUp();
+                    if (msg == WM_RBUTTONUP) _chordGate.OnRightUp();
+                    return true;
+                }
+
                 if (msg is WM_XBUTTONDOWN or WM_XBUTTONUP)
                 {
                     int button = (int)((data.MouseData >> 16) & 0xFFFF);
@@ -273,7 +308,10 @@ namespace Action_Wheel.Services
                     }
 
                     if (msg == WM_XBUTTONDOWN)
+                    {
+                        if (InterceptDown(at, 8 << (button - 1))) return true;
                         AnyButtonDown?.Invoke(this, at);
+                    }
                 }
 
                 if (msg == WM_MBUTTONDOWN && Trigger == MouseTrigger.MiddleButton)
@@ -292,7 +330,10 @@ namespace Action_Wheel.Services
                 }
 
                 if (msg == WM_MBUTTONDOWN && Trigger != MouseTrigger.MiddleButton)
+                {
+                    if (InterceptDown(at, 4)) return true;
                     AnyButtonDown?.Invoke(this, at);
+                }
 
                 if (msg == WM_MOUSEMOVE && TrackMovement)
                 {
@@ -309,12 +350,15 @@ namespace Action_Wheel.Services
                     if (chordFired)
                     {
                         _activeChord = chordTrigger;
+                        _redirectRightUp = _rightForwardedTarget;
                         MiddleClick?.Invoke(this, at);
                     }
 
                     if (swallow)
                         return true;
 
+                    if (InterceptDown(at, 1)) return true;
+                    _leftForwardedTarget = RedirectChordFirstButtonUp ? ButtonTargetAt(at) : IntPtr.Zero;
                     AnyButtonDown?.Invoke(this, at);
                 }
 
@@ -327,12 +371,15 @@ namespace Action_Wheel.Services
                     if (chordFired)
                     {
                         _activeChord = chordTrigger;
+                        _redirectLeftUp = _leftForwardedTarget;
                         MiddleClick?.Invoke(this, at);
                     }
 
                     if (swallow)
                         return true;
 
+                    if (InterceptDown(at, 2)) return true;
+                    _rightForwardedTarget = RedirectChordFirstButtonUp ? ButtonTargetAt(at) : IntPtr.Zero;
                     AnyButtonDown?.Invoke(this, at);
                 }
 
@@ -350,7 +397,7 @@ namespace Action_Wheel.Services
                         GestureCanceled?.Invoke(this, EventArgs.Empty);
                     }
 
-                    if (swallow)
+                    if (RedirectRelease(ref _redirectLeftUp, WM_LBUTTONUP, at) || swallow)
                         return true;
                 }
 
@@ -368,12 +415,46 @@ namespace Action_Wheel.Services
                         GestureCanceled?.Invoke(this, EventArgs.Empty);
                     }
 
-                    if (swallow)
+                    if (RedirectRelease(ref _redirectRightUp, WM_RBUTTONUP, at) || swallow)
                         return true;
                 }
             }
 
             return false;
+        }
+
+        private bool InterceptDown(PointInt32 at, int button)
+        {
+            if (InterceptButtonDown?.Invoke(at) != true) return false;
+            _isolatedButtonUps |= button;
+            // This DOWN was never delivered. It must not seed a new chord while its physical
+            // button is still held after dismissal, nor reuse a target from an earlier gesture.
+            if (button == 1) { _chordGate.OnLeftUp(); _leftForwardedTarget = IntPtr.Zero; }
+            if (button == 2) { _chordGate.OnRightUp(); _rightForwardedTarget = IntPtr.Zero; }
+            return true;
+        }
+
+        private bool RedirectRelease(ref IntPtr pending, int message, PointInt32 at)
+        {
+            IntPtr target = pending;
+            pending = IntPtr.Zero;
+            return target != IntPtr.Zero && SendButtonRelease(target, message, at);
+        }
+
+        private static bool DeliverButtonRelease(IntPtr target, int message, PointInt32 at)
+        {
+            var point = new POINT { X = at.X, Y = at.Y };
+            if (!ScreenToClient(target, ref point)) return false;
+            // The first DOWN preceded the chord and reached this exact child HWND. Activation
+            // may have released its capture; deliver its matching UP there rather than to the
+            // newly focused wheel. PostMessage never blocks the low-level input callback.
+            int keys = 0;
+            // The chord's second mouse DOWN was consumed, so do not advertise that physical
+            // button as held to the original recipient when the first button cancels early.
+            if (GetAsyncKeyState(0x10) < 0) keys |= 4;
+            if (GetAsyncKeyState(0x11) < 0) keys |= 8;
+            int packed = (point.X & 0xffff) | (point.Y << 16);
+            return PostMessage(target, message, (IntPtr)keys, (IntPtr)packed);
         }
 
         public void Dispose()

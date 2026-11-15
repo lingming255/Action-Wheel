@@ -131,6 +131,8 @@ namespace Action_Wheel.Services
         private const int MenuIdReload = 4;
         private const int MenuIdStartup = 5;
         private const int MenuIdExit = 6;
+        private const int MenuIdQuickAdd = 7;
+        private const int MenuIdNoteBoard = 8;
 
         /// <summary>
         /// First command ID handed to a profile row; the rest follow in <see cref="_menuProfiles"/>
@@ -156,6 +158,8 @@ namespace Action_Wheel.Services
 
         public event EventHandler? ShowRequested;
         public event EventHandler? SettingsRequested;
+        public event EventHandler? QuickAddRequested;
+        public event EventHandler? NoteBoardRequested;
         public event EventHandler? ReloadRequested;
 
         /// <summary>Raised after the tray menu toggled the startup entry, so open windows can refresh.</summary>
@@ -262,6 +266,8 @@ namespace Action_Wheel.Services
             try
             {
                 AppendMenu(menu, MF_STRING, MenuIdShow, "Open Action Wheel");
+                AppendMenu(menu, MF_STRING, MenuIdQuickAdd, "快捷添加网页 / 笔记…");
+                AppendMenu(menu, MF_STRING, MenuIdNoteBoard, "笔记板");
                 AppendMenu(menu, MF_STRING, MenuIdSettings, "Settings…");
                 AppendMenu(menu, MF_SEPARATOR, 0, null);
 
@@ -351,6 +357,14 @@ namespace Action_Wheel.Services
 
                 case MenuIdSettings:
                     SettingsRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+
+                case MenuIdQuickAdd:
+                    QuickAddRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+
+                case MenuIdNoteBoard:
+                    NoteBoardRequested?.Invoke(this, EventArgs.Empty);
                     break;
 
                 case MenuIdEditActions:

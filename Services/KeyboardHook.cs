@@ -6,8 +6,8 @@ namespace Action_Wheel.Services
 {
     /// <summary>
     /// Low-level global keyboard hook used to catch Escape and the hold-to-open information wheel.
-    /// The menu window carries WS_EX_NOACTIVATE, so it never takes keyboard focus and cannot
-    /// receive a KeyDown of its own - the key has to be caught system-wide instead.
+    /// Input ownership starts with the gesture, before native activation completes. Matching
+    /// releases remain consumed even if their key-down dismissed the wheel.
     /// </summary>
     public class KeyboardHook : IDisposable
     {
@@ -67,7 +67,10 @@ namespace Action_Wheel.Services
         public Func<bool>? EscapePressed { get; set; }
         public Func<bool>? EmergencyTriggerPressed { get; set; }
         public Func<bool>? EmergencyTriggerReleased { get; set; }
+        public Func<uint, bool>? MenuKeyPressed { get; set; }
+        internal Func<int, bool> IsKeyDown { get; set; } = IsDown;
         private bool _swallowEmergencyKeyUp;
+        private readonly bool[] _swallowedKeys = new bool[256];
 
         public KeyboardHook()
         {
@@ -103,6 +106,7 @@ namespace Action_Wheel.Services
         public void Stop()
         {
             _swallowEmergencyKeyUp = false;
+            Array.Clear(_swallowedKeys);
             if (_hookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_hookID);
@@ -142,6 +146,14 @@ namespace Action_Wheel.Services
             if (nCode >= 0)
             {
                 int msg = (int)wParam;
+                var keyData = ReadEvent(lParam);
+                if (keyData.dwExtraInfo == InputInjection.Marker) return false;
+                uint key = keyData.vkCode;
+                if (key < _swallowedKeys.Length && _swallowedKeys[key])
+                {
+                    if (msg is WM_KEYUP or WM_SYSKEYUP) _swallowedKeys[key] = false;
+                    return true;
+                }
                 if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
                 {
                     var data = ReadEvent(lParam);
@@ -150,6 +162,7 @@ namespace Action_Wheel.Services
 
                     if (data.vkCode == VK_ESCAPE && EscapePressed?.Invoke() == true)
                     {
+                        _swallowedKeys[VK_ESCAPE] = true;
                         return true;
                     }
 
@@ -161,8 +174,14 @@ namespace Action_Wheel.Services
                         return true;
                     }
 
+                    if (MenuKeyPressed?.Invoke(data.vkCode) == true)
+                    {
+                        if (data.vkCode < _swallowedKeys.Length) _swallowedKeys[data.vkCode] = true;
+                        return true;
+                    }
+
                     if (data.vkCode == VK_SPACE
-                        && IsDown(VK_CONTROL) && IsDown(VK_MENU)
+                        && IsKeyDown(VK_CONTROL) && IsKeyDown(VK_MENU)
                         && EmergencyTriggerPressed?.Invoke() == true)
                     {
                         _swallowEmergencyKeyUp = true;
