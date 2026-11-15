@@ -1,6 +1,8 @@
 # Quick Add and Note Board
 
-Open the main wheel with the existing gesture, then press **A** for Quick Add or **N** for the Note Board. The centre of the wheel displays these keys. Quick Info keeps its existing gesture. Both tools are also available from the tray menu and as built-in Function actions.
+In Button Settings, select a wheel button and choose **Note Board** or **Quick Add web page / note** directly from its action-type menu, then save. Invoke that button with the normal wheel gesture. The same choices are available for a group child or a hold action. Both tools are also available from the tray menu. Quick Info keeps its existing gesture.
+
+The direct choices use the existing built-in Function actions in JSON/XML, so existing configured tool buttons continue to work. A/N do not invoke tools, and the wheel centre has no A/N hint.
 
 ## Quick Add
 

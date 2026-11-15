@@ -482,9 +482,19 @@ namespace Action_Wheel.Settings
                 {
                     Width = 220,
                     VerticalAlignment = VerticalAlignment.Center,
-                    // Groups cannot nest; copy occupies the fifth visible choice instead.
-                    ItemsSource = new[] { "无操作 / Do nothing", "发送快捷键 / Send shortcut", "打开应用或文件 / Open app / file", "Windows 功能 / Windows function", "复制文本 / Copy text" },
-                    SelectedIndex = rowModel.KindIndex == ActionValueCodec.CopyTextIndex ? 4 : rowModel.KindIndex,
+                    // Keep the same indices as the main editor, with nesting explicitly disabled.
+                    ItemsSource = new[]
+                    {
+                        new ComboBoxItem { Content = "无操作 / Do nothing" },
+                        new ComboBoxItem { Content = "发送快捷键 / Send shortcut" },
+                        new ComboBoxItem { Content = "打开应用或文件 / Open app / file" },
+                        new ComboBoxItem { Content = "Windows 功能 / Windows function" },
+                        new ComboBoxItem { Content = "分组 / Group", IsEnabled = false },
+                        new ComboBoxItem { Content = "复制文本 / Copy text" },
+                        new ComboBoxItem { Content = "笔记板 / Note board" },
+                        new ComboBoxItem { Content = "快捷添加网页／笔记 / Quick add" },
+                    },
+                    SelectedIndex = rowModel.TypeSelectionIndex,
                 };
 
                 var remove = new Button
@@ -598,8 +608,21 @@ namespace Action_Wheel.Settings
 
                 kind.SelectionChanged += (s2, e2) =>
                 {
-                    rowModel.KindIndex = kind.SelectedIndex == 4 ? ActionValueCodec.CopyTextIndex : kind.SelectedIndex;
+                    if (kind.SelectedIndex >= 0 && kind.SelectedIndex != ActionValueCodec.GroupIndex)
+                        rowModel.TypeSelectionIndex = kind.SelectedIndex;
                     RefreshValueVisibility();
+                };
+                rowModel.PropertyChanged += (s2, e2) =>
+                {
+                    if (e2.PropertyName == nameof(ActionEditModel.TypeSelectionIndex))
+                    {
+                        if (kind.SelectedIndex != rowModel.TypeSelectionIndex)
+                            kind.SelectedIndex = rowModel.TypeSelectionIndex;
+                        RefreshValueVisibility();
+                    }
+                    if (e2.PropertyName == nameof(ActionEditModel.FunctionQuery)
+                        && functionBox.Text != rowModel.FunctionQuery)
+                        functionBox.Text = rowModel.FunctionQuery;
                 };
 
                 var valueRow = new StackPanel

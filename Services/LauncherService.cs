@@ -66,8 +66,6 @@ namespace Action_Wheel.Services
 
         /// <summary>Raised on the UI thread when a menu button requests Action Settings.</summary>
         public event EventHandler? SettingsRequested;
-        public event EventHandler<IntPtr>? QuickAddRequested;
-        public event EventHandler? NoteBoardRequested;
 
         public LauncherService()
         {
@@ -587,23 +585,9 @@ namespace Action_Wheel.Services
 
         private bool OnMenuKeyPressed(uint key)
         {
-            if (!OwnsWheelInput()) return false;
-            var menu = _currentMenu;
-            if (menu?.OwnsInput == true && !menu.IsQuickInfo && key is 0x41 or 0x4E)
-            {
-                _gestureActive = _keyboardGestureActive = false;
-                _mouseHook.TrackMovement = false;
-                _dispatcherQueue.TryEnqueue(() =>
-                {
-                    if (!ReferenceEquals(_currentMenu, menu) || !menu.OwnsInput) return;
-                    CloseCurrentMenu();
-                    if (key == 0x41) QuickAddRequested?.Invoke(this, menu.ActionTargetWindow);
-                    else NoteBoardRequested?.Invoke(this, EventArgs.Empty);
-                });
-            }
-            // The hook pairs every consumed DOWN with its UP, including when A/N/Esc closes
-            // the menu before release. Ordinary typing and shell shortcuts stay in the wheel.
-            return true;
+            // Tools are invoked by configured wheel buttons. Ordinary typing remains isolated,
+            // and the hook consumes each matching UP even when Escape has closed the wheel.
+            return OwnsWheelInput();
         }
 
         /// <summary>

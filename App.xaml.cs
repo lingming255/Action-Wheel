@@ -116,8 +116,6 @@ namespace Action_Wheel
             {
                 _launcherService = new LauncherService();
                 _launcherService.SettingsRequested += (s, e) => ShowSettings();
-                _launcherService.QuickAddRequested += OnQuickAddRequested;
-                _launcherService.NoteBoardRequested += OnNoteBoardRequested;
                 _launcherService.Start();
             }
             catch (Exception)

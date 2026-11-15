@@ -21,6 +21,9 @@ namespace Action_Wheel.Settings
     /// </remarks>
     public sealed class ActionEditModel : ObservableObject
     {
+        public const int NoteBoardTypeIndex = 6;
+        public const int QuickAddTypeIndex = 7;
+
         private int _tag;
         private string _label;
         private string _value;
@@ -42,6 +45,8 @@ namespace Action_Wheel.Settings
         private double _shadowOffsetY;
         private int _kindIndex;
         private int _holdKindIndex;
+        private bool _selectingType;
+        private bool _selectingHoldType;
         private string _holdValue = string.Empty;
         private string _holdArguments = string.Empty;
         private IReadOnlyList<ActionItem> _groupChildren = Array.Empty<ActionItem>();
@@ -187,11 +192,9 @@ namespace Action_Wheel.Settings
                     if (_kindIndex != 2)
                         RefreshStatus();
                     if (IsFunction)
-                    {
-                        _functionQuery = _functionChoices.FirstOrDefault(
-                            item => string.Equals(item.Id, _value, StringComparison.OrdinalIgnoreCase))?.Name ?? _value;
-                        Raise(nameof(FunctionQuery));
-                    }
+                        RefreshFunctionQuery();
+                    if (!_selectingType)
+                        Raise(nameof(TypeSelectionIndex));
                 }
             }
         }
@@ -409,7 +412,7 @@ namespace Action_Wheel.Settings
                 ? Math.Round(value, decimals, MidpointRounding.AwayFromZero)
                 : fallback;
 
-        /// <summary>Index into the type combo box: 0 = none, 1 = keys, 2 = launch.</summary>
+        /// <summary>The persisted action kind; tool presets in the UI remain Function actions.</summary>
         public int KindIndex
         {
             get => _kindIndex;
@@ -424,8 +427,69 @@ namespace Action_Wheel.Settings
                 Raise(nameof(ValuePlaceholder));
                 Raise(nameof(IsFunction));
                 Raise(nameof(IsGroup));
+                if (IsFunction)
+                    RefreshFunctionQuery();
+                if (!_selectingType)
+                    Raise(nameof(TypeSelectionIndex));
                 RefreshStatus();
             }
+        }
+
+        /// <summary>Direct tool choices share the existing Function wire format and dispatcher.</summary>
+        public int TypeSelectionIndex
+        {
+            get => ToolTypeIndex(_kindIndex, _value);
+            set
+            {
+                if (_selectingType || value < ActionValueCodec.NoneIndex || value > QuickAddTypeIndex)
+                    return;
+                _selectingType = true;
+                try
+                {
+                    if (ToolValue(value) is string tool)
+                    {
+                        KindIndex = ActionValueCodec.FunctionIndex;
+                        Value = tool;
+                    }
+                    else
+                    {
+                        // Leaving a direct tool choice starts a new action. In particular, a
+                        // generic Function choice must not immediately project back to the tool.
+                        if (ToolTypeIndex(_kindIndex, _value) >= NoteBoardTypeIndex)
+                            Value = string.Empty;
+                        KindIndex = value;
+                    }
+                }
+                finally
+                {
+                    _selectingType = false;
+                    Raise(nameof(TypeSelectionIndex));
+                }
+            }
+        }
+
+        private static int ToolTypeIndex(int kindIndex, string value)
+        {
+            if (kindIndex != ActionValueCodec.FunctionIndex)
+                return kindIndex;
+            if (string.Equals(value, WindowsFunctions.NoteBoard, StringComparison.OrdinalIgnoreCase))
+                return NoteBoardTypeIndex;
+            return string.Equals(value, WindowsFunctions.QuickAdd, StringComparison.OrdinalIgnoreCase)
+                ? QuickAddTypeIndex : kindIndex;
+        }
+
+        private static string? ToolValue(int typeIndex) => typeIndex switch
+        {
+            NoteBoardTypeIndex => WindowsFunctions.NoteBoard,
+            QuickAddTypeIndex => WindowsFunctions.QuickAdd,
+            _ => null,
+        };
+
+        private void RefreshFunctionQuery()
+        {
+            _functionQuery = _functionChoices.FirstOrDefault(
+                item => string.Equals(item.Id, _value, StringComparison.OrdinalIgnoreCase))?.Name ?? _value;
+            Raise(nameof(FunctionQuery));
         }
 
         /// <summary>"Do nothing" and "Group" both need no value, so the box is greyed out rather than misleading.</summary>
@@ -474,6 +538,39 @@ namespace Action_Wheel.Settings
                 Raise(nameof(CanBrowseHold));
                 Raise(nameof(HoldValuePlaceholder));
                 Raise(nameof(IsHoldFunction));
+                if (!_selectingHoldType)
+                    Raise(nameof(HoldTypeSelectionIndex));
+            }
+        }
+
+        public int HoldTypeSelectionIndex
+        {
+            get => ToolTypeIndex(_holdKindIndex, _holdValue);
+            set
+            {
+                if (_selectingHoldType || value < ActionValueCodec.NoneIndex || value > QuickAddTypeIndex
+                    || value == ActionValueCodec.GroupIndex)
+                    return;
+                _selectingHoldType = true;
+                try
+                {
+                    if (ToolValue(value) is string tool)
+                    {
+                        HoldKindIndex = ActionValueCodec.FunctionIndex;
+                        HoldValue = tool;
+                    }
+                    else
+                    {
+                        if (ToolTypeIndex(_holdKindIndex, _holdValue) >= NoteBoardTypeIndex)
+                            HoldValue = string.Empty;
+                        HoldKindIndex = value;
+                    }
+                }
+                finally
+                {
+                    _selectingHoldType = false;
+                    Raise(nameof(HoldTypeSelectionIndex));
+                }
             }
         }
 
@@ -490,7 +587,15 @@ namespace Action_Wheel.Settings
             _ => "无长按操作 / No hold action",
         };
 
-        public string HoldValue { get => _holdValue; set => Set(ref _holdValue, value); }
+        public string HoldValue
+        {
+            get => _holdValue;
+            set
+            {
+                if (Set(ref _holdValue, value) && !_selectingHoldType)
+                    Raise(nameof(HoldTypeSelectionIndex));
+            }
+        }
         public string HoldArguments { get => _holdArguments; set => Set(ref _holdArguments, value); }
 
         /// <summary>
@@ -664,6 +769,9 @@ namespace Action_Wheel.Settings
             _holdValue = source.HoldValue;
             _holdArguments = source.HoldArguments;
             _groupChildren = source.GroupChildren;
+            _functionQuery = source.Kind == ActionKind.Function
+                ? _functionChoices.FirstOrDefault(item => string.Equals(item.Id, _value, StringComparison.OrdinalIgnoreCase))?.Name ?? _value
+                : string.Empty;
             _status = ComputeStatus();
 
             // Everything at once: individual setters were bypassed to avoid nine separate change
@@ -680,12 +788,12 @@ namespace Action_Wheel.Settings
             nameof(IconScale), nameof(IconScaleText), nameof(IconOffsetX), nameof(IconOffsetXText),
             nameof(IconOffsetY), nameof(IconOffsetYText),
             nameof(IconTint), nameof(CanTintIcon),
-            nameof(Foreground), nameof(Background), nameof(Shadow), nameof(KindIndex), nameof(IsValueEnabled),
+            nameof(Foreground), nameof(Background), nameof(Shadow), nameof(KindIndex), nameof(TypeSelectionIndex), nameof(IsValueEnabled),
             nameof(ShadowEnabled), nameof(ShadowOpacity), nameof(ShadowOpacityText), nameof(ShadowBlur), nameof(ShadowBlurText),
             nameof(ShadowOffsetX), nameof(ShadowOffsetXText), nameof(ShadowOffsetY), nameof(ShadowOffsetYText),
             nameof(CanBrowse), nameof(CanRecord), nameof(ValuePlaceholder),
             nameof(IsFunction),
-            nameof(HoldKindIndex), nameof(HoldValue), nameof(HoldArguments), nameof(IsHoldValueEnabled),
+            nameof(HoldKindIndex), nameof(HoldTypeSelectionIndex), nameof(HoldValue), nameof(HoldArguments), nameof(IsHoldValueEnabled),
             nameof(CanBrowseHold), nameof(HoldValuePlaceholder), nameof(IsHoldFunction), nameof(HoldFunctionChoices),
             nameof(IsGroup), nameof(GroupChildren), nameof(EditGroupText), nameof(CanBeGroup),
             nameof(FunctionQuery), nameof(FunctionSuggestions),

@@ -114,7 +114,6 @@ namespace Action_Wheel.Overlay
             if (_appearance.Animation == RingAnimation.None)
             {
                 MenuContainer.Opacity = 1;
-                ShowIdleInputHint();
                 SettleAfterOpening();
                 return;
             }
@@ -123,7 +122,6 @@ namespace Action_Wheel.Overlay
             _ringMotion.Completed += (_, _) => { if (!_closing) SettleAfterOpening(); };
             _ringMotion.Begin();
             StartGlassAccents();
-            ShowIdleInputHint();
         }
 
         /// <summary>Keep the visual closing tail while immediately returning input to the desktop.</summary>

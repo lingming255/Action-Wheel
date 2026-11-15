@@ -155,14 +155,16 @@
                                             <TextBox PlaceholderText="提示文字 / Tooltip text"
                                                      Text="{Binding Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <ComboBox HorizontalAlignment="Stretch"
-                                                      SelectedIndex="{Binding KindIndex, Mode=TwoWay}">
+                                                      SelectedIndex="{Binding TypeSelectionIndex, Mode=TwoWay}">
                                                 <ComboBoxItem><TextBlock Text="无操作 / Do nothing" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="发送快捷键 / Send shortcut" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="打开应用 / 文件 / Open app / file" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="Windows 功能 / Windows function" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem IsEnabled="{Binding CanBeGroup, Mode=OneWay}"
-                                                              ToolTipService.ToolTip="中心按钮不能设为分组。 / The centre button cannot be a group."><TextBlock Text="分组（最多5个按钮） / Group (up to 5 buttons)" TextWrapping="Wrap"/></ComboBoxItem>
+                                                              ToolTipService.ToolTip="中心按钮不能设为分组。 / The centre button cannot be a group."><TextBlock Text="分组（最多8个按钮） / Group (up to 8 buttons)" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="复制文字 / Copy text" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="笔记板 / Note board" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="快捷添加网页／笔记 / Quick add" TextWrapping="Wrap"/></ComboBoxItem>
                                             </ComboBox>
                                         </StackPanel>
                                     </Grid>
@@ -497,7 +499,7 @@
                                                 <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <ComboBox Grid.Row="0" Grid.Column="0" HorizontalAlignment="Stretch"
-                                                      SelectedIndex="{Binding HoldKindIndex, Mode=TwoWay}"
+                                                      SelectedIndex="{Binding HoldTypeSelectionIndex, Mode=TwoWay}"
                                                       ToolTipService.ToolTip="长按动作 / Hold action">
                                                 <ComboBoxItem><TextBlock Text="无长按动作 / No hold action" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="发送快捷键 / Send shortcut" TextWrapping="Wrap"/></ComboBoxItem>
@@ -505,6 +507,8 @@
                                                 <ComboBoxItem><TextBlock Text="Windows 功能 / Windows function" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem IsEnabled="False"><TextBlock Text="分组 / Group" TextWrapping="Wrap"/></ComboBoxItem>
                                                 <ComboBoxItem><TextBlock Text="复制文字 / Copy text" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="笔记板 / Note board" TextWrapping="Wrap"/></ComboBoxItem>
+                                                <ComboBoxItem><TextBlock Text="快捷添加网页／笔记 / Quick add" TextWrapping="Wrap"/></ComboBoxItem>
                                             </ComboBox>
                                             <TextBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch"
                                                      IsEnabled="{Binding IsHoldValueEnabled, Mode=OneWay}"

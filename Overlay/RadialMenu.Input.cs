@@ -17,7 +17,6 @@ namespace Action_Wheel.Overlay
                 (style | WS_EX_TOOLWINDOW) & ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT));
             WindowInputFocus.TryActivate(_windowHandle);
             CenterBtn.Focus(FocusState.Programmatic);
-            ShowIdleInputHint();
         }
 
         private void ReturnInputFocus()
@@ -30,16 +29,5 @@ namespace Action_Wheel.Overlay
                 WindowInputFocus.TryActivate(ActionTargetWindow);
         }
 
-        private void ShowIdleInputHint()
-        {
-            if (IsQuickInfo || !OwnsInput) return;
-            CenterBtn.Opacity = 0;
-            CenterInfo.Visibility = Visibility.Visible;
-            SelectionTitle.Text = "Action Wheel";
-            SelectionTitle.FontSize = 11;
-            SelectionTitle.MaxLines = 1;
-            SelectionTitle.TextWrapping = TextWrapping.NoWrap;
-            SelectionMeta.Text = "A 添加 · N 笔记";
-        }
     }
 }

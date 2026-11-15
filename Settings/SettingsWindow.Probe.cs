@@ -25,6 +25,7 @@ namespace Action_Wheel.Settings
                 Require(!viewModel.HasUnsavedChanges && viewModel.RefreshSettings == originalRefresh
                     && viewModel.ReclaimSettings == originalReclaim && viewModel.SoundSettings == originalSounds,
                     "Opening the bilingual controls changed loaded settings.");
+                VerifyDirectToolActionTypes();
                 Require(window.Title.Contains("设置") && window.Title.Contains("Settings"),
                     "The settings title is not bilingual.");
                 var appearance = window.SectionsNav.MenuItems.OfType<NavigationViewItem>()
@@ -137,7 +138,8 @@ namespace Action_Wheel.Settings
                     HoverVolumeTwoWayBinding = true, HoverVolumeRange = "0-200", HoverVolumeDefault = 100,
                     MasterAndHoverIndependent = true, HoverBoundaryBinding = true,
                     SoundEnabledBinding = true, HoverOnlyDirtyState = true, AudioPlayed = false,
-                    UsedDesktopCapture = false, DisplayedWindow = false };
+                    UsedDesktopCapture = false, DisplayedWindow = false,
+                    DirectWheelToolTypes = true, ToolFunctionDispatch = true };
             }
             finally
             {

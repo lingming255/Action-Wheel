@@ -735,7 +735,6 @@ namespace Action_Wheel.Overlay
         {
             CenterInfo.Visibility = Visibility.Collapsed;
             CenterBtn.Opacity = 1;
-            ShowIdleInputHint();
         }
 
         private static string Truncate(string value, int max) =>
