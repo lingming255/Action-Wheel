@@ -17,6 +17,12 @@ A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor when yo
 
 </div>
 
+This branch also includes wheel-triggered **Quick Add** and **Note Board**, foreground input
+ownership, opening targets on the invoking display, and a prepared main wheel reused between
+ordinary gestures. See [Quick Add and Note Board](Doc/quick-add-and-noteboard.md) for usage and
+window-selection limits, [native wheel](Doc/prototypes/wheel-unified-glass-native.md) for material
+and reuse behavior, and [refresh](Doc/refresh-effect.md) for rendering and handoff details.
+
 ---
 
 ## Table of contents
@@ -64,7 +70,7 @@ A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor when yo
 - **Says when it isn't working** — the main window reports whether the hooks installed and whether `actions.json` was usable.
 - **Private by design** — no usage events, clicks, gestures, launched actions, profile changes or errors are written to a log file.
 - **Starts with Windows** — optional, from the main window's toggle or the tray menu. Uses the per-user Run key, so it needs no elevation and shows up in Windows' own Startup Apps settings.
-- **Stays out of the way** — `WS_EX_TOOLWINDOW` + `WS_EX_NOACTIVATE` keep the overlay out of Alt+Tab and the taskbar, and it never steals focus, so shortcuts land in the app you were actually using.
+- **Owns input while open** — the interactive wheel acquires the foreground and consumes ordinary keys, scrolling and outside dismissal clicks. Closing restores the original foreground while the wheel still owns it; shortcut actions verify that target before sending. The released refresh decoration stays non-activating and click-through. Real foreground behavior still needs desktop acceptance.
 
 ## Requirements
 
@@ -101,7 +107,8 @@ Self-contained publishes are large (roughly 250–300 MB). That is normal for a 
 2. Hold the **left mouse button**, then press the **right mouse button** anywhere.
 3. Move to a sector and release the right button to run its action. Release in the centre for the refresh effect; release left first, or press <kbd>Esc</kbd>, to cancel.
 4. For Quick Info, hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>, hover a topic, move onto an information button, and release <kbd>Space</kbd> to copy. See [Quick Info](Doc/quick-info.md) for the Markdown catalog.
-4. Right-click the tray icon to open the main window, open the settings window, open `actions.json` in an editor, reload the config, turn **Start with Windows** on or off, or quit.
+5. To bind a scratch pad or a link editor, choose **Note Board** or **Quick Add web page / note** in a wheel button's action-type menu, then save and invoke that button with the normal gesture. Group children and hold actions support the same choices. The board supports **Save to…**; Quick Add can search Obsidian note names and generate their links.
+6. Right-click the tray icon to open the main window, settings, Quick Add, Note Board, or `actions.json`, reload the config, turn **Start with Windows** on or off, or quit.
 
 ## Configuring the buttons
 
@@ -111,7 +118,7 @@ Self-contained publishes are large (roughly 250–300 MB). That is normal for a 
 
 **Buttons** (the default section) is master-detail: a compact, one-line-per-button list on the left — drag a row to move that button around the ring, the first row is the centre button and the rest go clockwise from the top — and a detail panel on the right for whichever button is selected (click a row, or click a button in the live preview above the panel), with:
 
-- **Label**, **action type** and **value**. Action type is one of **Do nothing**, **Send shortcut**, **Open app / file**, **Windows function** (a built-in: lock, sleep, restart, shut down, show desktop, snap, open Task Manager, reload the config, switch or open a profile, and more), or **Group**.
+- **Label**, **action type** and **value**. Action types include **Do nothing**, **Send shortcut**, **Open app / file**, **Windows function** (lock, sleep, snap, switch profile and more), **Note Board**, **Quick Add web page / note**, and **Group**. The two tool choices persist as compatible built-in Function actions; no function ID needs to be typed.
 - a **record button** (keyboard icon) that captures a key press instead of making you type the shortcut — Ctrl, Alt and Shift combinations are captured; the Windows key never reaches the app because the shell takes it first, so `Win+…` has to be typed by hand. <kbd>Esc</kbd> cancels recording.
 - a **file browser** for launch targets, and an **arguments** box for the parameters to pass them
 - an **icon**. The preview button opens a picker offering all three sources: any glyph in the bundled icon font (searchable by name or code, and read from the font itself so the list matches what the app can draw), your own **`.svg`, `.png` or `.ico` file**, and **the icon of the program the button launches**. Browsing for a launch target takes that program's icon automatically.
@@ -244,9 +251,10 @@ The code is in two assemblies. **`ActionWheel.Core`** is the business logic and 
 | File | Role |
 |---|---|
 | `Services/MouseHook.cs` | `WH_MOUSE_LL` hook: raises the configured trigger's events (including chord detection for the two-button triggers), swallows it, and reports other clicks so the menu can be dismissed |
-| `Services/KeyboardHook.cs` | `WH_KEYBOARD_LL` hook, only for <kbd>Esc</kbd> — the overlay never has keyboard focus |
+| `Services/KeyboardHook.cs` | `WH_KEYBOARD_LL` hook for Esc, Quick Info and interactive-wheel input ownership, including matched key releases |
 | `Services/LauncherService.cs` | Owns the hooks, the watcher and the menu's lifetime; guarantees one menu at a time; reports hook status; runs the drag gesture and the hold countdown |
-| `Services/ActionDispatcher.cs` | Synthesises shortcuts via `SendInput`, or starts a process; raises `ActionFailed` when either does not work |
+| `Services/ActionDispatcher.cs` | Sends shortcuts to the verified original target or opens content, carries the captured display, and raises `ActionFailed` on failure |
+| `Services/LaunchWindowFollower*.cs` | Bounded external handler identification, existing-window reuse, display placement and foreground requests |
 | `Services/TrayIcon.cs` | `Shell_NotifyIcon` tray icon with a right-click menu (including recent profiles), on a message-only window |
 | `Services/AppIcon.cs` | Reads `icon.ico` back out of the exe's own resources for the window title bars and the tray |
 | `Services/AppIconExtractor.cs` | Copies the icon Windows shows for a program into a 256px PNG, via the system image list |
@@ -275,7 +283,7 @@ A few implementation details are easy to break and worth knowing about:
 - **Transparency** needs *both* a custom `SystemBackdrop` holding a transparent composition brush *and* `DwmEnableBlurBehindWindow`. Drop either and the menu renders as a solid black square. The classic `WS_EX_LAYERED` colour-key trick does not work with WinUI 3 content.
 - **Removing the window outline** is done entirely by `RemoveWindowFrame`, which strips `WS_DLGFRAME` and friends directly. It only works if the presenter was attached to the `AppWindow` first, otherwise the style changes are silently reverted.
 - **`InitializeWindow` deliberately configures nothing on the presenter, and does not touch `AppWindow.TitleBar`.** Both blocks used to be there and between them cost 46 ms of the 52 ms it took to build the overlay — on every single click — while achieving nothing measurable: the TitleBar properties style a title bar this window does not have, and every presenter flag is superseded a few lines later by `RemoveWindowFrame` and `SetWindowPos(HWND_TOPMOST)`. Removing them left `GWL_EXSTYLE` byte-identical and `GWL_STYLE` different only in two bits that cannot draw without `WS_CAPTION`. Don't put them back.
-- **The opening animation's timings are tuned.** The 0.012 s stagger and 0.09 s per button put the last one on screen 186 ms after the click; they were 0.03 s / 0.15 s, which meant 400 ms and was most of how slow the menu felt. Click-to-first-pixel is only ~15 ms, so the animation, not the code, is what the user is waiting for.
+- **The current wheel animates as one sheet**, using the saved appearance preset and duration. Ordinary sessions retain a prepared HWND and visual tree; configuration changes retire that snapshot, and a centre refresh consumes its window as a fullscreen decoration. Spare preparation waits for refresh playback to finish, so opening during that interval may use cold creation. Hidden component timings do not measure real input-to-visible latency; see the native wheel document for scope and checks.
 - **Code reachable from a hook callback must never perform disk I/O.** The mouse hook reads the cursor position from `lParam` rather than calling `GetCursorPos`, which is both cheaper and more accurate during fast movement.
 - **Button styles use full `ControlTemplate`s** with every visual state written out. Setting `Background`/`Foreground` on a `Button` only styles the initial rest state, and the default template has nothing to restore it with, so hover colours would stick permanently once the pointer left.
 - **The settings window's row and detail-panel templates use classic `{Binding}`**, not `{x:Bind}`, which means they resolve properties by reflection. That is fine while `PublishTrimmed` is `False`; turning trimming on later means converting those bindings to `x:Bind` first. The Buttons section's detail panel is itself one such template, applied via a `ContentControl` bound to the row list's `SelectedItem` — `Verify-Bindings.ps1` (the script behind `Build.ps1 -Task VerifyBindings`) knows to skip `ElementName` bindings like that one, since they read a named element's own property rather than the region's `DataContext`.
