@@ -19,8 +19,10 @@ per capture and is not involved in animation frames.
 
 `GpuRefreshPlayback` presents a premultiplied DXGI swapchain through the WinUI Composition
 surface directly. There is no per-frame pixel readback, `WriteableBitmap` or CPU image beneath
-the GPU layer. A 60 Hz elapsed-time schedule follows Composition rendering callbacks, skipping
-missed states without simulation catch-up. By default it stops at 2500 ms, matching the menu's close timer.
+the GPU layer. An elapsed-time schedule follows the target HWND monitor's nominal refresh rate
+(60 Hz if the display query fails), skipping missed states without simulation catch-up. Composition
+callbacks and nonblocking presentation can limit actual delivery; the target is not a desktop-fps
+guarantee. By default it stops at 2500 ms, matching the menu's close timer.
 Real captures remove the former 119 reference-ms initial pause. At the default settings the
 2881-ms reference domain advances at 1.1524x: spatial delay is at most 607.43 ms,
 depth travel 1379.73 ms and block lifetime 442.55 ms. The latest full fade finishes at
@@ -181,6 +183,28 @@ The GPU smoke's ParallelIntro report includes ReusedRelease and NativeHandoff: r
 followed by quick/settled centre releases, externally cloaked and originally uncloaked owners,
 native cloak at the geometry transition, separate cover intervals and disposal. These are
 synthetic hidden-window state checks, not captured proof of every on-screen frame.
+
+## Input, native grading and audio latency (2026-11-16)
+
+The interactive UI publishes saturation and ownership updates to `ScreenGradeDispatcher`.
+That dedicated dispatcher owns the native magnifier HWNDs, cache and 33-ms live source timer;
+three-monitor sampling no longer runs inside UI ticks. Magnification colour effects require
+one owner thread per process: hidden baseline diagnostics release their UI cache before
+transferring ownership to the worker, and verify a fresh UI rental after worker shutdown.
+Generation checks surround source sampling and showing so cancelled work cannot reappear.
+Restore is asynchronous and can wait for an in-flight native call. A new original-colour
+capture awaits the hide acknowledgement on its capture worker; menu input never waits on it.
+
+Same-monitor menu reuse skips the first-show/cross-monitor staging move and redundant native
+frame/style writes. Focus acquisition remains part of every interactive session. Mouse moves
+retain at most one pending UI update per gesture generation, preserving the exact release
+position and resetting long-press timing after skipped selection changes. Cancelled depth
+requests recheck cancellation after acquiring the shared inference lock.
+
+Opt-in opening, reuse and GPU reports expose component wall times, UI callback intervals and
+submission counts. Normal launches write no activity logs. These reports do not measure real
+input-to-pixel latency, audible output or visible desktop frame rate. The silent audio device
+and recovery checks are described in `Doc/quick-add-and-noteboard.md`.
 
 ## Preparation optimization (2026-11-11)
 

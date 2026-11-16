@@ -51,6 +51,15 @@ their bounded wait or launcher shutdown; newer requests for the same handler sup
 
 ## Verification
 
+Wheel audio retains the configured cues and gain. Its background worker reopens cached waveOut
+voices when the default output changes or reconnects, and retries a failed reset/write once.
+Late requests are discarded after 250 ms; native buffers remain owned until the driver returns
+them, with at most six active/retired leases. No system or application mixer volume is changed.
+`--wheel-audio-smoke <absolute-json-path>` checks embedded PCM loading and real device completion
+with gain zero, including the public Configure/Play queue and shutdown acknowledgement.
+It writes only the requested report and does not establish audible output.
+`Tools/WheelSoundRecoveryCheck` covers recovery, request expiry and native buffer ownership.
+
 `Tools/QuickAddCheck`, `Tools/NoteBoardCheck`, `Tools/MouseDispatchCheck`, `Tools/ChordGateCheck`, and `Tools/RingGestureTests` exercise persistence, replacement, input pairing and geometry. Run `--input-smoke-report <absolute-json-path>` for a brief native-window focus check using disposable windows without global hooks or simulated input.
 
 `--quick-add-preview` opens the real editor against temporary config copies. `--note-board-preview <absolute-note-path>` opens an isolated board without changing the remembered working location.

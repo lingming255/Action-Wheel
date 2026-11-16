@@ -71,7 +71,8 @@ namespace Action_Wheel.Services
                         var reference = new SpectrumOverlayRefreshRenderer(width, height, capture,
                             new RefreshDepthMap(width, height, depths), width / 2, height / 2, timing: timing);
                         renderer = new GpuRefreshRenderer(new GpuRefreshScene(reference));
-                        playback = new GpuRefreshPlayback(renderer, host);
+                        playback = new GpuRefreshPlayback(renderer, host, window: WinRT.Interop.WindowNative.GetWindowHandle(window))
+                        { MeasureTimings = true };
                         bool playbackFailed = false;
                         foreach (double fraction in new double[] { 0, .12, .32, .64, .996, 1 })
                         {
@@ -80,6 +81,7 @@ namespace Action_Wheel.Services
                         }
                         int initialFrames = playback.PresentedFrames;
                         var clock = Stopwatch.StartNew();
+                        playback.ResetTimingDiagnostics();
                         playback.Start(() => playbackFailed = true);
                         await Task.Delay((int)Math.Ceiling(renderer.DurationMs + 200));
                         double observedMs = clock.Elapsed.TotalMilliseconds;
@@ -105,6 +107,7 @@ namespace Action_Wheel.Services
                             ObservedMs = observedMs, PlaybackDurationMs = renderer.DurationMs,
                             StoppedAtEnd = true,
                             Mapping = playback.GetMappingDiagnostic(),
+                            TimingDiagnostics = playback.GetTimingDiagnostics(),
                             HiddenWindow = true, InteropSurfaceCreated = true });
                     }
                     finally

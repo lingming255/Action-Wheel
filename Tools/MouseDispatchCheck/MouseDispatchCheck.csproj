@@ -11,6 +11,7 @@
         <Compile Include="../../Services/KeyboardHook.cs" Link="KeyboardHook.cs" />
         <Compile Include="../../Services/InputInjection.cs" Link="InputInjection.cs" />
         <Compile Include="../../ActionWheel.Core/ChordGate.cs" Link="ChordGate.cs" />
+        <Compile Include="../../ActionWheel.Core/LatestGestureUpdate.cs" Link="LatestGestureUpdate.cs" />
         <Compile Include="../../GlobalUsings.cs" Link="GlobalUsings.cs" />
     </ItemGroup>
 </Project>

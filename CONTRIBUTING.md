@@ -36,7 +36,7 @@ commands run locally and in CI:
 .\Build.ps1 -Task Package         # Publish, ZIP it, then launch the ZIP's exe as a smoke test
 .\Build.ps1 -Task Installer       # x64 only; requires Inno Setup 6
 .\Build.ps1 -Task VerifyBindings  # checks every classic {Binding} path against its type
-.\Build.ps1 -Task VerifyApplication # eight isolated behavior-check programs
+.\Build.ps1 -Task VerifyApplication # nine isolated behavior-check programs
 .\Build.ps1 -Task VerifyBuildSafety # cleanup/publish boundaries in temporary directories
 .\Build.ps1 -Task VerifyGpu       # opt-in synthetic hardware D3D11 correctness checks
 .\Build.ps1 -Task Clean -Preview # inspect compiler cleanup targets without deleting them
@@ -100,7 +100,7 @@ Existing standalone checks live in `Tools/`. At minimum:
 1. `dotnet build "Action Wheel.csproj"` must succeed with no new warnings.
 2. Run the checks relevant to the change. `VerifyApplication` covers Quick
    Add, Note Board, mouse dispatch, ring gestures, Quick Info, reclaim
-   settings, refresh timing and smoke-report status using isolated data.
+   settings, refresh timing, smoke-report status and audio recovery using isolated data.
    `VerifyBuildSafety` checks compiler cleanup and publish boundaries in
    disposable directories. Neither requires the depth model, shows
    windows, installs hooks or captures the desktop.

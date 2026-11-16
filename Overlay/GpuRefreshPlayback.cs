@@ -18,6 +18,8 @@ namespace Action_Wheel.Overlay
     {
         private readonly GpuRefreshRenderer _renderer;
         private readonly FrameworkElement _host;
+        private readonly nint _window;
+        private int _targetRefreshRate = 60;
         private SpriteVisual? _visual;
         private CompositionSurfaceBrush? _brush;
         private ICompositionSurface? _surface;
@@ -28,10 +30,33 @@ namespace Action_Wheel.Overlay
         private bool _disposed, _started, _subscribed, _attached, _hostEventsSubscribed;
         private bool _geometryPresentPending;
         private bool _ownsRenderer;
+        private DurationSamples _callbackIntervals, _renderTimings, _presentTimings;
+        private long _previousMeasuredCallback, _measuredCallbacks, _busyPresents;
+        private int _callbackIntervalsOver25Ms, _callbackIntervalsOver33Ms;
         internal bool OwnsRenderer => _ownsRenderer;
         internal GpuRefreshRenderer Renderer => _renderer;
         internal int PresentedFrames { get; private set; }
         internal string AdapterName => _renderer.Device.AdapterName;
+        // Diagnostic probes explicitly opt in; normal playback collects no timing samples.
+        internal bool MeasureTimings { get; set; }
+        internal object GetTimingDiagnostics() => new
+        {
+            Enabled = MeasureTimings, RenderingCallbacks = _measuredCallbacks,
+            TargetRefreshRateHz = _targetRefreshRate,
+            CallbackIntervals = _callbackIntervals.Snapshot(),
+            CallbackIntervalsOver25Ms = _callbackIntervalsOver25Ms,
+            CallbackIntervalsOver33Ms = _callbackIntervalsOver33Ms,
+            RenderSubmission = _renderTimings.Snapshot(), PresentCall = _presentTimings.Snapshot(),
+            BusyPresents = _busyPresents,
+            Boundary = "UI callback intervals and submission wall times; no GPU completion wait, pixel readback or displayed-frame measurement.",
+        };
+
+        internal void ResetTimingDiagnostics()
+        {
+            _callbackIntervals = _renderTimings = _presentTimings = default;
+            _previousMeasuredCallback = _measuredCallbacks = _busyPresents = 0;
+            _callbackIntervalsOver25Ms = _callbackIntervalsOver33Ms = 0;
+        }
         internal object GetMappingDiagnostic()
         {
             var parent = ElementCompositionPreview.GetElementVisual(_host);
@@ -52,9 +77,11 @@ namespace Action_Wheel.Overlay
             };
         }
 
-        public GpuRefreshPlayback(GpuRefreshRenderer renderer, FrameworkElement host, bool ownsRenderer = true)
+        public GpuRefreshPlayback(GpuRefreshRenderer renderer, FrameworkElement host, bool ownsRenderer = true,
+            nint window = 0)
         {
             _renderer = renderer; _host = host;
+            _window = window;
             _ownsRenderer = ownsRenderer;
             try
             {
@@ -118,6 +145,12 @@ namespace Action_Wheel.Overlay
         private void SyncGeometry()
         {
             if (_disposed) return;
+            int refreshRate = DisplayRefreshRate.ForWindow(_window);
+            if (refreshRate != _targetRefreshRate)
+            {
+                _targetRefreshRate = refreshRate;
+                _lastFrameSlot = -1;
+            }
             XamlRoot? root = _host.XamlRoot;
             if (root != _xamlRoot)
             {
@@ -179,6 +212,19 @@ namespace Action_Wheel.Overlay
         private void OnRendering(object? sender, object args)
         {
             if (_disposed) return;
+            if (MeasureTimings)
+            {
+                long now = Stopwatch.GetTimestamp();
+                _measuredCallbacks++;
+                if (_previousMeasuredCallback != 0)
+                {
+                    double interval = Stopwatch.GetElapsedTime(_previousMeasuredCallback, now).TotalMilliseconds;
+                    _callbackIntervals.Add(interval);
+                    if (interval > 25) _callbackIntervalsOver25Ms++;
+                    if (interval > 33) _callbackIntervalsOver33Ms++;
+                }
+                _previousMeasuredCallback = now;
+            }
             try
             {
                 double elapsed = _clock.Elapsed.TotalMilliseconds;
@@ -187,9 +233,9 @@ namespace Action_Wheel.Overlay
                     Unsubscribe();
                     return;
                 }
-                // High-refresh monitors still submit at most 60 frames per second. A slow
-                // callback evaluates the latest time; it never queues simulation catch-up.
-                long frameSlot = (long)Math.Floor((elapsed + .75) * 60 / 1000);
+                // Match the target monitor's nominal mode, bounded by actual Composition
+                // callbacks. A late callback never queues simulation catch-up frames.
+                long frameSlot = (long)Math.Floor((elapsed + .75) * _targetRefreshRate / 1000);
                 if (frameSlot <= _lastFrameSlot) return;
                 _lastFrameSlot = frameSlot;
                 RenderFrame(elapsed);
@@ -205,8 +251,20 @@ namespace Action_Wheel.Overlay
         internal void RenderFrame(double elapsedMs)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            long started = MeasureTimings ? Stopwatch.GetTimestamp() : 0;
             _renderer.Render(elapsedMs);
-            if (_renderer.Device.Present(_renderer.OutputTexture))
+            if (started != 0)
+            {
+                _renderTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                started = Stopwatch.GetTimestamp();
+            }
+            bool presented = _renderer.Device.Present(_renderer.OutputTexture);
+            if (started != 0)
+            {
+                _presentTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                if (!presented) _busyPresents++;
+            }
+            if (presented)
             {
                 PresentedFrames++;
                 _geometryPresentPending = false;

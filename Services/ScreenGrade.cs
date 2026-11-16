@@ -16,8 +16,8 @@ namespace Action_Wheel.Services
     /// matrix. Its glass still samples the grey scene beneath. No cached screenshot or global colour
     /// setting is installed; closing these windows restores the desktop, including after a crash.
     ///
-    /// UI thread only: LauncherService starts this only after the raw colour capture succeeds.
-    /// Its dispatcher orders the transition against cancellation and the grey-cover handoff.
+    /// UI calls order the transition against cancellation and the grey-cover handoff. Native
+    /// magnifier HWNDs and live sampling belong to a separate dispatcher so they cannot block input.
     /// </remarks>
     internal static class ScreenGrade
     {
@@ -39,7 +39,9 @@ namespace Action_Wheel.Services
         private static nint _menuHwnd;
         private static RefreshReclaimIntro? _intro;
         private static Action<float>? _applyGlassSaturation;
-        private static ScreenGradeSurface? _surface;
+        private static readonly ScreenGradeDispatcher Native = new();
+        private static long _nativeGeneration;
+        private static Action? _nativeFailure;
         private static readonly Transition Grade = new(ApplySaturation);
         private static readonly Stopwatch TransitionClock = new();
         private static DispatcherQueueTimer? _transitionTimer;
@@ -48,10 +50,23 @@ namespace Action_Wheel.Services
         internal static void BindMenu(nint menuHwnd, RefreshReclaimIntro? intro, Action<float> applyGlassSaturation)
         {
             Restore();
+            _nativeGeneration = Native.BeginGesture();
             _menuHwnd = menuHwnd;
             _intro = intro;
             _applyGlassSaturation = applyGlassSaturation;
+            long generation = _nativeGeneration;
+            DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
+            _nativeFailure = () => queue?.TryEnqueue(() =>
+            {
+                if (generation == _nativeGeneration) Restore();
+            });
         }
+
+        internal static void Warm() => Native.Warm();
+        internal static void ReleaseCache() => Native.ReleaseCache();
+
+        /// <summary>Capture workers await this acknowledgement before reading original desktop colour.</summary>
+        internal static Task NativeRestoreCompleted => Native.LastRestoreTask;
 
         /// <summary>Desaturates every monitor.</summary>
         public static void Lower()
@@ -104,8 +119,9 @@ namespace Action_Wheel.Services
         {
             StopTransitionTimer();
             Grade.Restore();
-            _surface?.ReturnToCache();
-            _surface = null;
+            Native.Restore();
+            _nativeGeneration = 0;
+            _nativeFailure = null;
             _menuHwnd = 0;
             ApplyIntroSaturation(1);
             _intro = null;
@@ -117,14 +133,20 @@ namespace Action_Wheel.Services
         {
             StopTransitionTimer();
             Grade.Shutdown();
-            _surface?.Dispose();
-            _surface = null;
+            _ = ShutdownNativeAsync();
+            _nativeGeneration = 0;
+            _nativeFailure = null;
             _menuHwnd = 0;
             ApplyIntroSaturation(1);
             _intro = null;
             ApplyGlassSaturation(1);
             _applyGlassSaturation = null;
-            ScreenGradeSurface.ShutdownCache();
+        }
+
+        private static async Task ShutdownNativeAsync()
+        {
+            try { await Native.ShutdownAsync(); }
+            catch (Exception) { /* Optional native decoration must not interrupt app shutdown. */ }
         }
 
         private static void OnTransitionTick(DispatcherQueueTimer sender, object args)
@@ -153,19 +175,12 @@ namespace Action_Wheel.Services
         {
             ApplyIntroSaturation(saturation);
             ApplyGlassSaturation(saturation);
-            if (saturation == 1)
-            {
-                _surface?.ReturnToCache();
-                _surface = null;
-                return true;
-            }
+            // Restore invalidates the native generation explicitly. Begin(1) only establishes
+            // the glass/particle curve; no identity magnifier needs to be shown for that frame.
+            if (saturation == 1) return true;
             if (_menuHwnd == 0) return false;
-            _surface ??= ScreenGradeSurface.TryCreate(_menuHwnd);
-            _surface?.SetDecorationAnchor(_intro is { AlreadyCompleted: false } ? _intro.WindowHandle : 0);
-            if (_surface?.Apply(saturation) == true) return true;
-            _surface?.Dispose();
-            _surface = null;
-            return false;
+            return Native.Apply(_nativeGeneration, _menuHwnd,
+                _intro is { AlreadyCompleted: false } ? _intro.WindowHandle : 0, saturation, _nativeFailure);
         }
 
         private static void ApplyIntroSaturation(float saturation)

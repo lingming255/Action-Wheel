@@ -30,6 +30,7 @@ namespace Action_Wheel.Overlay
             var failures = new List<string>();
             var nativeSnapshots = new Dictionary<string, ScreenGradeSurface.NativeCallDiagnostics>();
             var nativeDeltas = new Dictionary<string, object>();
+            object? nativeTimings = null;
             long[] nativeHosts = Array.Empty<long>();
             long[] initialOrder = Array.Empty<long>();
             bool? reusedPreviousHosts = null;
@@ -116,6 +117,8 @@ namespace Action_Wheel.Overlay
                     nativeSnapshots["BeforeRent"] = ScreenGradeSurface.GetNativeCallDiagnostics();
                     grade = ScreenGradeSurface.TryCreate(menu!._windowHandle)
                         ?? throw new InvalidOperationException("Native grade creation failed: " + ScreenGradeSurface.LastFailure);
+                    grade.ResetTimingDiagnostics();
+                    grade.MeasureTimings = true;
                     nativeSnapshots["AfterRent"] = ScreenGradeSurface.GetNativeCallDiagnostics();
                     nativeDeltas["Rent"] = OpeningNativeDelta(nativeSnapshots["BeforeRent"], nativeSnapshots["AfterRent"]);
                     nativeHosts = grade.WindowHandles.Select(hwnd => hwnd.ToInt64()).ToArray();
@@ -194,6 +197,8 @@ namespace Action_Wheel.Overlay
                 // only the wrapper's final cleanup destroys the cache. Reclaim stays cold/hidden.
                 try
                 {
+                    nativeTimings = grade?.GetTimingDiagnostics();
+                    if (grade != null) grade.MeasureTimings = false;
                     nativeSnapshots["BeforeReturn"] = ScreenGradeSurface.GetNativeCallDiagnostics();
                     grade?.ReturnToCache();
                     nativeSnapshots["AfterReturn"] = ScreenGradeSurface.GetNativeCallDiagnostics();
@@ -237,6 +242,7 @@ namespace Action_Wheel.Overlay
                     HostsRetainedHiddenAfterReturn = hostsRetainedHiddenAfterReturn,
                     WarmExcludedFromOpeningDispatcherSamples = true,
                     Snapshots = nativeSnapshots, Deltas = nativeDeltas,
+                    Timings = nativeTimings,
                 },
                 Dispatcher = SummariseOpeningSamples(samples.Select(sample => sample.Milliseconds)),
                 DispatcherByPhase = samples.GroupBy(sample => sample.Phase).Select(group => new

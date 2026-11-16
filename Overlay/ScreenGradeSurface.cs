@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Action_Wheel.Services;
 using Microsoft.UI.Dispatching;
@@ -11,41 +13,88 @@ namespace Action_Wheel.Overlay
 {
     /// <summary>
     /// Live 1:1 desktop grading below the wheel. Native magnifier controls retain pixel detail;
-    /// unlike a host backdrop they do not pre-blur the desktop. All calls use the menu UI thread.
+    /// unlike a host backdrop they do not pre-blur the desktop. Each group stays on its creating
+    /// dispatcher; production uses a dedicated native dispatcher, while probes may use the UI.
     /// </summary>
     internal sealed class ScreenGradeSurface : IDisposable
     {
         private const string HostClass = "ActionWheel.ScreenGrade.NativeHost";
         private static readonly NativeWindowProc HostProc = WindowProc;
-        private static readonly List<ScreenGradeSurface> ActiveGroups = new();
+        [ThreadStatic] private static List<ScreenGradeSurface>? _activeGroups;
+        private static List<ScreenGradeSurface> ActiveGroups => _activeGroups ??= new();
+        private static readonly object NativeSessionGate = new();
+        private static int _processSessionUsers, _processSessionThread;
         private static ushort _hostClass;
-        private static int _sessionUsers;
-        private static ScreenGradeSurface? _idleGroup;
-        private static long _initializeCalls, _uninitializeCalls, _createHostCalls, _createMagnifierCalls;
-        private static long _setColorCalls, _setSourceCalls, _invalidateCalls, _showCalls, _hideCalls;
-        private static long _setWindowPosCalls, _setFilterCalls, _cacheRents, _cacheReturns, _cacheWarms;
+        [ThreadStatic] private static int _sessionUsers;
+        [ThreadStatic] private static ScreenGradeSurface? _idleGroup;
+        [ThreadStatic] private static long _initializeCalls, _uninitializeCalls, _createHostCalls, _createMagnifierCalls;
+        [ThreadStatic] private static long _setColorCalls, _setSourceCalls, _invalidateCalls, _showCalls, _hideCalls;
+        [ThreadStatic] private static long _setWindowPosCalls, _setFilterCalls, _cacheRents, _cacheReturns, _cacheWarms;
+        [ThreadStatic] private static string? _lastFailure;
         private readonly List<MonitorSurface> _surfaces = new();
         private nint _menuHwnd;
         private nint _decorationHwnd;
         private readonly bool _canShow, _cacheEligible;
         private DispatcherQueueTimer? _timer;
         private bool _disposed, _sessionOwned, _registered, _filtersDirty, _presented;
+        private Func<bool>? _mayPresent;
+        private DurationSamples _applyTimings, _tickTimings, _tickIntervals;
+        private long _previousMeasuredTick;
+        private int _tickIntervalsOver50Ms, _tickIntervalsOver66Ms;
 
-        internal static string? LastFailure { get; private set; }
+        // Opt-in and instance-local: normal desktop operation collects no timing samples.
+        internal bool MeasureTimings { get; set; }
+        internal object GetTimingDiagnostics()
+        {
+            var sources = new List<object>();
+            foreach (var surface in _surfaces) sources.Add(surface.GetTimingDiagnostics());
+            return new
+            {
+                Enabled = MeasureTimings,
+                TargetTickIntervalMs = 33,
+                Apply = _applyTimings.Snapshot(), Tick = _tickTimings.Snapshot(),
+                TickIntervals = _tickIntervals.Snapshot(),
+                TickIntervalsOver50Ms = _tickIntervalsOver50Ms,
+                TickIntervalsOver66Ms = _tickIntervalsOver66Ms,
+                MonitorSources = sources,
+                Boundary = "Owning-thread native call wall times; no pixel readback or presentation latency measurement.",
+            };
+        }
+
+        internal void ResetTimingDiagnostics()
+        {
+            _applyTimings = _tickTimings = _tickIntervals = default;
+            _previousMeasuredTick = 0;
+            _tickIntervalsOver50Ms = _tickIntervalsOver66Ms = 0;
+            foreach (var surface in _surfaces) surface.ResetTimingDiagnostics();
+        }
+
+        internal static string? LastFailure { get => _lastFailure; private set => _lastFailure = value; }
         internal IReadOnlyList<nint> WindowHandles { get; private set; } = Array.Empty<nint>();
         internal IReadOnlyList<RectInt32> Bounds { get; private set; } = Array.Empty<RectInt32>();
+        internal void SetPresentationGuard(Func<bool>? mayPresent) => _mayPresent = mayPresent;
+        private bool MayPresent => _mayPresent?.Invoke() != false;
 
-        // UI-thread snapshots only. Counters stay in memory; diagnostics compare before/after deltas.
+        private void StopAndHide()
+        {
+            _timer?.Stop();
+            foreach (var surface in _surfaces) surface.Hide();
+            _presented = false;
+        }
+
+        // Owning-thread snapshots only. Counters stay in memory; diagnostics compare deltas.
         internal readonly record struct NativeCallDiagnostics(long Initialize, long Uninitialize,
             long CreateHost, long CreateMagnifier, long SetColorEffect, long SetWindowSource,
             long Invalidate, long ShowWindow, long HideWindow, long SetWindowPos, long SetFilterList,
-            long CacheRents, long CacheReturns, long CacheWarms, int SessionUsers, bool HasIdleGroup);
+            long CacheRents, long CacheReturns, long CacheWarms, int SessionUsers, bool HasIdleGroup,
+            int ProcessSessionUsers, int ProcessSessionThread);
 
         internal static NativeCallDiagnostics GetNativeCallDiagnostics()
             => new(_initializeCalls, _uninitializeCalls, _createHostCalls, _createMagnifierCalls,
                 _setColorCalls, _setSourceCalls, _invalidateCalls, _showCalls, _hideCalls,
                 _setWindowPosCalls, _setFilterCalls, _cacheRents, _cacheReturns, _cacheWarms,
-                _sessionUsers, _idleGroup is { _disposed: false });
+                _sessionUsers, _idleGroup is { _disposed: false }, Volatile.Read(ref _processSessionUsers),
+                Volatile.Read(ref _processSessionThread));
 
         // Capture-excluded inward particles cannot be sampled by a magnifier. Keep their
         // independently graded layer above this surface while the interactive wheel stays on top.
@@ -87,7 +136,7 @@ namespace Action_Wheel.Overlay
         }
 
         /// <summary>
-        /// Builds at most one hidden production group on the menu dispatcher during idle time.
+        /// Builds at most one hidden group on its owning dispatcher during idle time.
         /// No source timer or grading window is shown until a later successful Apply.
         /// </summary>
         internal static bool Warm()
@@ -117,6 +166,7 @@ namespace Action_Wheel.Overlay
             {
                 _timer?.Stop();
                 foreach (var surface in _surfaces) surface.Hide();
+                _mayPresent = null;
                 _presented = false;
                 _menuHwnd = 0;
                 _decorationHwnd = 0;
@@ -179,10 +229,22 @@ namespace Action_Wheel.Overlay
             _cacheEligible = cacheEligible;
             try
             {
-                if (_sessionUsers == 0)
+                lock (NativeSessionGate)
                 {
-                    _initializeCalls++;
-                    Check(MagInitialize(), "Initialize magnifier controls");
+                    // This native control supports one owning thread at a time per process.
+                    // An independent native isolation probe returns ERROR_NOT_SUPPORTED from
+                    // MagSetColorEffect on a second thread even after its own MagInitialize.
+                    // The owner can transfer only after every previous group is destroyed.
+                    int thread = Environment.CurrentManagedThreadId;
+                    if (_processSessionUsers != 0 && _processSessionThread != thread)
+                        throw new InvalidOperationException("Magnifier groups must share one owning thread until its cache is released.");
+                    if (_sessionUsers == 0)
+                    {
+                        _initializeCalls++;
+                        Check(MagInitialize(), "Initialize magnifier controls");
+                    }
+                    _processSessionUsers++;
+                    _processSessionThread = thread;
                 }
                 _sessionUsers++;
                 _sessionOwned = true;
@@ -215,6 +277,8 @@ namespace Action_Wheel.Overlay
         internal bool Apply(float saturation)
         {
             if (_disposed) return false;
+            if (!MayPresent) { StopAndHide(); return false; }
+            long started = MeasureTimings ? Stopwatch.GetTimestamp() : 0;
             try
             {
                 if (!float.IsFinite(saturation)) throw new ArgumentOutOfRangeException(nameof(saturation));
@@ -225,9 +289,14 @@ namespace Action_Wheel.Overlay
                 {
                     // Initial sampling must finish before showing any host. Subsequent saturation
                     // updates touch only the colour matrix; the independent timer owns resampling.
-                    RefreshSources();
+                    if (!RefreshSources()) return false;
                     if (_canShow)
-                        foreach (var surface in _surfaces) surface.ShowBelow(LayerAnchor);
+                        foreach (var surface in _surfaces)
+                        {
+                            if (!MayPresent) { StopAndHide(); return false; }
+                            surface.ShowBelow(LayerAnchor);
+                            if (!MayPresent) { StopAndHide(); return false; }
+                        }
                     _presented = true;
                     // The endpoint remains live even after ScreenGrade's transition timer stops.
                     if (_canShow) _timer!.Start();
@@ -235,13 +304,34 @@ namespace Action_Wheel.Overlay
                 return true;
             }
             catch (Exception exception) { LastFailure = Describe(exception); Dispose(); return false; }
+            finally
+            {
+                if (started != 0) _applyTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
         }
 
         private void OnTick(DispatcherQueueTimer sender, object args)
         {
             if (_disposed || !_presented || !_canShow || !ReferenceEquals(sender, _timer)) return;
+            if (!MayPresent) { StopAndHide(); return; }
+            long started = MeasureTimings ? Stopwatch.GetTimestamp() : 0;
+            if (started != 0)
+            {
+                if (_previousMeasuredTick != 0)
+                {
+                    double interval = Stopwatch.GetElapsedTime(_previousMeasuredTick, started).TotalMilliseconds;
+                    _tickIntervals.Add(interval);
+                    if (interval > 50) _tickIntervalsOver50Ms++;
+                    if (interval > 66) _tickIntervalsOver66Ms++;
+                }
+                _previousMeasuredTick = started;
+            }
             try { SynchronizeLayer(); RefreshSources(); }
             catch (Exception exception) { LastFailure = Describe(exception); Dispose(); }
+            finally
+            {
+                if (started != 0) _tickTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
         }
 
         private void SynchronizeLayer()
@@ -258,9 +348,15 @@ namespace Action_Wheel.Overlay
                 foreach (var surface in _surfaces) surface.OrderBelow(LayerAnchor);
         }
 
-        private void RefreshSources()
+        private bool RefreshSources()
         {
-            foreach (var surface in _surfaces) surface.RefreshSource();
+            foreach (var surface in _surfaces)
+            {
+                if (!MayPresent) { StopAndHide(); return false; }
+                surface.RefreshSource(MeasureTimings);
+            }
+            if (!MayPresent) { StopAndHide(); return false; }
+            return true;
         }
 
         private static void RefreshFilters()
@@ -299,24 +395,40 @@ namespace Action_Wheel.Overlay
             if (_registered) { ActiveGroups.Remove(this); _registered = false; }
             for (int index = _surfaces.Count - 1; index >= 0; index--) _surfaces[index].Dispose();
             _surfaces.Clear();
-            // Probes may temporarily coexist. Keep the process session until the last owner,
-            // and remove retired HWNDs from every remaining control's exclusion list.
+            // Probes may temporarily coexist. Keep this thread's session until its last owner,
+            // and remove retired HWNDs from the remaining local controls' exclusion lists.
             try { if (ActiveGroups.Count > 0) RefreshFilters(); }
             catch (Exception exception) { LastFailure = Describe(exception); }
             if (_sessionOwned)
             {
                 _sessionOwned = false;
-                if (--_sessionUsers == 0) { _uninitializeCalls++; MagUninitialize(); }
+                _sessionUsers--;
+                lock (NativeSessionGate)
+                {
+                    _processSessionUsers--;
+                    if (_sessionUsers == 0) { _uninitializeCalls++; MagUninitialize(); }
+                    if (_processSessionUsers == 0) _processSessionThread = 0;
+                }
             }
         }
 
         private sealed class MonitorSurface : IDisposable
         {
             private readonly NativeRect _source;
+            private DurationSamples _sourceTimings, _invalidateTimings;
             private bool _shown, _hasOrder;
             private nint _orderedAnchor;
             internal nint Host { get; private set; }
             internal nint Child { get; private set; }
+
+            internal object GetTimingDiagnostics() => new
+            {
+                X = _source.Left, Y = _source.Top,
+                Width = _source.Right - _source.Left, Height = _source.Bottom - _source.Top,
+                SetWindowSource = _sourceTimings.Snapshot(), Invalidate = _invalidateTimings.Snapshot(),
+            };
+
+            internal void ResetTimingDiagnostics() => _sourceTimings = _invalidateTimings = default;
 
             internal MonitorSurface(RectInt32 bounds, bool captureExcluded)
             {
@@ -354,14 +466,21 @@ namespace Action_Wheel.Overlay
                 Check(MagSetColorEffect(Child, ref color), "Set Rec601 grading matrix");
             }
 
-            internal void RefreshSource()
+            internal void RefreshSource(bool measureTimings = false)
             {
                 // MagSetWindowSource takes RECT by value. Its unchanged 1:1 rectangle must still
                 // be refreshed independently, so underlying content keeps moving at saturation 0.
                 _setSourceCalls++;
+                long started = measureTimings ? Stopwatch.GetTimestamp() : 0;
                 Check(MagSetWindowSource(Child, _source), "Refresh live magnifier source");
+                if (started != 0)
+                {
+                    _sourceTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                    started = Stopwatch.GetTimestamp();
+                }
                 _invalidateCalls++;
                 Check(InvalidateRect(Child, 0, false), "Invalidate live grading pixels");
+                if (started != 0) _invalidateTimings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
 
             internal void ShowBelow(nint menuHwnd)
@@ -403,14 +522,17 @@ namespace Action_Wheel.Overlay
 
         private static void EnsureHostClass()
         {
-            if (_hostClass != 0) return;
-            var definition = new WindowClass
+            lock (NativeSessionGate)
             {
-                Size = (uint)Marshal.SizeOf<WindowClass>(), Instance = GetModuleHandle(null),
-                WindowProc = Marshal.GetFunctionPointerForDelegate(HostProc), ClassName = HostClass,
-            };
-            _hostClass = RegisterClassEx(ref definition);
-            Check(_hostClass != 0, "Register native grading host");
+                if (_hostClass != 0) return;
+                var definition = new WindowClass
+                {
+                    Size = (uint)Marshal.SizeOf<WindowClass>(), Instance = GetModuleHandle(null),
+                    WindowProc = Marshal.GetFunctionPointerForDelegate(HostProc), ClassName = HostClass,
+                };
+                _hostClass = RegisterClassEx(ref definition);
+                Check(_hostClass != 0, "Register native grading host");
+            }
         }
 
         private static nint WindowProc(nint hwnd, uint message, nint wParam, nint lParam)
@@ -466,7 +588,9 @@ namespace Action_Wheel.Overlay
                 SessionLifetimeVerified = true, UsedDesktopCapture = false, DisplayedEffect = false };
         }
 
-        private static string Describe(Exception exception) => $"{exception.GetType().Name}: {exception.Message}";
+        private static string Describe(Exception exception) => exception is Win32Exception native
+            ? $"{exception.GetType().Name} ({native.NativeErrorCode}): {exception.Message}"
+            : $"{exception.GetType().Name}: {exception.Message}";
         private static void Check(bool condition, string operation)
         {
             if (!condition) throw new Win32Exception(Marshal.GetLastWin32Error(), operation);

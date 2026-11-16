@@ -80,13 +80,18 @@ namespace Action_Wheel.Services
         /// This is the earliest safe moment to start the opening desaturation transition.
         /// </summary>
         public static Task<RefreshFrame?> CaptureAsync(PointInt32 position, Action<byte[], RectInt32> captured,
-            CancellationToken cancellation = default, RefreshAnimationSettings? settings = null)
+            CancellationToken cancellation = default, RefreshAnimationSettings? settings = null,
+            Task? originalColorReady = null)
             => Task.Run(async () =>
             {
                 try
                 {
                     // Cancel only this gesture's wait, never the process-wide training task.
                     await RefreshRenderWarmup.EnsureAsync().WaitAsync(cancellation).ConfigureAwait(false);
+                    // Native grading now lives on its own dispatcher. A replacement capture
+                    // must wait for the previous layer to hide, without blocking menu input.
+                    if (originalColorReady != null)
+                        await originalColorReady.WaitAsync(cancellation).ConfigureAwait(false);
                     return Capture(position, captured, cancellation,
                         new RefreshTimingProfile(settings ?? RefreshAnimationSettings.Default, instantStart: true));
                 }
@@ -118,7 +123,7 @@ namespace Action_Wheel.Services
                 int originX = Math.Clamp(position.X - x, 0, w - 1);
                 int originY = Math.Clamp(position.Y - y, 0, h - 1);
                 cancellation.ThrowIfCancellationRequested();
-                RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h);
+                RefreshDepthMap depth = RefreshDepthEstimator.Estimate(pixels, w, h, cancellation);
                 cancellation.ThrowIfCancellationRequested();
                 return CreatePrepared(pixels, depth, new RectInt32(x, y, w, h), originX, originY, timing, cancellation);
             }

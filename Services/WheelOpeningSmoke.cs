@@ -46,6 +46,17 @@ namespace Action_Wheel.Services
                 bool passed = true;
                 foreach (object round in rounds)
                     passed &= JsonSerializer.SerializeToElement(round).GetProperty("Passed").GetBoolean();
+                // Magnifier colour effects reject concurrent owner threads in one process.
+                // Retire the direct baseline before measuring the production native worker.
+                var beforeWorkerTransfer = ScreenGradeSurface.GetNativeCallDiagnostics();
+                ScreenGradeSurface.ShutdownCache();
+                var afterWorkerTransfer = ScreenGradeSurface.GetNativeCallDiagnostics();
+                if (afterWorkerTransfer.ProcessSessionUsers != 0 || afterWorkerTransfer.HasIdleGroup)
+                    throw new InvalidOperationException("The direct native owner was not released before worker diagnostics.");
+                report["NativeOwnerTransfer"] = new { Before = beforeWorkerTransfer, After = afterWorkerTransfer };
+                object worker = await ScreenGradeDispatcherProbe.RunAsync();
+                report["Worker"] = worker;
+                passed &= JsonSerializer.SerializeToElement(worker).GetProperty("Passed").GetBoolean();
                 report["Passed"] = passed;
                 report["Kind"] = "Opt-in cached native opening component and UI dispatcher timing";
                 report["Appearance"] = appearance;

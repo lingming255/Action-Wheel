@@ -21,6 +21,7 @@ namespace Action_Wheel.Services
         private readonly DispatcherQueue _dispatcherQueue;
         private readonly ConfigWatcher _configWatcher;
         private readonly DispatcherQueueTimer _hookHealthTimer;
+        private LatestGestureUpdate<PointerUpdate>? _pointerUpdates;
         private DispatcherQueueTimer? _openingPreparationTimer;
         private RadialMenu? _currentMenu;
         private readonly HashSet<RadialMenu> _playingRefreshes = new();
@@ -66,6 +67,7 @@ namespace Action_Wheel.Services
         private bool _gestureActive;
         private PointInt32 _keyboardGestureOrigin;
         private bool _keyboardGestureActive;
+        private readonly record struct PointerUpdate(PointInt32 Position, int? Tag, bool AllowHold);
 
         private PointInt32? _lastHealthCursor;
         private long _lastHealthMouseCallback;
@@ -215,7 +217,7 @@ namespace Action_Wheel.Services
                 DestroyMenu(menu);
             _playingRefreshes.Clear();
             RefreshReclaimIntro.ClearCache();
-            ScreenGradeSurface.ShutdownCache();
+            ScreenGrade.ReleaseCache();
         }
 
         private void PrepareOpeningResources()
@@ -225,7 +227,7 @@ namespace Action_Wheel.Services
             // its default position. Ordinary wheel sessions still retain their prepared HWND.
             if (_playingRefreshes.Count != 0) return;
             PrepareMainMenu();
-            ScreenGradeSurface.Warm();
+            ScreenGrade.Warm();
             if (MouseHook.TryGetCursorPosition(out var cursor))
                 RefreshReclaimIntro.WarmAt(cursor, _reclaimSettings);
         }
@@ -684,12 +686,7 @@ namespace Action_Wheel.Services
                     position.X - _gestureOrigin.X,
                     position.Y - _gestureOrigin.Y);
 
-                _dispatcherQueue.TryEnqueue(() =>
-                {
-                    if (_stopped || requestGeneration != _menuRequestGeneration) return;
-                    // Radius and child choice can change without crossing a main-ring sector.
-                    _currentMenu?.UpdateGesture(position, mouseTag, allowHold: true);
-                });
+                QueuePointerUpdate(requestGeneration, position, mouseTag, allowHold: true);
                 return;
             }
 
@@ -701,11 +698,25 @@ namespace Action_Wheel.Services
                 position.X - _keyboardGestureOrigin.X,
                 position.Y - _keyboardGestureOrigin.Y);
 
-            _dispatcherQueue.TryEnqueue(() =>
+            QueuePointerUpdate(keyboardRequestGeneration, position, keyboardTag, allowHold: false);
+        }
+
+        private void QueuePointerUpdate(long generation, PointInt32 position, int? tag, bool allowHold)
+        {
+            // High-polling mice must not queue thousands of obsolete UI turns while capture or
+            // a native presentation call is busy. Release still uses its exact position, in order.
+            _pointerUpdates ??= new LatestGestureUpdate<PointerUpdate>(
+                action => _dispatcherQueue.TryEnqueue(() => action()), (requestGeneration, update, interrupted) =>
             {
-                if (_stopped || keyboardRequestGeneration != _menuRequestGeneration) return;
-                _currentMenu?.UpdateGesture(position, keyboardTag, allowHold: false);
-            });
+                if (_stopped || requestGeneration != _menuRequestGeneration) return;
+                // Radius and child choice can change without crossing a main-ring sector.
+                _currentMenu?.UpdateGesture(update.Position, update.Tag, update.AllowHold, restartHold: interrupted);
+            }, (before, after) => before.Tag != after.Tag
+                // A group's intermediate child/gap hit tests are intentionally not run in the
+                // hook. When positions are skipped there, restart its hold rather than risk an
+                // old child firing after an unobserved leave-and-return.
+                || (_currentMenu?.HasExpandedGroup == true && before.Position != after.Position));
+            _pointerUpdates.Submit(generation, new PointerUpdate(position, tag, allowHold));
         }
 
         /// <summary>
@@ -960,6 +971,7 @@ namespace Action_Wheel.Services
             // Closed can arrive after a replacement menu was created. End the previous owner
             // explicitly before its colour matrix can leak into the next original capture.
             _ = EndGrade();
+            Task originalColorReady = ScreenGrade.NativeRestoreCompleted;
             var cancellation = new CancellationTokenSource();
             var capturedOnUi = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _refreshCapturePresented = capturedOnUi;
@@ -993,7 +1005,7 @@ namespace Action_Wheel.Services
                         capturedOnUi.TrySetResult(false);
                     }
                 })) capturedOnUi.TrySetResult(false);
-            }, cancellation.Token, settings: _refreshSettings);
+            }, cancellation.Token, settings: _refreshSettings, originalColorReady: originalColorReady);
             _refreshIntro = RefreshReclaimIntro.TryStart(position, WinRT.Interop.WindowNative.GetWindowHandle(menu), _reclaimSettings);
             ScreenGrade.BindMenu(WinRT.Interop.WindowNative.GetWindowHandle(menu), _refreshIntro, menu.ApplyGlassSaturation);
             _ = PrepareRefreshPresentationAsync(menu, _refreshFrame);

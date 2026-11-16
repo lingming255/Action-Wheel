@@ -48,18 +48,23 @@ namespace Action_Wheel.Services
                 pixels[p + 3] = 255;
             }
             cancellation.ThrowIfCancellationRequested();
-            _ = Estimate(pixels, width, height);
+            _ = Estimate(pixels, width, height, cancellation);
             cancellation.ThrowIfCancellationRequested();
         }
 
-        public static RefreshDepthMap Estimate(byte[] bgra, int width, int height)
+        public static RefreshDepthMap Estimate(byte[] bgra, int width, int height,
+            CancellationToken cancellation = default)
         {
             ArgumentNullException.ThrowIfNull(bgra);
             if (width <= 0 || height <= 0 || bgra.LongLength != (long)width * height * 4)
                 throw new ArgumentException("Depth input must be a complete top-down BGRA capture.", nameof(bgra));
 
+            cancellation.ThrowIfCancellationRequested();
             lock (Gate)
             {
+                // A gesture can finish while waiting behind an earlier inference. Do not run
+                // that obsolete request after the shared session finally becomes available.
+                cancellation.ThrowIfCancellationRequested();
                 InferenceSession session = _session ??= LoadSession();
                 // This ONNX export accepts dynamic spatial dimensions in multiples of 14.
                 // Bound the longest side for interactive desktop use, preserving aspect ratio;
@@ -69,8 +74,10 @@ namespace Action_Wheel.Services
                 int inputHeight = Math.Max(14, (int)Math.Round(height * scale / 14) * 14);
                 float[] inputData = ResizeAndNormalize(bgra, width, height, inputWidth, inputHeight);
                 var inputTensor = new DenseTensor<float>(inputData, [1, 3, inputHeight, inputWidth]);
+                cancellation.ThrowIfCancellationRequested();
                 using var results = session.Run(
                     [NamedOnnxValue.CreateFromTensor("pixel_values", inputTensor)]);
+                cancellation.ThrowIfCancellationRequested();
                 Tensor<float> prediction = results.Single(result => result.Name == "predicted_depth").AsTensor<float>();
                 ReadOnlySpan<int> dimensions = prediction.Dimensions;
                 if (dimensions.Length != 3 || dimensions[0] != 1

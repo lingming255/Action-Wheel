@@ -57,7 +57,10 @@ namespace Action_Wheel.Overlay
             try
             {
                 var timer = Stopwatch.StartNew();
-                menu = new RadialMenu(actions, appearance) { ActionTargetWindow = originalForeground };
+                menu = new RadialMenu(actions, appearance)
+                {
+                    ActionTargetWindow = originalForeground, MeasureShowTimings = true,
+                };
                 constructMs = timer.Elapsed.TotalMilliseconds;
                 menu.SessionEnded += (_, _) => sessions++;
                 menu.Closed += (_, _) => closed++;
@@ -81,11 +84,20 @@ namespace Action_Wheel.Overlay
                 int? primedChildren = null, primedRootChildren = null;
                 object[]? groupButtons = null;
                 object? holdIndicator = null;
-                for (int round = 0; round < 6; round++)
+                // Keep the original twice-across-all-monitors rounds, then measure repeated
+                // openings at different anchors on each monitor. A final injected frame checks
+                // that the fast path still repairs frame bits reintroduced by a presenter.
+                var cases = monitors.Concat(monitors)
+                    .Select(monitor => (Monitor: monitor, Scenario: "cross-monitor")).ToList();
+                foreach (var monitor in monitors)
+                    for (int repeat = 0; repeat < 3; repeat++) cases.Add((monitor, "same-monitor"));
+                cases.Add((monitors[^1], "repair-injected-frame"));
+                for (int round = 0; round < cases.Count; round++)
                 {
-                    var monitor = monitors[round % monitors.Count];
-                    var point = new PointInt32((monitor.Bounds.left + monitor.Bounds.right) / 2,
-                        (monitor.Bounds.top + monitor.Bounds.bottom) / 2);
+                    var (monitor, scenario) = cases[round];
+                    int anchorOffset = scenario == "same-monitor" ? 30 * (round % 3 - 1) : 0;
+                    var point = new PointInt32((monitor.Bounds.left + monitor.Bounds.right) / 2 + anchorOffset,
+                        (monitor.Bounds.top + monitor.Bounds.bottom) / 2 + anchorOffset);
                     var roundFailures = new List<string>();
                     void RoundCheck(bool condition, string message)
                     {
@@ -93,11 +105,46 @@ namespace Action_Wheel.Overlay
                     }
                     menu.ActionTargetWindow = originalForeground;
                     Cloak(menu);
+                    bool previouslyShown = menu._hasShownMenu;
+                    bool sameMonitorBeforeShow = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                        == MonitorFromPoint(new POINT(point.X, point.Y), MONITOR_DEFAULTTONEAREST);
+                    bool injectedFrame = scenario == "repair-injected-frame";
+                    if (injectedFrame)
+                    {
+                        SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) | WS_DLGFRAME);
+                        SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_WINDOWEDGE);
+                    }
                     timer.Restart();
                     menu.ShowAtPosition(point);
                     double showMs = timer.Elapsed.TotalMilliseconds;
+                    var showStages = menu.LastShowTimings;
                     PositionProbeRequireCloaked(hwnd);
                     RestoreForeground();
+                    RoundCheck(showStages != null
+                        && showStages.MonitorStagingMoved == (!previouslyShown || !sameMonitorBeforeShow),
+                        "A parked warm wheel staged on its existing monitor or skipped a necessary monitor migration.");
+                    int nativeStyle = GetWindowLong(hwnd, GWL_STYLE);
+                    int nativeExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+                    bool frameless = (nativeStyle & (WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME)) == 0
+                        && (nativeExStyle & (WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME)) == 0;
+                    RoundCheck(frameless, "A reused Show retained native frame bits.");
+                    RoundCheck((nativeExStyle & (WS_EX_NOACTIVATE | WS_EX_TRANSPARENT)) == 0,
+                        "A reused interactive wheel retained no-activate or click-through styles.");
+                    bool cornersSupported = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+                    int corners = 0;
+                    bool cornersCorrect = !cornersSupported || (PositionProbeGetDwmAttribute(hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE, out corners, sizeof(int)) == 0 && corners == DWMWCP_DONOTROUND);
+                    RoundCheck(cornersCorrect, "A reused wheel lost its no-rounding DWM preference.");
+                    uint nativeDpi = GetDpiForWindow(hwnd);
+                    bool clientBoundsRead = menu.TryGetScreenClientBounds(out var clientBounds);
+                    int expectedSize = menu.PhysicalMenuSize;
+                    bool anchorCorrect = clientBoundsRead
+                        && clientBounds.left == point.X - (int)Math.Round(expectedSize / 2.0)
+                        && clientBounds.top == point.Y - (int)Math.Round(expectedSize / 2.0)
+                        && clientBounds.right - clientBounds.left == expectedSize
+                        && clientBounds.bottom - clientBounds.top == expectedSize;
+                    RoundCheck(nativeDpi == monitor.Dpi && anchorCorrect,
+                        "A reused wheel did not preserve its target DPI, size and pointer-centred bounds.");
                     RoundCheck(!menu.IsParked && menu.OwnsInput && !menu._inputReturned,
                         "Show did not reset parked/input-returned state for a new session.");
                     RoundCheck(!menu._trackingGesture && menu._highlightedTag == null
@@ -162,8 +209,13 @@ namespace Action_Wheel.Overlay
                         "A deferred layout/hold callback changed the parked menu.");
                     rounds.Add(new
                     {
-                        Round = round, Monitor = monitor.Index, Passed = roundFailures.Count == 0,
+                        Round = round, Monitor = monitor.Index, Scenario = scenario,
+                        SameMonitorBeforeShow = sameMonitorBeforeShow, Passed = roundFailures.Count == 0,
                         ShowSynchronousMs = showMs, CloseSynchronousMs = closeMs,
+                        ShowTimings = showStages,
+                        Frameless = frameless, NativeStyle = nativeStyle, NativeExtendedStyle = nativeExStyle,
+                        CornersCorrect = cornersCorrect, CornerPreference = corners, NativeDpi = nativeDpi,
+                        AnchorCorrect = anchorCorrect, FrameInjected = injectedFrame,
                         Hwnd = hwnd.ToInt64(), GlassIdentity = RuntimeHelpers.GetHashCode(glass!),
                         MainButtonIdentities = buttons.Select(RuntimeHelpers.GetHashCode).ToArray(),
                         VisualChildren = menu.ButtonsCanvas.Children.Count,
@@ -176,7 +228,7 @@ namespace Action_Wheel.Overlay
                 double destroyMs = timer.Elapsed.TotalMilliseconds;
                 await Task.Delay(50);
                 bool parkedDestroyed = menu._closed && menu._glassSurface == null
-                    && !PositionProbeIsWindow(hwnd) && !menu.CanReuse && sessions == 6 && closed == 1;
+                    && !PositionProbeIsWindow(hwnd) && !menu.CanReuse && sessions == cases.Count && closed == 1;
                 Check(parkedDestroyed, "Destroying a parked menu did not release its HWND/glass exactly once.");
                 parkedDestruction = new { Passed = parkedDestroyed, SynchronousMs = destroyMs,
                     ClosedCount = closed, SessionEndedCount = sessions, NativeDestroyed = !PositionProbeIsWindow(hwnd) };

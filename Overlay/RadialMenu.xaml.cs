@@ -55,6 +55,9 @@ namespace Action_Wheel.Overlay
         [DllImport("user32.dll")]
         private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
@@ -157,6 +160,8 @@ namespace Action_Wheel.Overlay
         private readonly WindowSubclassProc _backgroundSubclass;
         private IntPtr _backgroundBrush;
         private IntPtr _windowHandle;
+        private bool _frameCornersConfigured;
+        private bool _hasShownMenu;
 
         /// <summary>
         /// Menu size in DIPs. Derived from the ring rather than fixed at 400: a wide
@@ -646,9 +651,12 @@ namespace Action_Wheel.Overlay
                 ShowSelectionInfo(ResolveGroupChild(parent, child));
         }
 
-        public void UpdateGesture(PointInt32 point, int? mainTag, bool allowHold)
+        internal bool HasExpandedGroup => _expandedGroupTag != null;
+
+        public void UpdateGesture(PointInt32 point, int? mainTag, bool allowHold, bool restartHold = false)
         {
             if (_closed || _closing) return;
+            if (restartHold) DisarmHold();
             _trackingGesture = true;
             var child = GroupChildAt(point);
             bool changed = _highlightedChild != child;
@@ -656,7 +664,7 @@ namespace Action_Wheel.Overlay
             {
                 HighlightTag(null);
                 HighlightChild(child);
-                if (changed && allowHold && child.Tag is string text
+                if ((changed || restartHold) && allowHold && child.Tag is string text
                     && TryParseChildTag(text, out int parent, out int index)
                     && ResolveGroupChild(parent, index) is ActionItem action)
                     ArmChildHold(parent, index, action, child);
@@ -674,7 +682,7 @@ namespace Action_Wheel.Overlay
                 DisarmHold();
                 return;
             }
-            bool mainChanged = _highlightedTag != mainTag || changed;
+            bool mainChanged = _highlightedTag != mainTag || changed || restartHold;
             HighlightTag(mainTag);
             if (mainChanged)
             {
@@ -1496,24 +1504,45 @@ namespace Action_Wheel.Overlay
         /// wholesale drops WS_CLIPCHILDREN/WS_CLIPSIBLINGS, which is what made the menu render
         /// blurry after the opening animation (see doc/).
         /// </remarks>
-        private static void RemoveWindowFrame(IntPtr hwnd)
+        private void RemoveWindowFrame(IntPtr hwnd)
         {
-            var style = GetWindowLong(hwnd, GWL_STYLE);
-            style &= ~(WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME);
-            SetWindowLong(hwnd, GWL_STYLE, style);
+            int style = GetWindowLong(hwnd, GWL_STYLE);
+            int framelessStyle = style & ~(WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME);
+            bool changed = framelessStyle != style;
+            if (framelessStyle != style)
+            {
+                SetWindowLong(hwnd, GWL_STYLE, framelessStyle);
+                _showTimings?.RecordFrameStyleWrite();
+            }
 
-            var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            exStyle &= ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME);
-            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+            int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            int framelessExStyle = exStyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME);
+            if (framelessExStyle != exStyle)
+            {
+                SetWindowLong(hwnd, GWL_EXSTYLE, framelessExStyle);
+                _showTimings?.RecordFrameStyleWrite();
+                changed = true;
+            }
 
             // Windows 11 rounds top-level windows; on a transparent overlay the rounding is visible
-            // as the curved corners of that same unwanted outline.
-            int corners = DWMWCP_DONOTROUND;
-            DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corners, sizeof(int));
+            // as the curved corners of that same unwanted outline. This preference belongs to the
+            // HWND and survives hide/show; only retry it if the initial configuration failed.
+            if (!_frameCornersConfigured && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+            {
+                int corners = DWMWCP_DONOTROUND;
+                _frameCornersConfigured = DwmSetWindowAttribute(hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE, ref corners, sizeof(int)) == 0;
+                _showTimings?.RecordCornerPreferenceWrite();
+            }
 
-            // The cached frame is only recomputed when the window is told its frame changed.
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            // Notify Windows when a presenter actually put a frame back. Repeating FRAMECHANGED
+            // for an unchanged reused HWND needlessly performs synchronous non-client layout.
+            if (changed)
+            {
+                SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                _showTimings?.RecordFrameChange();
+            }
         }
 
         /// <summary>
@@ -1706,7 +1735,7 @@ namespace Action_Wheel.Overlay
             if (gpu == null) return;
             try
             {
-                _gpuRefreshPlayback = new GpuRefreshPlayback(gpu, RefreshLayer, ownsRenderer: false);
+                _gpuRefreshPlayback = new GpuRefreshPlayback(gpu, RefreshLayer, ownsRenderer: false, window: _windowHandle);
             }
             catch (Exception)
             {
@@ -2154,32 +2183,63 @@ namespace Action_Wheel.Overlay
         {
             if (_appWindow == null || _closed || (_closing && !_parked)) return;
             bool prepared = _menuVisualsReady;
-            BeginMenuSession();
-            _menuAnchor = position;
-            // Only a new hidden window needs the staging move. Repositioning an already-shown
-            // wheel must never expose the monitor-centre staging position.
-            if (_menuDpiRoot == null) MoveToTargetMonitor(position);
-            AlignMenuToAnchor();
+            bool wasParked = _parked;
+            var timings = MeasureShowTimings ? new ShowTimingCapture(prepared) : null;
+            _showTimings = timings;
+            try
+            {
+                BeginMenuSession();
+                timings?.Mark("BeginMenuSession");
+                _menuAnchor = position;
+                // A parked wheel retains its HWND monitor and physical size. Only its first show
+                // or a hidden move to another monitor needs the DPI staging position; the DPI
+                // subscription is detached on every park and cannot identify a cold window.
+                bool stageMonitor = !_hasShownMenu || (wasParked
+                    && MonitorFromWindow(_windowHandle, MONITOR_DEFAULTTONEAREST)
+                        != MonitorFromPoint(new POINT(position.X, position.Y), MONITOR_DEFAULTTONEAREST));
+                if (stageMonitor)
+                {
+                    MoveToTargetMonitor(position);
+                    timings?.RecordMonitorStagingMove();
+                }
+                timings?.Mark("MoveToTargetMonitor");
+                AlignMenuToAnchor();
+                timings?.Mark("AlignBeforeActivation");
 
-            // Position is set BEFORE Activate() so the menu does not flash somewhere else, but it
-            // has to be set AGAIN afterwards: the first Activate() is when the window is actually
-            // shown, and Win32 applies the default position (CW_USEDEFAULT/cascade) reserved for
-            // the window, overwriting the earlier Move - which is why the menu used to pop up in a
-            // corner of the screen instead of right under the cursor.
-            Activate();
-            AcquireInputFocus();
+                // Position is set BEFORE Activate() so the menu does not flash somewhere else, but it
+                // has to be set AGAIN afterwards: the first Activate() is when the window is actually
+                // shown, and Win32 applies the default position (CW_USEDEFAULT/cascade) reserved for
+                // the window, overwriting the earlier Move - which is why the menu used to pop up in a
+                // corner of the screen instead of right under the cursor.
+                Activate();
+                timings?.Mark("Activate");
+                AcquireInputFocus();
+                timings?.Mark("AcquireInputFocus");
 
-            // Same reason the Move is repeated: showing the window is when the frame is finally
-            // realised, and WinUI puts WS_DLGFRAME/WS_EX_WINDOWEDGE back. Stripping them once in
-            // the constructor leaves the outline visible on the menu the user actually sees.
-            RemoveWindowFrame(_windowHandle);
-            AlignMenuToAnchor();
-            // Activation can change z-order even when the native bounds already match.
-            SetWindowPos(_windowHandle, HWND_TOPMOST, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            WatchMenuDpi();
-            QueueMenuPlacement();
-            if (prepared) StartPreparedOpening();
+                // Same reason the Move is repeated: showing the window is when the frame is finally
+                // realised, and WinUI puts WS_DLGFRAME/WS_EX_WINDOWEDGE back. Stripping them once in
+                // the constructor leaves the outline visible on the menu the user actually sees.
+                RemoveWindowFrame(_windowHandle);
+                timings?.Mark("RemoveWindowFrame");
+                AlignMenuToAnchor();
+                timings?.Mark("AlignAfterActivation");
+                // Activation can change z-order even when the native bounds already match.
+                SetWindowPos(_windowHandle, HWND_TOPMOST, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                timings?.Mark("SetTopmost");
+                WatchMenuDpi();
+                QueueMenuPlacement();
+                timings?.Mark("WatchAndQueuePlacement");
+                if (prepared) StartPreparedOpening();
+                timings?.Mark("StartPreparedOpening");
+                _hasShownMenu = true;
+            }
+            finally
+            {
+                timings?.Complete();
+                LastShowTimings = timings;
+                _showTimings = null;
+            }
         }
 
         private void UpdateButtonPositions(double radius)

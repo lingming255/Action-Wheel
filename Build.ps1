@@ -191,7 +191,7 @@ function Invoke-VerifyRefresh {
 function Invoke-VerifyApplication {
     Write-Step 'Verifying application behavior with isolated checks'
     foreach ($check in @('QuickAddCheck', 'NoteBoardCheck', 'MouseDispatchCheck', 'RingGestureTests',
-        'QuickInfoTests', 'ReclaimSettingsCheck', 'RefreshTimingCheck', 'SmokeReportCheck')) {
+        'QuickInfoTests', 'ReclaimSettingsCheck', 'RefreshTimingCheck', 'SmokeReportCheck', 'WheelSoundRecoveryCheck')) {
         $tool = Join-Path $root "Tools\$check\$check.csproj"
         Invoke-Dotnet @('run', '--project', $tool, '-c', 'Release', '--nologo')
     }

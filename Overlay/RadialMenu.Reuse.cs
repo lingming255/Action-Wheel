@@ -86,8 +86,9 @@ namespace Action_Wheel.Overlay
             {
                 const int sessionBits = WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | 0x80000;
                 int current = GetWindowLong(_windowHandle, GWL_EXSTYLE);
-                SetWindowLong(_windowHandle, GWL_EXSTYLE,
-                    (current & ~sessionBits) | (_interactiveExtendedStyle & sessionBits));
+                int interactive = (current & ~sessionBits) | (_interactiveExtendedStyle & sessionBits);
+                if (interactive != current)
+                    SetWindowLong(_windowHandle, GWL_EXSTYLE, interactive);
             }
             else _interactiveExtendedStyle = GetWindowLong(_windowHandle, GWL_EXSTYLE);
         }
@@ -97,11 +98,16 @@ namespace Action_Wheel.Overlay
             if (_closed || _parked || _preparingReuse || _closing || IsRefreshPlaying) return;
             if (_openingGeneration == _sessionGeneration) return;
             _openingGeneration = _sessionGeneration;
+            _showTimings?.BeginPreparedOpening();
             if (_glassSurface?.IsConnected == false) _glassSurface = null;
             if (_glassSurface == null) ConnectGlassMaterial();
+            _showTimings?.MarkPreparedOpening("ValidateAndConnectGlass");
             _glassSurface?.Resume();
+            _showTimings?.MarkPreparedOpening("ResumeGlass");
             BeginGlassOpening();
+            _showTimings?.MarkPreparedOpening("BeginGlassOpening");
             WheelSounds.Play(WheelSound.Open);
+            _showTimings?.MarkPreparedOpening("QueueOpeningSound");
         }
 
         private void ResetInteraction()

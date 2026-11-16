@@ -156,7 +156,49 @@ bool SendKey(KeyboardHook hook, int message, uint key, nint marker = default)
     Require(SendKey(hook, 0x100, 0x20) && SendKey(hook, 0x100, 0x20), "QuickInfo Space and its repeats stay consumed");
     Require(SendKey(hook, 0x101, 0x20) && opened == 1 && released == 1, "QuickInfo still completes once on Space UP");
 }
-Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { Passed = true, Checks = checks, LinkedActualMouseHook = true, LinkedActualKeyboardHook = true, InstalledHooks = false, UsedSendInput = false }));
+// Exercise the production scheduler with a busy dispatcher, without sending real pointer input.
+{
+    var queued = new Queue<Action>();
+    var applied = new List<(long Gesture, int Position)>();
+    var interrupted = new List<bool>();
+    var latest = new Action_Wheel.Core.LatestGestureUpdate<int>(
+        callback => { queued.Enqueue(callback); return true; },
+        (gesture, point, resetHold) => { applied.Add((gesture, point)); interrupted.Add(resetHold); },
+        (before, after) => before != after);
+    for (int point = 0; point < 10000; point++) latest.Submit(1, point);
+    Require(queued.Count == 1, "A busy dispatcher must keep only one pointer turn per gesture");
+    queued.Dequeue()();
+    Require(applied.SequenceEqual(new[] { (1L, 9999) }), "Pointer feedback must use the latest position");
+    latest.Submit(1, 10);
+    latest.Submit(1, 11);
+    latest.Submit(1, 10);
+    queued.Dequeue()();
+    Require(interrupted.Last(), "A leave-and-return must restart hold even when the final selection is unchanged");
+    latest.Submit(1, 20);
+    queued.Enqueue(() => applied.Add((1, -1))); // Exact release remains behind its pending movement.
+    queued.Dequeue()();
+    queued.Dequeue()();
+    Require(applied.TakeLast(2).SequenceEqual(new[] { (1L, 20), (1L, -1) }), "Coalescing must preserve release order");
+    latest.Submit(1, 21);
+    queued.Enqueue(() => applied.Add((2, -2))); // Opening the next gesture.
+    latest.Submit(2, 30);
+    queued.Dequeue()();
+    queued.Dequeue()();
+    queued.Dequeue()();
+    Require(applied.TakeLast(2).SequenceEqual(new[] { (2L, -2), (2L, 30) }),
+        "A stale queued update must not update the new wheel before its opening turn");
+    bool accepting = false;
+    var recovered = new Action_Wheel.Core.LatestGestureUpdate<int>(
+        callback => { if (!accepting) return false; queued.Enqueue(callback); return true; },
+        (gesture, point, _) => applied.Add((gesture, point)), (before, after) => before != after);
+    recovered.Submit(3, 1);
+    accepting = true;
+    recovered.Submit(3, 2);
+    Require(queued.Count == 1, "A rejected dispatcher post must not strand later pointer updates");
+    queued.Dequeue()();
+    Require(applied.Last() == (3L, 2), "Recovered dispatch must use the fresh value");
+}
+Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { Passed = true, Checks = checks, LinkedActualMouseHook = true, LinkedActualKeyboardHook = true, LinkedPointerScheduler = true, InstalledHooks = false, UsedSendInput = false }));
 
 [StructLayout(LayoutKind.Sequential)] struct TestMouseData { public int X, Y; public uint MouseData, Flags, Time; public nuint ExtraInfo; }
 [StructLayout(LayoutKind.Sequential)] struct TestKeyData { public uint Key, Scan, Flags, Time; public nint ExtraInfo; }

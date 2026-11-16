@@ -183,7 +183,7 @@ namespace Action_Wheel.Services
                 var reference = new SpectrumOverlayRefreshRenderer(width, height, source,
                     new RefreshDepthMap(width, height, depth), width / 2, height / 2);
                 renderer = new GpuRefreshRenderer(new GpuRefreshScene(reference));
-                playback = new GpuRefreshPlayback(renderer, host);
+                playback = new GpuRefreshPlayback(renderer, host, window: WinRT.Interop.WindowNative.GetWindowHandle(window));
                 playback.RenderFrame(0);
                 renderer.Device.WaitIdle();
                 byte[] expected = renderer.Device.ReadbackBgra(renderer.OutputTexture);

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -18,12 +19,28 @@ namespace Action_Wheel.Services
     /// </summary>
     public static class WheelSounds
     {
-        private readonly record struct Request(WheelSound? Sound, long Timestamp);
+        private readonly record struct Request(WheelSound? Sound, long Timestamp, bool Silent = false,
+            TaskCompletionSource<QueueProbeResult>? Completion = null);
+        private sealed record QueueProbeResult(string Stage, bool Passed, bool SubmittedSilence,
+            bool Completed, uint? NativeResult = null, uint? NativeDeviceId = null, string? Reason = null);
+        private sealed class SilentQueueProbe
+        {
+            private TaskCompletionSource<QueueProbeResult>? _next;
+            internal Task<QueueProbeResult> ExpectNext()
+            {
+                var completion = new TaskCompletionSource<QueueProbeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Volatile.Write(ref _next, completion);
+                return completion.Task;
+            }
+            internal TaskCompletionSource<QueueProbeResult>? TakeCompletion() => Interlocked.Exchange(ref _next, null);
+        }
 
         private static readonly Channel<Request> Requests = Channel.CreateBounded<Request>(
             new BoundedChannelOptions(16) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
         private static WheelSoundSettings _settings = WheelSoundSettings.Default;
         private static int _started;
+        // Installed only by the opt-in diagnostic before hooks/windows are started.
+        private static SilentQueueProbe? _silentQueueProbe;
         // Point Duel's hover cue has no time limit. Three reusable switch voices let every real
         // direction entry sound even when the pointer crosses several sectors within 70 ms.
         private static readonly WheelSound[] SoundForSlot =
@@ -36,7 +53,8 @@ namespace Action_Wheel.Services
             // Default-off installs neither open an audio device nor start a worker.
             if (!next.Enabled && Volatile.Read(ref _started) == 0) return;
             if (Interlocked.Exchange(ref _started, 1) == 0) _ = Task.Run(ProcessAsync);
-            Requests.Writer.TryWrite(new Request(null, Stopwatch.GetTimestamp()));
+            var probe = Volatile.Read(ref _silentQueueProbe);
+            Requests.Writer.TryWrite(new Request(null, Stopwatch.GetTimestamp(), probe != null, probe?.TakeCompletion()));
         }
 
         public static void Play(WheelSound sound)
@@ -44,7 +62,8 @@ namespace Action_Wheel.Services
             var settings = Volatile.Read(ref _settings);
             if (!settings.Enabled || settings.VolumePercent <= 0) return;
             if (sound == WheelSound.Switch && settings.HoverVolumePercent <= 0) return;
-            Requests.Writer.TryWrite(new Request(sound, Stopwatch.GetTimestamp()));
+            var probe = Volatile.Read(ref _silentQueueProbe);
+            Requests.Writer.TryWrite(new Request(sound, Stopwatch.GetTimestamp(), probe != null, probe?.TakeCompletion()));
         }
 
         /// <summary>Stops active cues and releases devices asynchronously. A later Configure can resume.</summary>
@@ -52,26 +71,41 @@ namespace Action_Wheel.Services
 
         private static async Task ProcessAsync()
         {
-            Voice?[] voices = new Voice?[SoundForSlot.Length];
+            using var endpoint = new WheelAudioEndpointMonitor();
+            using var recovery = new WheelSoundRecovery<Voice>(SoundForSlot.Length);
+            Voice?[] voices = recovery.Voices;
             int nextSwitch = 0;
             await foreach (var request in Requests.Reader.ReadAllAsync())
             {
+                Voice.RetryRetired();
                 var settings = Volatile.Read(ref _settings);
                 if (!settings.Enabled || settings.VolumePercent <= 0)
                 {
-                    ReleaseVoices(voices);
+                    recovery.Dispose();
+                    request.Completion?.TrySetResult(new QueueProbeResult("Stopped", true, false, false));
                     continue;
                 }
                 try
                 {
+                    endpoint.RefreshDefaultEndpoint();
+                    long endpointGeneration = endpoint.Generation;
+                    recovery.SynchronizeEndpoint(endpointGeneration);
                     if (request.Sound == null)
                     {
                         // Prepare without writing any audio. Enabling the option cannot emit a cue.
                         for (int i = 0; i < voices.Length; i++) voices[i] ??= Voice.TryCreate(SoundForSlot[i]);
+                        if (request.Completion != null)
+                            request.Completion.TrySetResult(new QueueProbeResult("Prepared",
+                                Array.TrueForAll(voices, voice => voice != null), false, false));
                         continue;
                     }
                     // An unavailable/slow device must never play an old gesture after it has ended.
-                    if (Stopwatch.GetElapsedTime(request.Timestamp).TotalMilliseconds > 250) continue;
+                    if (Stopwatch.GetElapsedTime(request.Timestamp).TotalMilliseconds > 250)
+                    {
+                        request.Completion?.TrySetResult(new QueueProbeResult("Dropped", false, false, false,
+                            Reason: "Request expired before dispatch."));
+                        continue;
+                    }
                     int index = request.Sound.Value switch
                     {
                         WheelSound.Open => 0,
@@ -80,41 +114,58 @@ namespace Action_Wheel.Services
                         WheelSound.Cancel => 5,
                         _ => -1,
                     };
-                    if (index < 0) continue;
-                    var voice = voices[index] ??= Voice.TryCreate(request.Sound.Value);
-                    if (voice == null) continue;
+                    if (index < 0)
+                    {
+                        request.Completion?.TrySetResult(new QueueProbeResult("Dropped", false, false, false,
+                            Reason: "Unknown cue."));
+                        continue;
+                    }
                     // A confirmation or cancellation supersedes the opening/switch cues.
                     if (request.Sound is WheelSound.Confirm or WheelSound.Cancel)
-                        foreach (var other in voices) other?.Stop();
-                    // Settings can change while a driver is opening. Recheck before writing audio.
-                    var current = Volatile.Read(ref _settings);
-                    if (!current.Enabled || current.VolumePercent <= 0) continue;
-                    if (request.Sound == WheelSound.Switch && current.HoverVolumePercent <= 0) continue;
-                    // 45% is the reference level. The relay opening cue is independently stronger;
-                    // hover scales independently, preserving the cue's baked 70 ms fade.
-                    double gain = current.VolumePercent / WheelSoundSettings.DefaultVolumePercent * (request.Sound.Value switch
+                        recovery.StopAll(voice => voice.Stop());
+                    bool IsFresh()
                     {
-                        WheelSound.Open => 0.45,
-                        WheelSound.Switch => 0.08 * current.HoverVolumePercent / 100,
-                        WheelSound.Confirm => 0.375,
-                        _ => 0.08,
-                    });
-                    LimitVoices(voices, voice);
-                    if (!voice.Play(gain))
+                        var current = Volatile.Read(ref _settings);
+                        return Stopwatch.GetElapsedTime(request.Timestamp).TotalMilliseconds <= 250
+                            && endpoint.Generation == endpointGeneration
+                            && current.Enabled && current.VolumePercent > 0
+                            && (request.Sound != WheelSound.Switch || current.HoverVolumePercent > 0);
+                    }
+                    Voice? submittedVoice = null;
+                    recovery.TryPlay(index, () => Voice.TryCreate(request.Sound.Value), voice =>
                     {
-                        voice.Dispose();
-                        voices[index] = null;
+                        // Settings and request age were rechecked after any driver open/retry.
+                        var current = Volatile.Read(ref _settings);
+                        double gain = current.VolumePercent / WheelSoundSettings.DefaultVolumePercent * (request.Sound.Value switch
+                        {
+                            WheelSound.Open => 0.45,
+                            WheelSound.Switch => 0.08 * current.HoverVolumePercent / 100,
+                            WheelSound.Confirm => 0.375,
+                            _ => 0.08,
+                        });
+                        bool played = LimitVoices(voices, voice) && voice.Play(request.Silent ? 0 : gain, IsFresh);
+                        if (played && voice.StartedAt != 0) submittedVoice = voice;
+                        return played;
+                    }, IsFresh);
+                    if (request.Completion != null)
+                    {
+                        bool completed = submittedVoice != null && await WaitForCompletionAsync(submittedVoice);
+                        request.Completion.TrySetResult(new QueueProbeResult(request.Sound.Value.ToString(), completed,
+                            submittedVoice != null, completed, submittedVoice?.LastResult, submittedVoice?.GetDeviceId(),
+                            submittedVoice == null ? "Expired, disabled, changed endpoint or unavailable device." : null));
                     }
                 }
                 catch (Exception)
                 {
                     // Optional decoration cannot interrupt a gesture when audio is unavailable.
-                    ReleaseVoices(voices);
+                    recovery.Dispose();
+                    request.Completion?.TrySetResult(new QueueProbeResult("Failed", false, false, false,
+                        Reason: "Audio worker rejected the diagnostic request."));
                 }
             }
         }
 
-        private static void LimitVoices(Voice?[] voices, Voice upcoming)
+        private static bool LimitVoices(Voice?[] voices, Voice upcoming)
         {
             // Match the game's three concurrent sources, replacing the oldest when full.
             long now = Stopwatch.GetTimestamp();
@@ -126,27 +177,87 @@ namespace Action_Wheel.Services
                 active++;
                 if (oldest == null || voice.StartedAt < oldest.StartedAt) oldest = voice;
             }
-            if (active >= 3) oldest?.Stop();
+            return active < 3 || oldest == null || oldest.Stop();
         }
 
-        private static void ReleaseVoices(Voice?[] voices)
+        /// <summary>Opt-in diagnostic: parses real cues and submits silence through real waveOut.</summary>
+        internal static async Task<object> RunSilentProbeAsync()
         {
-            for (int i = 0; i < voices.Length; i++)
+            using var endpoint = new WheelAudioEndpointMonitor();
+            var results = new List<object>();
+            bool passed = endpoint.DefaultEndpointId != null && endpoint.NotificationRegistrationResult == 0;
+            foreach (WheelSound sound in Enum.GetValues<WheelSound>())
             {
-                voices[i]?.Dispose();
-                voices[i] = null;
+                using Voice? voice = Voice.TryCreate(sound);
+                bool submitted = voice?.Play(0) == true;
+                bool completed = submitted && await WaitForCompletionAsync(voice!);
+                passed &= completed;
+                results.Add(new { Sound = sound.ToString(), Loaded = voice != null,
+                    SubmittedSilence = submitted, Completed = completed,
+                    NativeResult = voice?.LastResult, NativeDeviceId = voice?.GetDeviceId() });
             }
+            var queueResults = new List<QueueProbeResult>();
+            var queueProbe = new SilentQueueProbe();
+            if (Interlocked.CompareExchange(ref _silentQueueProbe, queueProbe, null) != null)
+                throw new InvalidOperationException("An audio queue diagnostic is already running.");
+            bool stopped = false;
+            try
+            {
+                Task<QueueProbeResult> preparation = queueProbe.ExpectNext();
+                Configure(WheelSoundSettings.Default with { Enabled = true });
+                QueueProbeResult prepared = await preparation.WaitAsync(TimeSpan.FromSeconds(10));
+                passed &= prepared.Passed && prepared.Stage == "Prepared";
+                queueResults.Add(prepared);
+                foreach (WheelSound sound in Enum.GetValues<WheelSound>())
+                {
+                    Task<QueueProbeResult> completion = queueProbe.ExpectNext();
+                    Play(sound);
+                    QueueProbeResult result = await completion.WaitAsync(TimeSpan.FromSeconds(5));
+                    passed &= result.Passed && result.SubmittedSilence && result.Completed;
+                    queueResults.Add(result);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Task<QueueProbeResult> completion = queueProbe.ExpectNext();
+                    Shutdown();
+                    QueueProbeResult result = await completion.WaitAsync(TimeSpan.FromSeconds(5));
+                    stopped = result.Passed && result.Stage == "Stopped";
+                }
+                finally { Volatile.Write(ref _silentQueueProbe, null); }
+            }
+            return new { Passed = passed && stopped, DefaultEndpointId = endpoint.DefaultEndpointId,
+                NotificationRegistrationResult = endpoint.NotificationRegistrationResult,
+                Cues = results, QueuedCues = queueResults, QueueShutdownCompleted = stopped,
+                Gain = 0, AudibleAudioPlayed = false, SavedUserConfiguration = false };
+        }
+
+        private static async Task<bool> WaitForCompletionAsync(Voice voice)
+        {
+            long started = Stopwatch.GetTimestamp();
+            while (!voice.HasCompleted && Stopwatch.GetElapsedTime(started).TotalSeconds < 2)
+                await Task.Delay(10).ConfigureAwait(false);
+            return voice.HasCompleted;
         }
 
         private sealed class Voice : IDisposable
         {
+            private static readonly WheelSoundRetirement<Voice> NativeLeases = new(SoundForSlot.Length);
             private readonly byte[] _original;
             private readonly byte[] _scaled;
             private nint _device;
             private nint _samples;
             private nint _header;
-            private bool _prepared;
+            private readonly WaveOutReleaseState _release = new();
+            private bool _reserved;
             internal long StartedAt { get; private set; }
+            internal uint LastResult { get; private set; }
+            internal bool HasCompleted => _header != 0
+                && (Marshal.PtrToStructure<WaveHeader>(_header).Flags & 1) != 0; // WHDR_DONE
+            private bool IsQueued => _header != 0
+                && (Marshal.PtrToStructure<WaveHeader>(_header).Flags & 16) != 0; // WHDR_INQUEUE
             private static readonly uint HeaderSize = (uint)Marshal.SizeOf<WaveHeader>();
 
             private Voice(byte[] pcm) { _original = pcm; _scaled = new byte[pcm.Length]; }
@@ -182,57 +293,80 @@ namespace Action_Wheel.Services
                         stream.Position = end + (length & 1);
                     }
                     if (!validFormat || pcm == null || pcm.Length == 0 || (pcm.Length & 1) != 0) return null;
+                    RetryRetired();
                     voice = new Voice(pcm);
+                    if (!NativeLeases.TryAcquire()) return null;
+                    voice._reserved = true;
                     var format = new WaveFormat { FormatTag = 1, Channels = 1, SamplesPerSecond = 48000,
                         AverageBytesPerSecond = 96000, BlockAlign = 2, BitsPerSample = 16 };
                     if (waveOutOpen(out voice._device, uint.MaxValue, ref format, 0, 0, 0) != 0) return null;
+                    voice._release.DeviceOpen = true;
                     voice._samples = Marshal.AllocHGlobal(pcm.Length);
                     voice._header = Marshal.AllocHGlobal((int)HeaderSize);
                     Marshal.StructureToPtr(new WaveHeader { Data = voice._samples, BufferLength = (uint)pcm.Length },
                         voice._header, false);
                     if (waveOutPrepareHeader(voice._device, voice._header, HeaderSize) != 0) return null;
-                    voice._prepared = true;
+                    voice._release.Prepared = true;
                     return voice;
                 }
                 catch (Exception) { return null; }
                 finally
                 {
-                    if (voice != null && !voice._prepared) voice.Dispose();
+                    if (voice != null && !voice._release.Prepared) voice.Dispose();
                 }
             }
 
-            internal void Stop()
+            internal bool Stop()
             {
-                if (_device != 0) waveOutReset(_device);
+                LastResult = _device == 0 ? 0 : waveOutReset(_device);
                 StartedAt = 0;
+                return LastResult == 0;
             }
 
             internal bool IsPlaying(long now) => StartedAt != 0
                 && Stopwatch.GetElapsedTime(StartedAt, now).TotalSeconds < _original.Length / 96000.0;
 
-            internal bool Play(double gain)
+            internal uint? GetDeviceId() => _device != 0 && waveOutGetID(_device, out uint id) == 0 ? id : null;
+
+            internal bool Play(double gain, Func<bool>? canSubmit = null)
             {
-                Stop();
+                if (!Stop()) return false;
                 for (int i = 0; i < _original.Length; i += 2)
                 {
                     short sample = BinaryPrimitives.ReadInt16LittleEndian(_original.AsSpan(i, 2));
                     BinaryPrimitives.WriteInt16LittleEndian(_scaled.AsSpan(i, 2), (short)Math.Round(sample * gain));
                 }
                 Marshal.Copy(_scaled, 0, _samples, _scaled.Length);
-                bool started = waveOutWrite(_device, _header, HeaderSize) == 0;
+                // Reset/copy may itself be delayed by a driver; never submit an expired gesture.
+                if (canSubmit != null && !canSubmit()) return true;
+                LastResult = waveOutWrite(_device, _header, HeaderSize);
+                bool started = LastResult == 0;
                 if (started) StartedAt = Stopwatch.GetTimestamp();
                 return started;
             }
 
             public void Dispose()
             {
-                Stop();
-                if (_prepared) waveOutUnprepareHeader(_device, _header, HeaderSize);
-                if (_device != 0) waveOutClose(_device);
+                if (!TryReleaseNative()) NativeLeases.Retire(this);
+            }
+
+            internal static void RetryRetired() => NativeLeases.Drain(voice => voice.TryReleaseNative());
+
+            private bool TryReleaseNative()
+            {
+                if (!_reserved) return true;
+                StartedAt = 0;
+                if (!_release.TryRelease(() => waveOutReset(_device),
+                    () => waveOutUnprepareHeader(_device, _header, HeaderSize),
+                    () => waveOutClose(_device), () => IsQueued)) return false;
+                // Only an unprepared/returned buffer can leave native ownership. A driver that
+                // never returns it holds one of six leases instead of causing a dangling pointer.
                 if (_header != 0) Marshal.FreeHGlobal(_header);
                 if (_samples != 0) Marshal.FreeHGlobal(_samples);
                 _device = _header = _samples = 0;
-                _prepared = false;
+                _reserved = false;
+                NativeLeases.Release();
+                return true;
             }
         }
 
@@ -262,5 +396,6 @@ namespace Action_Wheel.Services
         [DllImport("winmm.dll")] private static extern uint waveOutReset(nint device);
         [DllImport("winmm.dll")] private static extern uint waveOutUnprepareHeader(nint device, nint header, uint size);
         [DllImport("winmm.dll")] private static extern uint waveOutClose(nint device);
+        [DllImport("winmm.dll")] private static extern uint waveOutGetID(nint device, out uint id);
     }
 }

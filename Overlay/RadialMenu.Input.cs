@@ -15,8 +15,9 @@ namespace Action_Wheel.Overlay
             if (!OwnsInput) return;
             WindowInputFocus.EnterWheel(_windowHandle);
             int style = GetWindowLong(_windowHandle, GWL_EXSTYLE);
-            SetWindowLong(_windowHandle, GWL_EXSTYLE,
-                (style | WS_EX_TOOLWINDOW) & ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT));
+            int interactive = (style | WS_EX_TOOLWINDOW) & ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
+            if (interactive != style)
+                SetWindowLong(_windowHandle, GWL_EXSTYLE, interactive);
             WindowInputFocus.TryActivate(_windowHandle);
             CenterBtn.Focus(FocusState.Programmatic);
         }
