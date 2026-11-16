@@ -1,0 +1,53 @@
+name: Application checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore Windows app dependencies
+        run: .\Build.ps1 -Task Restore
+
+      - name: Build Windows application
+        run: .\Build.ps1 -Task Debug -NoRestore
+
+      - name: Verify binding paths
+        run: .\Build.ps1 -Task VerifyBindings
+
+      - name: Verify configuration round trips
+        run: .\Build.ps1 -Task VerifyRoundTrip
+
+      - name: Verify chord input pairing
+        run: .\Build.ps1 -Task VerifyChordGate
+
+      - name: Verify package version metadata
+        run: .\Build.ps1 -Task VerifyVersionSync
+
+      - name: Verify application regressions
+        run: .\Build.ps1 -Task VerifyApplication
+
+      - name: Verify build path safety
+        run: .\Build.ps1 -Task VerifyBuildSafety

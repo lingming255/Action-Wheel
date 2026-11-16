@@ -28,12 +28,26 @@
     VerifyConfigBackup - regression-check ConfigBackup.TryImport's rejection paths (entry count,
                       entry size, unrecognised entry names, zip-slip)
     VerifyRefresh   - check uniform blocks and archived refresh pipelines, bloom and bounded rendering
-    Clean           - delete bin\ and obj\
+    VerifyApplication - run app behavior checks without showing windows or registering hooks
+    VerifyGpu       - explicit hardware GPU correctness check (no desktop capture or model)
+    VerifyBuildSafety - check cleanup and publish boundaries in disposable directories
+    Clean           - remove compiler output, preserving Publish, Backups, Checks and Review
     All             - Restore, VerifyBindings, VerifyRoundTrip, VerifyChordGate, VerifyVersionSync,
-                      VerifyFormat, VerifyConfigBackup, VerifyRefresh, Debug, Release, Publish
+                      VerifyFormat, VerifyConfigBackup, VerifyApplication, VerifyBuildSafety,
+                      VerifyRefresh, Debug, Release, Publish
 
 .PARAMETER Platform
     x64 (default), x86 or ARM64. Sets both the MSBuild platform and the runtime identifier.
+
+.PARAMETER Output
+    Publish into a separate child directory of bin\Publish. The reviewed quick-info-win-x64
+    runtime copy is protected; deploy into it separately after verification.
+
+.PARAMETER Preview
+    With Clean, list compiler directories without deleting them.
+
+.PARAMETER NoRestore
+    Build/run/publish using already-restored assets, without an implicit package restore.
 
 .EXAMPLE
     .\Build.ps1
@@ -43,13 +57,19 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Restore', 'Debug', 'Release', 'Publish', 'Package', 'Installer', 'VerifyBindings', 'VerifyRoundTrip', 'VerifyChordGate', 'VerifyVersionSync', 'VerifyFormat', 'VerifyConfigBackup', 'VerifyRefresh', 'Clean', 'All')]
+    [ValidateSet('Restore', 'Debug', 'Release', 'Publish', 'Package', 'Installer', 'VerifyBindings', 'VerifyRoundTrip', 'VerifyChordGate', 'VerifyVersionSync', 'VerifyFormat', 'VerifyConfigBackup', 'VerifyRefresh', 'VerifyApplication', 'VerifyGpu', 'VerifyBuildSafety', 'Clean', 'All')]
     [string]$Task = 'Debug',
 
     [ValidateSet('x64', 'x86', 'ARM64')]
     [string]$Platform = 'x64',
 
-    [string]$Output
+    # Publishing recreates this directory. It must be inside bin\Publish and separate from the
+    # reviewed runtime copy; arbitrary directories are never accepted as deletion targets.
+    [string]$Output,
+
+    [switch]$Preview,
+
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,6 +79,9 @@ $root = $PSScriptRoot
 $project = Join-Path $root 'Action Wheel.csproj'
 $core = Join-Path $root 'ActionWheel.Core\ActionWheel.Core.csproj'
 $rid = 'win-' + $Platform.ToLowerInvariant()
+. (Join-Path $root 'Tools\BuildSupport.ps1')
+
+if ($Preview -and $Task -ne 'Clean') { throw '-Preview is only supported by Clean.' }
 
 if (-not $Output) {
     $Output = Join-Path $root "bin\Publish\$rid"
@@ -79,6 +102,10 @@ function Assert-NotRunning {
 }
 
 function Invoke-Dotnet([string[]]$dotnetArgs) {
+    if ($NoRestore -and $dotnetArgs[0] -in @('build', 'run', 'publish')) {
+        # Keep this before a run command's "--" separator so it is not passed to the check app.
+        $dotnetArgs = @($dotnetArgs[0], '--no-restore') + @($dotnetArgs | Select-Object -Skip 1)
+    }
     Write-Host "dotnet $($dotnetArgs -join ' ')" -ForegroundColor DarkGray
     & dotnet @dotnetArgs
     if ($LASTEXITCODE -ne 0) {
@@ -161,14 +188,35 @@ function Invoke-VerifyRefresh {
     Invoke-Dotnet @('run', '--project', $spectrumOverlayTool, '-c', 'Release', '--nologo')
 }
 
+function Invoke-VerifyApplication {
+    Write-Step 'Verifying application behavior with isolated checks'
+    foreach ($check in @('QuickAddCheck', 'NoteBoardCheck', 'MouseDispatchCheck', 'RingGestureTests',
+        'QuickInfoTests', 'ReclaimSettingsCheck', 'RefreshTimingCheck', 'SmokeReportCheck')) {
+        $tool = Join-Path $root "Tools\$check\$check.csproj"
+        Invoke-Dotnet @('run', '--project', $tool, '-c', 'Release', '--nologo')
+    }
+}
+
+function Invoke-VerifyGpu {
+    Write-Step 'Verifying synthetic frames on a hardware D3D11 device'
+    $tool = Join-Path $root 'Tools\GpuRefreshCheck\GpuRefreshCheck.csproj'
+    Invoke-Dotnet @('run', '--project', $tool, '-c', 'Release', '--nologo', '--', '--correctness-only')
+}
+
+function Invoke-VerifyBuildSafety {
+    Write-Step 'Verifying build filesystem boundaries in temporary directories'
+    & (Join-Path $root 'Tools\BuildSafetyCheck.ps1')
+}
+
 function Invoke-Publish {
     Write-Step "Publishing Release | $rid"
+    $script:Output = Get-WheelPublishPath $root $Output
     Assert-NotRunning
     Invoke-VerifyVersionSync
 
     if (Test-Path $Output) {
         Write-Host "Clearing $Output" -ForegroundColor DarkGray
-        Remove-Item -LiteralPath $Output -Recurse -Force
+        Remove-WheelBuildTree $root $Output
     }
 
     # PublishTrimmed stays false on purpose: the settings window's row templates use classic
@@ -252,7 +300,7 @@ function Invoke-Package {
     }
     finally {
         if (Test-Path -LiteralPath $smokeDirectory) {
-            Remove-Item -LiteralPath $smokeDirectory -Recurse -Force
+            Remove-WheelBuildTree ([System.IO.Path]::GetTempPath()) $smokeDirectory
         }
     }
 
@@ -262,6 +310,9 @@ function Invoke-Package {
 }
 
 function Invoke-Installer {
+    if ($Platform -ne 'x64') {
+        throw 'The installer currently supports x64 only. Use Publish or Package for other architectures.'
+    }
     Invoke-Publish
 
     Write-Step 'Building the installer'
@@ -275,7 +326,8 @@ function Invoke-Installer {
         throw 'Inno Setup 6 was not found. Install it, or run -Task Publish for the portable exe.'
     }
 
-    & $iscc (Join-Path $root 'ActionWheel-Setup.iss')
+    $version = (Get-Item -LiteralPath (Join-Path $Output 'Action Wheel.exe')).VersionInfo.ProductVersion
+    & $iscc "/DMyAppSourcePath=$Output" "/DMyAppVersion=$version" (Join-Path $root 'ActionWheel-Setup.iss')
     if ($LASTEXITCODE -ne 0) {
         throw "ISCC failed with exit code $LASTEXITCODE."
     }
@@ -300,21 +352,9 @@ function Invoke-VerifyChordGate {
 
 function Invoke-Clean {
     Write-Step 'Cleaning'
-    Assert-NotRunning
+    if (-not $Preview) { Assert-NotRunning }
 
-    foreach ($directory in @(
-        'bin', 'obj', 'ActionWheel.Core\bin', 'ActionWheel.Core\obj',
-        'Tools\RoundTripCheck\bin', 'Tools\RoundTripCheck\obj',
-        'Tools\ChordGateCheck\bin', 'Tools\ChordGateCheck\obj',
-        'Tools\RefreshAnalyzerCheck\bin', 'Tools\RefreshAnalyzerCheck\obj',
-        'Tools\ConfigBackupCheck\bin', 'Tools\ConfigBackupCheck\obj'
-    )) {
-        $path = Join-Path $root $directory
-        if (Test-Path $path) {
-            Write-Host "Removing $directory" -ForegroundColor DarkGray
-            Remove-Item -LiteralPath $path -Recurse -Force
-        }
-    }
+    Clear-WheelBuildOutput $root -Preview:$Preview
 }
 
 switch ($Task) {
@@ -331,6 +371,9 @@ switch ($Task) {
     'VerifyFormat' { Invoke-VerifyFormat }
     'VerifyConfigBackup' { Invoke-VerifyConfigBackup }
     'VerifyRefresh' { Invoke-VerifyRefresh }
+    'VerifyApplication' { Invoke-VerifyApplication }
+    'VerifyGpu' { Invoke-VerifyGpu }
+    'VerifyBuildSafety' { Invoke-VerifyBuildSafety }
     'Clean' { Invoke-Clean }
     'All' {
         Invoke-Restore
@@ -340,6 +383,8 @@ switch ($Task) {
         Invoke-VerifyVersionSync
         Invoke-VerifyFormat
         Invoke-VerifyConfigBackup
+        Invoke-VerifyApplication
+        Invoke-VerifyBuildSafety
         Invoke-VerifyRefresh
         Invoke-Build 'Debug'
         Invoke-Build 'Release'

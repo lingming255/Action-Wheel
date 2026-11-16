@@ -5,11 +5,21 @@
 ; ==============================================
 
 #define MyAppName "Action Wheel"
+#ifndef MyAppVersion
 #define MyAppVersion "2.8.0"
+#endif
 #define MyAppPublisher "KoneForge"
 #define MyAppURL "https://konexforge.com/"
 #define MyAppExeName "Action Wheel.exe"
+#ifndef MyAppSourcePath
 #define MyAppSourcePath "bin\Publish\win-x64"
+#endif
+
+; Build.ps1 passes the exact publish output through /DMyAppSourcePath so an
+; installer cannot silently fall back to an unrelated older x64 build.
+#if !FileExists(AddBackslash(MyAppSourcePath) + MyAppExeName)
+#error "Action Wheel.exe was not found in MyAppSourcePath. Publish the application before building the installer."
+#endif
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}

@@ -26,7 +26,9 @@ namespace Action_Wheel.Services
                 object parallel = await RadialMenu.RunParallelIntroProbeAsync();
                 object? pixels = verifyPixels ? await ScreenGradePixelProbe.RunAsync() : null;
                 object? glassPixels = verifyPixels ? await ScreenGradePixelProbe.RunGlassSourceProbeAsync() : null;
-                bool passed = pixels == null || JsonSerializer.SerializeToElement(pixels)
+                bool passed = JsonSerializer.SerializeToElement(parallel)
+                    .GetProperty("Passed").GetBoolean();
+                passed &= pixels == null || JsonSerializer.SerializeToElement(pixels)
                     .TryGetProperty("Passed", out var result) && result.GetBoolean();
                 passed &= glassPixels == null || JsonSerializer.SerializeToElement(glassPixels)
                     .TryGetProperty("Passed", out var glassResult) && glassResult.GetBoolean();

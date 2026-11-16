@@ -46,17 +46,17 @@ namespace Action_Wheel
             string[] command = Environment.GetCommandLineArgs();
             if (command.Length == 3 && command[1] == "--window-placement-smoke")
             {
-                WindowPlacementSmoke.Run(command[2], Exit);
+                WindowPlacementSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] == "--wheel-reuse-smoke")
             {
-                WheelReuseSmoke.Run(command[2], Exit);
+                WheelReuseSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] == "--input-smoke-report")
             {
-                WheelInputSmoke.Run(command[2], Exit);
+                WheelInputSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 2 && command[1] == "--quick-add-preview")
@@ -77,27 +77,27 @@ namespace Action_Wheel
             }
             if (command.Length == 3 && command[1] == "--wheel-opening-smoke")
             {
-                WheelOpeningSmoke.Run(command[2], Exit);
+                WheelOpeningSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] is "--wheel-glass-smoke" or "--wheel-glass-pixel-probe")
             {
-                WheelGlassSmoke.Run(command[2], command[1] == "--wheel-glass-pixel-probe", Exit);
+                WheelGlassSmoke.Run(command[2], command[1] == "--wheel-glass-pixel-probe", CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] == "--settings-smoke")
             {
-                SettingsSmoke.Run(command[2], Exit);
+                SettingsSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] == "--wheel-position-smoke")
             {
-                WheelPositionSmoke.Run(command[2], Exit);
+                WheelPositionSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
             if (command.Length == 3 && command[1] == "--refresh-gpu-smoke")
             {
-                GpuRefreshSmoke.Run(command[2], Exit);
+                GpuRefreshSmoke.Run(command[2], CreateSmokeCompletion(command[2]));
                 return;
             }
 
@@ -166,6 +166,18 @@ namespace Action_Wheel
             _ = RefreshRenderWarmup.EnsureAsync();
 
             _ = CheckForUpdatesAsync(viewModel);
+        }
+
+        private Action CreateSmokeCompletion(string reportPath)
+        {
+            // A crash or early shutdown must fail even if the completion callback never runs.
+            Environment.ExitCode = 1;
+            bool prepared = SmokeReportStatus.Prepare(reportPath);
+            return () =>
+            {
+                Environment.ExitCode = prepared ? SmokeReportStatus.GetExitCode(reportPath) : 1;
+                Exit();
+            };
         }
 
         /// <summary>

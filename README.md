@@ -12,7 +12,7 @@ A WinUI 3 (.NET 10) desktop app that pops up a radial menu at the cursor when yo
 [![Latest tag](https://img.shields.io/github/v/tag/cmm-cmm/Action-Wheel?label=version&color=success)](https://github.com/cmm-cmm/Action-Wheel/tags)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?logo=windows&logoColor=white)](#requirements)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](#requirements)
-[![Windows App SDK](https://img.shields.io/badge/Windows%20App%20SDK-2.3.1-0078D6?logo=windowsxp&logoColor=white)](#requirements)
+[![Windows App SDK](https://img.shields.io/badge/Windows%20App%20SDK-2.4.0-0078D6?logo=windowsxp&logoColor=white)](#requirements)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 </div>
@@ -76,7 +76,7 @@ and reuse behavior, and [refresh](Doc/refresh-effect.md) for rendering and hando
 
 - Windows 10 version 1809 (build 17763) or later
 - .NET 10.0
-- Windows App SDK 2.3.1
+- Windows App SDK 2.4.0 (the version pinned by the app project)
 - Visual Studio 2022 with the "Windows application development" workload (for building)
 
 ## Build & run
@@ -88,12 +88,30 @@ and reuse behavior, and [refresh](Doc/refresh-effect.md) for rendering and hando
 .\Build.ps1 -Task Release
 .\Build.ps1 -Task Publish         # self-contained single-file exe in bin\Publish\win-x64
 .\Build.ps1 -Task Package         # Publish, ZIP it, then launch the ZIP's exe as a smoke test
-.\Build.ps1 -Task Installer       # Publish, then the Inno Setup installer
+.\Build.ps1 -Task Installer       # x64 only; requires Inno Setup 6
+.\Build.ps1 -Task VerifyApplication # isolated application regression checks
+.\Build.ps1 -Task VerifyBuildSafety # disposable-directory cleanup/publish checks
+.\Build.ps1 -Task VerifyGpu       # opt-in synthetic hardware D3D11 correctness checks
+.\Build.ps1 -Task Clean -Preview # list compiler output that would be removed
 .\Build.ps1 -Task Clean
 .\Build.ps1 -Task Publish -Platform ARM64
+.\Build.ps1 -Task Publish -Output '.\bin\Publish\candidate-x64'
+.\Build.ps1 -Task Debug -NoRestore # only after this project's dependencies have been restored
 ```
 
-Nothing in it prompts, so it works unattended. It refuses to build while a copy of Action Wheel is still running, because otherwise the exe is locked and MSBuild fails several hundred lines later with a copy error that never mentions the app being open.
+Build and publish tasks refuse to run while Action Wheel is running, because the executable can be locked. Quit it from the tray first. Verification tasks and `Clean -Preview` can run without replacing the installed program.
+
+`Clean` removes only known compiler directories: the app's `obj` and architecture/configuration output, the core library's `bin`/`obj`, and `bin`/`obj` under tool projects. It preserves `bin\Publish`, `bin\Backups`, `bin\Checks`, `bin\Review` and unknown children of the root `bin`. Use `-Preview` to inspect the targets without deleting anything; linked paths are rejected before recursive deletion.
+
+`Publish`, `Package` and `Installer` accept only output directories beneath this repository's `bin\Publish`. They reject the publish root itself, paths outside it, links, and the reviewed `quick-info-win-x64` runtime directory or its children. The chosen candidate output is cleared before publishing. Publish separately, verify the result, then deploy reviewed files to the runtime directory.
+
+`Installer` supports x64 and passes the selected publish directory and published EXE's product version to Inno Setup, including when `-Output` is supplied. Other architectures can use `Publish` or `Package`. The installer script also checks that its selected source contains `Action Wheel.exe`.
+
+`-NoRestore` adds `--no-restore` to `dotnet build`, `run` and `publish`; each target project's dependencies must already be available. It does not turn an explicit `Restore` task into a no-op.
+
+`VerifyApplication` runs eight existing check programs for Quick Add, Note Board, mouse dispatch, ring gestures, Quick Info, reclaim settings, refresh timing and smoke-report failure status. They use isolated data without opening windows, registering hooks, requiring the depth model or capturing the desktop. `VerifyBuildSafety` exercises cleanup and output boundaries in temporary directories. `VerifyGpu` is separate because it requires a hardware D3D11 device; it compares synthetic frames without a depth model or desktop capture. None establishes real foreground or visual acceptance.
+
+The [application checks workflow](.github/workflows/checks.yml) compiles the main app and runs binding, configuration round-trip, chord, version, application and build-safety checks on Windows. It does not need an interactive desktop or model. Hardware GPU checks, native window probes, packaging and installer validation remain explicit local work.
 
 Plain `dotnet build` also works: the project defaults `Platform` to `x64` and derives the matching runtime identifier, so no `-r win-x64` is needed. Pass `-p:Platform=ARM64` or `-r win-x86` to override.
 
