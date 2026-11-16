@@ -159,6 +159,29 @@ plus 2.61–3.69 ms waiting for rendering callbacks; these are not mouse-to-scre
 The synthetic real-model warmup took 488.31 ms in that process, without capturing the desktop.
 Native mapping samples and styled/unmodified offscreen BGRA comparisons still passed.
 
+### Reused wheel fullscreen handoff (2026-11-16)
+
+A centre release changes the wheel HWND into the fullscreen playback owner. Native window
+geometry can change before WinUI has presented a collapsed menu, briefly moving the previous
+wheel frame to the display origin. The transition now cloaks that owner before resizing/moving,
+commits the prepared cover, reveals only the cloak owned by this handoff, then gives the visible
+cover its own three-frame interval before restoring desktop colour and starting playback.
+An existing diagnostic/system cloak remains intact; a hidden owner stays hidden. Unsupported
+cloaking uses nonactivating hide/show for an originally visible owner. A one-second stalled
+handoff restores colour and closes the decoration without revealing the stale frame.
+
+Late Loaded/opening callbacks cannot restart wheel visuals during playback. Spare wheel
+preparation waits until outward playback ends; ordinary dismissal still retains the existing
+HWND, XAML controls and material. Prebuilding hides via AppWindow and native SW_HIDE before
+removing its temporary cloak. User appearance, durations, sounds and actions are unchanged.
+The normal handoff adds three Rendering callbacks (about 50 ms at 60 Hz) before playback;
+opening another wheel during outward playback can use the cold creation path until a spare is ready.
+
+The GPU smoke's ParallelIntro report includes ReusedRelease and NativeHandoff: repeated use
+followed by quick/settled centre releases, externally cloaked and originally uncloaked owners,
+native cloak at the geometry transition, separate cover intervals and disposal. These are
+synthetic hidden-window state checks, not captured proof of every on-screen frame.
+
 ## Preparation optimization (2026-11-11)
 
 The preceding `40aec5f` is preserved at `archive/refresh-before-preparation-opt-20261111`

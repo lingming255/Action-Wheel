@@ -221,10 +221,10 @@ namespace Action_Wheel.Services
         private void PrepareOpeningResources()
         {
             if (_stopped || _currentMenu != null) return;
-            PrepareMainMenu();
-            // A fresh wheel may be prepared after the opaque handoff, but do not speculate on
-            // another native/particle bundle while the independent outward effect owns resources.
+            // Let fullscreen playback finish before showing a cloaked preparation window at
+            // its default position. Ordinary wheel sessions still retain their prepared HWND.
             if (_playingRefreshes.Count != 0) return;
+            PrepareMainMenu();
             ScreenGradeSurface.Warm();
             if (MouseHook.TryGetCursorPosition(out var cursor))
                 RefreshReclaimIntro.WarmAt(cursor, _reclaimSettings);

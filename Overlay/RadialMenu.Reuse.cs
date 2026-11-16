@@ -53,6 +53,7 @@ namespace Action_Wheel.Overlay
             }
             finally
             {
+                _appWindow.Hide();
                 ShowWindow(_windowHandle, SW_HIDE);
                 cloak = 0;
                 DwmSetWindowAttribute(_windowHandle, 13, ref cloak, sizeof(int));
@@ -93,6 +94,7 @@ namespace Action_Wheel.Overlay
 
         private void StartPreparedOpening()
         {
+            if (_closed || _parked || _preparingReuse || _closing || IsRefreshPlaying) return;
             if (_openingGeneration == _sessionGeneration) return;
             _openingGeneration = _sessionGeneration;
             if (_glassSurface?.IsConnected == false) _glassSurface = null;

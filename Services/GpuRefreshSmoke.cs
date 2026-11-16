@@ -134,7 +134,9 @@ namespace Action_Wheel.Services
                     && !alphaMatches.GetBoolean())
                     throw new InvalidOperationException("Layered input transparency changed the visible GPU composition: "
                         + presentationResult.GetRawText());
-                File.WriteAllText(reportPath, JsonSerializer.Serialize(new { Passed = true, Rounds = rounds,
+                bool releasePassed = JsonSerializer.SerializeToElement(releasePreparation).GetProperty("Passed").GetBoolean()
+                    && JsonSerializer.SerializeToElement(parallelIntro).GetProperty("Passed").GetBoolean();
+                File.WriteAllText(reportPath, JsonSerializer.Serialize(new { Passed = releasePassed, Rounds = rounds,
                     PixelMappingVerified = pixelMappingVerified,
                     Presentation = presentation,
                     ReleasePreparation = releasePreparation,

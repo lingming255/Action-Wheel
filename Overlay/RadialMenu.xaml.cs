@@ -300,6 +300,7 @@ namespace Action_Wheel.Overlay
         {
             WindowInputFocus.LeaveWheel(_windowHandle);
             _closed = true;
+            StopRefreshHandoffWatch();
             StopMenuPlacement();
             _ringMotion?.Stop();
             StopGlassMotion();
@@ -341,7 +342,7 @@ namespace Action_Wheel.Overlay
 
         private void RadialMenu_Loaded(object? sender, RoutedEventArgs e)
         {
-            if (_closed || (_closing && !_preparingReuse)) return;
+            if (_closed || IsRefreshPlaying || (_closing && !_preparingReuse)) return;
             // Sizes before positions: UpdateButtonPositions places each button by its centre, so it
             // has to subtract a radius that is already the one the button will actually be drawn at.
             EnsureMenuVisuals();
@@ -1755,6 +1756,7 @@ namespace Action_Wheel.Overlay
             RefreshInputTransparency.Enable(_windowHandle);
             RootGrid.IsHitTestVisible = false;
             MenuContainer.Visibility = Visibility.Collapsed;
+            MenuContainer.Opacity = 0;
             RefreshFeedbackLayer.Width = MenuSize;
             RefreshFeedbackLayer.Height = MenuSize;
             RefreshFeedbackLayer.Visibility = Visibility.Visible;
@@ -1880,6 +1882,7 @@ namespace Action_Wheel.Overlay
                 return;
             }
 
+            ConcealRefreshHandoff();
             PrepareRefreshPresentation(frame);
             _fullRefreshStarted = true;
             StopMenuPlacement();
@@ -1972,8 +1975,30 @@ namespace Action_Wheel.Overlay
             {
                 if (++frames < 3 && !_closed)
                     return;
+                if (!_closed && HasRefreshHandoffBarrier)
+                {
+                    // The cover's layout/surface has committed while the old native frame was
+                    // concealed. Reveal it, then allow a separate visible-cover interval before
+                    // restoring desktop colour or starting the outward clock.
+                    try
+                    {
+                        RevealRefreshHandoff();
+                        frames = 0;
+                        return;
+                    }
+                    catch (Exception)
+                    {
+                        StopRefreshHandoffWatch();
+                        CompositionTarget.Rendering -= _refreshOnRendering;
+                        _refreshOnRendering = null;
+                        restoreColour();
+                        CloseMenu();
+                        return;
+                    }
+                }
                 CompositionTarget.Rendering -= _refreshOnRendering;
                 _refreshOnRendering = null;
+                StopRefreshHandoffWatch();
                 if (_closed)
                     return;
                 ClearRefreshFeedback();
@@ -1983,6 +2008,7 @@ namespace Action_Wheel.Overlay
                 _gpuRefreshPlayback?.Start(CloseMenu);
             };
             CompositionTarget.Rendering += _refreshOnRendering;
+            WatchRefreshHandoff(restoreColour);
         }
 
         /// <summary>The outward deadline clears its layer while a longer inward opening finishes.</summary>

@@ -305,9 +305,9 @@ namespace Action_Wheel.Overlay
                     EventHandler<object>? cover = menu._refreshOnRendering;
                     RequireReleaseProbe(cover != null,
                         "Parallel playback has no cover-commit handoff callback.");
-                    // The cover's existing three callbacks are the only display-order fence.
-                    // Drive them synchronously, before any timer can complete the intro.
-                    for (int callback = 0; callback < 3; callback++)
+                    // Commit both concealed layout and the revealed cover before any timer
+                    // can complete the intro. Externally cloaked fixtures need only one phase.
+                    for (int callback = 0; callback < 6; callback++)
                         menu._refreshOnRendering?.Invoke(null, null!);
                     double synchronousHandoffMs = handoffClock.Elapsed.TotalMilliseconds;
                     double introElapsedAtOutwardStart = intro.ElapsedMs;
@@ -408,7 +408,7 @@ namespace Action_Wheel.Overlay
                 longIntroMenu.AdoptRefreshReclaimIntro(longIntro);
                 var readyFrame = shortFrame;
                 longIntroMenu.PlayRefresh(readyFrame, readyFrame.Dispose);
-                for (int callback = 0; callback < 3; callback++)
+                for (int callback = 0; callback < 6; callback++)
                     longIntroMenu._refreshOnRendering?.Invoke(null, null!);
                 await Task.Delay(820);
                 RequireReleaseProbe(!longIntroMenu._closed && !longIntro.AlreadyCompleted
@@ -431,12 +431,15 @@ namespace Action_Wheel.Overlay
                 longIntro?.Dispose();
                 shortFrame?.Dispose();
             }
-            return new { Passed = true, Rounds = rounds, UsedDesktopCapture = false, UsedModel = false,
+            object reusedRelease = await RunReusedReleaseProbeAsync();
+            var nativeHandoff = await RunReusedReleaseHandoffProbeAsync();
+            return new { Passed = nativeHandoff.Passed, Rounds = rounds, ReusedRelease = reusedRelease,
+                NativeHandoff = nativeHandoff, UsedDesktopCapture = false, UsedModel = false,
                 DisplayedEffect = false, UsedScreenGrade = false,
                 TimingBoundary = "Prepared synthetic frames and manually committed hidden covers; this verifies independent lifetimes, not real input-to-visible latency." };
         }
 
-        private static RefreshFrame CreateReleaseProbeFrame(double durationMs = 1400)
+        private static RefreshFrame CreateReleaseProbeFrame(double durationMs = 1400, RectInt32? bounds = null)
         {
             const int width = 640, height = 360;
             byte[] capture = new byte[width * height * 4];
@@ -452,7 +455,7 @@ namespace Action_Wheel.Overlay
                 depth[pixel] = x / (float)(width - 1);
             }
             return RefreshFrame.CreatePrepared(capture, new RefreshDepthMap(width, height, depth),
-                new RectInt32(-20000, -20000, width, height), width / 2, height / 2,
+                bounds ?? new RectInt32(-20000, -20000, width, height), width / 2, height / 2,
                 new RefreshTimingProfile(new RefreshAnimationSettings { DurationMs = durationMs }, instantStart: true),
                 CancellationToken.None);
         }
