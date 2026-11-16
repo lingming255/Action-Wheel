@@ -119,7 +119,11 @@ namespace Action_Wheel.Overlay
             }
             _ringMotion = RingOpenAnimation.BuildUnified(MenuContainer, _appearance.AnimationDurationMs,
                 kind: _appearance.Animation);
-            _ringMotion.Completed += (_, _) => { if (!_closing) SettleAfterOpening(); };
+            long generation = _sessionGeneration;
+            _ringMotion.Completed += (_, _) =>
+            {
+                if (!_closing && generation == _sessionGeneration) SettleAfterOpening();
+            };
             _ringMotion.Begin();
             StartGlassAccents();
         }
@@ -156,8 +160,10 @@ namespace Action_Wheel.Overlay
             }
             _ringMotion = RingOpenAnimation.BuildUnified(MenuContainer, _appearance.AnimationDurationMs,
                 closing: true, confirmed: confirmed);
+            long generation = _sessionGeneration;
             _ringMotion.Completed += (_, _) =>
             {
+                if (generation != _sessionGeneration || _parked || _closed) return;
                 if (!_closed) CloseMenu();
                 completed?.Invoke();
             };

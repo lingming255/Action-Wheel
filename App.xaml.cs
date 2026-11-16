@@ -44,6 +44,11 @@ namespace Action_Wheel
             // Explicit diagnostics run before single-instance registration and hooks. UI previews
             // save only isolated copies; the input/pixel probes briefly show disposable windows.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--wheel-reuse-smoke")
+            {
+                WheelReuseSmoke.Run(command[2], Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--input-smoke-report")
             {
                 WheelInputSmoke.Run(command[2], Exit);

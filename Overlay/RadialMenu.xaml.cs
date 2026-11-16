@@ -282,6 +282,12 @@ namespace Action_Wheel.Overlay
         /// </remarks>
         public void CloseMenu()
         {
+            if (_closed || _parked) return;
+            if (CanReuse)
+            {
+                ParkMenu();
+                return;
+            }
             ReturnInputFocus();
             StopMenuPlacement();
             if (_windowHandle != IntPtr.Zero)
@@ -329,22 +335,19 @@ namespace Action_Wheel.Overlay
                 DeleteObject(_backgroundBrush);
                 _backgroundBrush = IntPtr.Zero;
             }
+            NotifySessionEnded();
         }
 
         private void RadialMenu_Loaded(object? sender, RoutedEventArgs e)
         {
-            if (_closed || _closing) return;
+            if (_closed || (_closing && !_preparingReuse)) return;
             // Sizes before positions: UpdateButtonPositions places each button by its centre, so it
             // has to subtract a radius that is already the one the button will actually be drawn at.
-            ApplySizes();
-            UpdateButtonPositions(_appearance.OrbitRadius);
+            EnsureMenuVisuals();
+            if (_preparingReuse || _parked) return;
             WatchMenuDpi();
             AlignMenuToAnchor();
-            BuildWedges();
-            ApplyActions();
-            ConnectGlassMaterial();
-            BeginGlassOpening();
-            WheelSounds.Play(WheelSound.Open);
+            StartPreparedOpening();
         }
 
         /// <summary>
@@ -2122,7 +2125,9 @@ namespace Action_Wheel.Overlay
 
         public void ShowAtPosition(PointInt32 position)
         {
-            if (_appWindow == null || _closed || _closing) return;
+            if (_appWindow == null || _closed || (_closing && !_parked)) return;
+            bool prepared = _menuVisualsReady;
+            BeginMenuSession();
             _menuAnchor = position;
             // Only a new hidden window needs the staging move. Repositioning an already-shown
             // wheel must never expose the monitor-centre staging position.
@@ -2147,6 +2152,7 @@ namespace Action_Wheel.Overlay
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             WatchMenuDpi();
             QueueMenuPlacement();
+            if (prepared) StartPreparedOpening();
         }
 
         private void UpdateButtonPositions(double radius)

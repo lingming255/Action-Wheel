@@ -62,6 +62,7 @@ namespace Action_Wheel.Overlay
         private readonly CompositionEffectBrush _glassBrush;
         private readonly List<IDisposable> _ownedResources = new();
         private bool _disposed;
+        private bool _suspended;
         private SolidColorBrush? _tintBrush;
         private Color _tintColor;
         private Color _lastMaskColor = Colors.Transparent;
@@ -249,7 +250,7 @@ namespace Action_Wheel.Overlay
 
         private void OnRendering(object? sender, object args)
         {
-            if (_disposed)
+            if (_disposed || _suspended)
                 return;
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362))
                 return;
@@ -359,6 +360,41 @@ namespace Action_Wheel.Overlay
         }
 
         private void OnHostUnloaded(object sender, RoutedEventArgs args) => Dispose();
+
+        internal void Suspend()
+        {
+            if (_disposed || _suspended) return;
+            _suspended = true;
+            CompositionTarget.Rendering -= OnRendering;
+            try
+            {
+                SetMaskColor(Colors.Transparent);
+                _setBackdropBrush(null);
+            }
+            catch (Exception)
+            {
+                // Device loss must not interrupt the wheel's logical close/focus handoff.
+                Dispose();
+            }
+        }
+
+        internal void Resume()
+        {
+            if (_disposed || !_suspended || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362)) return;
+            try
+            {
+                _suspended = false;
+                _setBackdropBrush(_glassBrush);
+                UpdateMask();
+                CompositionTarget.Rendering += OnRendering;
+            }
+            catch (Exception exception)
+            {
+                Diagnostics = Diagnostics with { FailureReason = $"{exception.GetType().Name}: {exception.Message}" };
+                ApplyTint(_host, _dark, materialAvailable: false);
+                Dispose();
+            }
+        }
 
         public void Dispose()
         {

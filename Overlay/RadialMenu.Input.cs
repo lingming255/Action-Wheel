@@ -6,7 +6,7 @@ namespace Action_Wheel.Overlay
     public sealed partial class RadialMenu
     {
         internal bool IsQuickInfo { get; set; }
-        internal bool OwnsInput => !_closed && !_closing && !IsRefreshPlaying;
+        internal bool OwnsInput => !_closed && !_parked && !_closing && !IsRefreshPlaying;
         private bool _inputReturned;
 
         private void AcquireInputFocus()

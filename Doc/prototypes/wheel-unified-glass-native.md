@@ -8,8 +8,9 @@ local selection tint and a short direction arc. The whole surface opens and clos
 alpha mask. It samples the live desktop without a screenshot. The mask follows the XAML centre,
 scale, opacity and monitor DPI. The settled frost covers 60%, with a separate 20% tint; the dividers
 remain independent and retain their original stroke/opacity. Windows 11 host backdrop support is required for desktop blur;
-unsupported systems retain a readable translucent tint. Closing releases the effect graph; a
-centre refresh releases it before the overlay becomes a full-screen click-through animation.
+unsupported systems retain a readable translucent tint. Final destruction releases the effect
+graph. A reusable main wheel keeps its material while hidden between gestures; a centre refresh
+releases it before the overlay becomes a full-screen click-through animation.
 
 Held-screen desaturation uses separate 1:1 native magnifier windows below the interactive wheel.
 The glass material explicitly follows the same saturation (host backdrop sampling can omit the
@@ -30,6 +31,69 @@ installation; completed gestures hide and return them, and idle preparation upda
 Monitor bounds/DPI and the capture policy are checked before reuse. Reclaim playback leases have
 independent timers/completion tasks, so an old callback cannot close a new gesture using the bundle.
 Cancellation/stop/shutdown clear active ownership and release the idle resources on exit.
+
+## Prepared main wheel and bounded reuse (2026-11-16)
+
+The main wheel itself is now prepared as a complete hidden WinUI window, in addition to the
+separate desktop-grade and reclaim resources above. `RadialMenu.PrepareForReuse` cloaks its HWND
+with DWM, shows it without activation long enough to realise layout, builds the main buttons,
+wedge masks, dividers, icons and glass material synchronously, then hides it. It does not play the
+opening animation or sound and does not acquire focus. Group satellites and the hold indicator
+remain lazy: their first use builds them once, and subsequent gestures retain those controls.
+
+`LauncherService` owns at most one idle main wheel. Startup prepares it before installing hooks;
+idle preparation can replace an invalid or consumed window. Opening rents that exact window and
+keeps its HWND, main controls and material. Ordinary close or a completed confirm/cancel tail
+returns input focus and hides the native window, clears pointer captures, gesture/highlight/group
+and hold state, stops animations, detaches borrowed refresh presentation, and returns a valid
+window to the single idle slot. `SessionEnded` reports each logical gesture ending once; native
+`Closed` is reserved for actual destruction. A late return cannot grow the pool: if the idle slot
+already contains a valid window, the extra one is destroyed.
+
+The idle snapshot includes its action set, appearance, configuration generation, effective theme
+and referenced main/group icon files' last-write timestamps and lengths. Configuration/profile
+reload, appearance or theme changes, or changed icon-file metadata invalidate that snapshot.
+An invalid idle window is destroyed and rebuilt; an active window finishes its own session but
+does not return as a stale snapshot. Quick Info continues to load its current data independently
+and is not retained in this main-wheel pool. If hidden preparation fails, the ordinary cold
+construction path remains available.
+
+Parking suspends the glass material's `CompositionTarget.Rendering` subscription, stops its
+animations and masks it out while retaining its effect graph. Resume reconnects rendering for
+the next gesture. Session generations guard opening/closing completion callbacks, and launcher
+request generations guard queued gesture work, so a callback from an earlier session cannot
+close, complete or alter a later use of the same HWND. A reset failure disables reuse and retires
+the window. Shutdown destroys all tracked windows, including a parked one.
+
+A centre release that starts refresh feedback is terminal for that window: its interactive glass
+is disposed and its purpose changes to click-through feedback/full-screen playback. That HWND
+never returns to the idle wheel slot, even after playback completes. The launcher prepares a new
+main wheel separately when appropriate, while outward playback retains its own lifecycle.
+
+Run the opt-in reuse diagnostic with an absolute report destination:
+
+```powershell
+& 'F:\Works\tools\palette\external\Action-Wheel\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\Action Wheel.exe' --wheel-reuse-smoke 'F:\Works\tools\palette\external\Action-Wheel\bin\wheel-reuse-report.json'
+```
+
+Use the executable produced by the build being checked; this command does not install or deploy
+it. `--wheel-reuse-smoke <absolute-report-path>` runs before normal application startup and hooks,
+disables sounds only in that process, reads appearance preferences without saving them, and uses
+synthetic actions that never dispatch. DWM-cloaked checks cover repeated cross-monitor reuse of
+the same HWND/material/buttons/wedges/arcs, lazy group/hold identity, stable visual-child counts,
+cleared interaction state, exactly-once session/action notifications, interrupted closing tails,
+actual destruction and terminal refresh-feedback cleanup. It also exercises the production
+launcher pool: repeated rent/return, reload retirement of idle and active old snapshots, and
+shutdown with both an idle window and a closing tail. It performs no desktop screenshot, pixel
+readback, model inference, simulated input or configuration write. Production Show can briefly
+acquire focus while the probe window is cloaked; the probe attempts to restore the original
+foreground window after each show and at cleanup.
+
+The first Debug run passed six reuse rounds across three displays. It recorded approximately
+117ms construction, 233ms hidden synchronous preparation and 28–70ms synchronous Show calls.
+These are component wall times from that one run, not input-to-visible-first-frame measurements
+or evidence of perceived on-screen smoothness. Cold work is moved into preparation and retained,
+not eliminated. Visible behavior and real opening latency still require desktop user review.
 
 The grey desktop is sampled independently every 33ms (about 30fps); saturation still updates on
 the original 16ms transition timer. A saturation tick no longer shows, reorders and resamples all

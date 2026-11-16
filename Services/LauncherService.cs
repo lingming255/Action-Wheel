@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Action_Wheel.Overlay;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using Windows.Graphics;
 
 namespace Action_Wheel.Services
@@ -12,7 +14,7 @@ namespace Action_Wheel.Services
     /// Service that manages the lifecycle of the radial menu overlay.
     /// Coordinates between the mouse hook and menu window creation.
     /// </summary>
-    public class LauncherService : IDisposable
+    public partial class LauncherService : IDisposable
     {
         private readonly MouseHook _mouseHook;
         private readonly KeyboardHook _keyboardHook;
@@ -22,12 +24,33 @@ namespace Action_Wheel.Services
         private DispatcherQueueTimer? _openingPreparationTimer;
         private RadialMenu? _currentMenu;
         private readonly HashSet<RadialMenu> _playingRefreshes = new();
+        // Every window stays tracked through its closing tail. Only one prepared main wheel is idle;
+        // fullscreen refresh owners are terminal and never return to that slot.
+        private readonly Dictionary<RadialMenu, MenuSnapshot> _menus = new();
+        private RadialMenu? _idleMenu;
+        private bool _preparingMenu;
+        private long _menuConfigurationGeneration;
         private long _menuRequestGeneration;
         private bool _stopped;
         private IReadOnlyList<ActionItem> _actions;
         private IReadOnlyList<ActionItem> _quickInfoActions = Array.Empty<ActionItem>();
         private int _quickInfoPage;
         public string QuickInfoStatus { get; private set; } = string.Empty;
+
+        private sealed class MenuSnapshot
+        {
+            internal required IReadOnlyList<ActionItem> Actions { get; init; }
+            internal required RingAppearance Appearance { get; init; }
+            internal required long Generation { get; init; }
+            internal required bool QuickInfo { get; init; }
+            internal required Dictionary<string, IconStamp> IconWriteTimes { get; init; }
+            internal FrameworkElement? Content { get; set; }
+            internal ElementTheme Theme { get; set; }
+            internal bool Initializing { get; set; } = true;
+            internal bool Invalidated { get; set; }
+        }
+
+        private readonly record struct IconStamp(DateTime WriteTimeUtc, long Length);
 
         private void ReloadQuickInfo()
         {
@@ -118,7 +141,7 @@ namespace Action_Wheel.Services
         public LauncherStatus Start()
         {
             _stopped = false;
-            // Build the bounded hidden native/particle resources before installing low-level
+            // Build the bounded hidden wheel/native/particle resources before installing low-level
             // hooks. Their cold allocations must never block a wheel's first visible frames.
             PrepareOpeningResources();
             string error = string.Empty;
@@ -171,6 +194,7 @@ namespace Action_Wheel.Services
         {
             _stopped = true;
             _menuRequestGeneration++;
+            _menuConfigurationGeneration++;
             _gestureActive = false;
             _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
@@ -180,13 +204,14 @@ namespace Action_Wheel.Services
             _openingPreparationTimer?.Stop();
             Status = LauncherStatus.NotStarted;
             StatusChanged?.Invoke(this, EventArgs.Empty);
-            CloseCurrentMenu();
-            // Also restore if a failed/late window close never raises the expected Closed event.
+            _currentMenu = null;
+            _idleMenu = null;
+            // End the borrowed presentation before destroying any HWND it is attached to.
             _ = EndGrade();
-            // Finished gestures are independent decorative windows. Only service shutdown,
-            // their own timer or a rendering failure may end their remaining playback.
-            foreach (var menu in new List<RadialMenu>(_playingRefreshes))
-                CloseMenu(menu);
+            // Include parked windows and normal closing tails, not just the current gesture and
+            // fullscreen playbacks. Stop must really close them, never park another idle window.
+            foreach (var menu in new List<RadialMenu>(_menus.Keys))
+                DestroyMenu(menu);
             _playingRefreshes.Clear();
             RefreshReclaimIntro.ClearCache();
             ScreenGradeSurface.ShutdownCache();
@@ -194,7 +219,11 @@ namespace Action_Wheel.Services
 
         private void PrepareOpeningResources()
         {
-            if (_stopped || _currentMenu != null || _playingRefreshes.Count != 0) return;
+            if (_stopped || _currentMenu != null) return;
+            PrepareMainMenu();
+            // A fresh wheel may be prepared after the opaque handoff, but do not speculate on
+            // another native/particle bundle while the independent outward effect owns resources.
+            if (_playingRefreshes.Count != 0) return;
             ScreenGradeSurface.Warm();
             if (MouseHook.TryGetCursorPosition(out var cursor))
                 RefreshReclaimIntro.WarmAt(cursor, _reclaimSettings);
@@ -202,7 +231,7 @@ namespace Action_Wheel.Services
 
         private void ScheduleOpeningPreparation()
         {
-            if (_stopped) return;
+            if (_stopped || _preparingMenu) return;
             _openingPreparationTimer ??= _dispatcherQueue.CreateTimer();
             _openingPreparationTimer.Stop();
             _openingPreparationTimer.IsRepeating = false;
@@ -215,12 +244,198 @@ namespace Action_Wheel.Services
         private void OnOpeningPreparation(DispatcherQueueTimer sender, object args)
         {
             if (_stopped) return;
-            if (_currentMenu != null || _playingRefreshes.Count != 0)
+            if (_currentMenu != null)
             {
                 ScheduleOpeningPreparation();
                 return;
             }
             PrepareOpeningResources();
+        }
+
+        private RadialMenu CreateMenu(IReadOnlyList<ActionItem> actions, bool quickInfo)
+        {
+            var snapshot = new MenuSnapshot
+            {
+                Actions = actions,
+                Appearance = _appearance,
+                Generation = _menuConfigurationGeneration,
+                QuickInfo = quickInfo,
+                IconWriteTimes = CaptureIconWriteTimes(actions),
+            };
+            var menu = new RadialMenu(actions, _appearance)
+            {
+                IsQuickInfo = quickInfo,
+                ReuseEnabled = !quickInfo,
+            };
+            _menus.Add(menu, snapshot);
+            menu.SessionEnded += OnMenuSessionEnded;
+            menu.Closed += OnMenuClosed;
+            menu.ActionInvoked += OnActionInvoked;
+            if (menu.Content is FrameworkElement content)
+            {
+                snapshot.Content = content;
+                snapshot.Theme = content.ActualTheme;
+                content.ActualThemeChanged += OnMenuThemeChanged;
+            }
+            return menu;
+        }
+
+        private void CompleteMenuInitialization(RadialMenu menu)
+        {
+            if (!_menus.TryGetValue(menu, out var snapshot)) return;
+            if (snapshot.Content != null) snapshot.Theme = snapshot.Content.ActualTheme;
+            snapshot.Initializing = false;
+        }
+
+        private bool IsCurrentSnapshot(MenuSnapshot snapshot)
+        {
+            if (snapshot.Initializing || snapshot.Invalidated || snapshot.QuickInfo
+                || snapshot.Generation != _menuConfigurationGeneration
+                || !ReferenceEquals(snapshot.Actions, _actions) || snapshot.Appearance != _appearance
+                || snapshot.Content?.ActualTheme != snapshot.Theme)
+                return false;
+            foreach (var icon in snapshot.IconWriteTimes)
+                if (ReadIconStamp(icon.Key) != icon.Value) return false;
+            return true;
+        }
+
+        private void PrepareMainMenu()
+        {
+            if (_idleMenu != null)
+            {
+                if (_idleMenu.IsParked && _idleMenu.CanReuse
+                    && _menus.TryGetValue(_idleMenu, out var snapshot) && IsCurrentSnapshot(snapshot)) return;
+            }
+            RadialMenu? menu = null;
+            _preparingMenu = true;
+            try
+            {
+                RetireIdleMenu();
+                menu = CreateMenu(_actions, quickInfo: false);
+                menu.PrepareForReuse();
+                CompleteMenuInitialization(menu);
+                if (!_stopped && menu.IsParked && menu.CanReuse
+                    && _menus.TryGetValue(menu, out var snapshot) && IsCurrentSnapshot(snapshot))
+                    _idleMenu = menu;
+                else DestroyMenu(menu);
+            }
+            catch
+            {
+                // Prebuilding is optional. A failed hidden preparation leaves the ordinary cold
+                // opening path available and must not prevent the global hooks from starting.
+                if (menu != null) DestroyMenu(menu);
+            }
+            finally { _preparingMenu = false; }
+        }
+
+        private RadialMenu? RentMainMenu(IReadOnlyList<ActionItem> actions)
+        {
+            var menu = _idleMenu;
+            _idleMenu = null;
+            if (menu == null) return null;
+            if (menu.IsParked && menu.CanReuse && _menus.TryGetValue(menu, out var snapshot)
+                && ReferenceEquals(snapshot.Actions, actions) && IsCurrentSnapshot(snapshot)) return menu;
+            DestroyMenu(menu);
+            return null;
+        }
+
+        private void OnMenuSessionEnded(object? sender, EventArgs args)
+        {
+            if (sender is not RadialMenu menu) return;
+            _playingRefreshes.Remove(menu);
+            if (ReferenceEquals(_currentMenu, menu)) _currentMenu = null;
+            if (ReferenceEquals(_gradedMenu, menu)) _ = EndGrade();
+            if (_menus.TryGetValue(menu, out var snapshot) && snapshot.Initializing) return;
+            if (!_stopped && menu.IsParked && menu.CanReuse
+                && _menus.TryGetValue(menu, out snapshot) && IsCurrentSnapshot(snapshot))
+            {
+                // A closing tail can finish after its replacement was already prepared. Keep the
+                // existing ready slot rather than allowing the hidden pool to grow without bound.
+                if (_idleMenu == null || ReferenceEquals(_idleMenu, menu)) _idleMenu = menu;
+                else DestroyMenu(menu);
+            }
+            else DestroyMenu(menu);
+            ScheduleOpeningPreparation();
+        }
+
+        private void OnMenuClosed(object sender, WindowEventArgs args)
+        {
+            if (sender is not RadialMenu menu) return;
+            if (ReferenceEquals(_idleMenu, menu)) _idleMenu = null;
+            // Also cover a partial native close that could not publish its logical session end.
+            _playingRefreshes.Remove(menu);
+            if (ReferenceEquals(_currentMenu, menu)) _currentMenu = null;
+            if (ReferenceEquals(_gradedMenu, menu)) _ = EndGrade();
+            if (_menus.Remove(menu, out var snapshot) && snapshot.Content != null)
+                snapshot.Content.ActualThemeChanged -= OnMenuThemeChanged;
+            menu.SessionEnded -= OnMenuSessionEnded;
+            menu.Closed -= OnMenuClosed;
+            // ConfirmGlassAction publishes its selected action after CloseMenu returns. A final
+            // native Closed can arrive synchronously inside that call, so keep this handler until
+            // the now-untracked window and its completion callback are collected together.
+            ScheduleOpeningPreparation();
+        }
+
+        private void OnMenuThemeChanged(FrameworkElement sender, object args)
+        {
+            foreach (var entry in _menus)
+            {
+                var snapshot = entry.Value;
+                if (!ReferenceEquals(snapshot.Content, sender)) continue;
+                if (snapshot.Initializing) { snapshot.Theme = sender.ActualTheme; return; }
+                snapshot.Invalidated = true;
+                if (ReferenceEquals(_idleMenu, entry.Key)) RetireIdleMenu();
+                ScheduleOpeningPreparation();
+                return;
+            }
+        }
+
+        private void RetireIdleMenu()
+        {
+            var menu = _idleMenu;
+            _idleMenu = null;
+            if (menu != null) DestroyMenu(menu);
+        }
+
+        private void DestroyMenu(RadialMenu menu)
+        {
+            try { menu.DestroyMenu(); }
+            catch (Exception ex)
+            {
+                ActionFailed?.Invoke(this, $"The radial menu could not be closed cleanly: {ex.Message}");
+            }
+        }
+
+        private static Dictionary<string, IconStamp> CaptureIconWriteTimes(IReadOnlyList<ActionItem> actions)
+        {
+            var stamps = new Dictionary<string, IconStamp>(StringComparer.OrdinalIgnoreCase);
+            foreach (var action in actions)
+            {
+                Add(action.IconPath);
+                foreach (var child in action.GroupChildren) Add(child.IconPath);
+            }
+            return stamps;
+
+            void Add(string path)
+            {
+                try
+                {
+                    if (!IconFile.IsVector(path) && !IconFile.IsRaster(path)) return;
+                    string fullPath = Path.GetFullPath(path);
+                    stamps[fullPath] = ReadIconStamp(fullPath);
+                }
+                catch { /* An invalid icon already falls back to its glyph. */ }
+            }
+        }
+
+        private static IconStamp ReadIconStamp(string path)
+        {
+            try
+            {
+                var file = new FileInfo(path);
+                return file.Exists ? new IconStamp(file.LastWriteTimeUtc, file.Length) : default;
+            }
+            catch { return default; }
         }
 
         private void CheckHookHealth(DispatcherQueueTimer sender, object args)
@@ -272,6 +487,8 @@ namespace Action_Wheel.Services
         /// <summary>Re-reads actions.json. The next menu that opens picks up the changes.</summary>
         public void ReloadActions()
         {
+            _menuConfigurationGeneration++;
+            RetireIdleMenu();
             ApplyTriggerSettings();
             Configuration = ActionConfig.LoadDetailed();
             _actions = Configuration.Actions;
@@ -415,6 +632,7 @@ namespace Action_Wheel.Services
             _dispatcherQueue.TryEnqueue(() =>
             {
                 if (_stopped || requestGeneration != _menuRequestGeneration) return;
+                RadialMenu? openingMenu = null;
                 try
                 {
                     // Close any existing menu first
@@ -428,37 +646,24 @@ namespace Action_Wheel.Services
                         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
                     }
 
-                    var menu = new RadialMenu(actions, _appearance)
-                    {
-                        ActionTargetWindow = targetWindow,
-                        IsQuickInfo = quickInfo,
-                    };
+                    var menu = (quickInfo ? null : RentMainMenu(actions)) ?? CreateMenu(actions, quickInfo);
+                    openingMenu = menu;
+                    menu.ActionTargetWindow = targetWindow;
                     _currentMenu = menu;
-
-                    // Only clear the reference if it still points at this exact menu. The old menu's
-                    // Closed event arrives after the new one has already been assigned, so a
-                    // hardcoded "_currentMenu = null" here would wipe out the new menu and it would
-                    // never close on the next middle-click.
-                    menu.Closed += (s, e) =>
-                    {
-                        _playingRefreshes.Remove(menu);
-                        if (ReferenceEquals(_currentMenu, menu))
-                            _currentMenu = null;
-                        // Every way out of a gesture closes its menu, so this is the one place a
-                        // cancel, Esc, a fired hold or an action can never leave the screen grey.
-                        if (ReferenceEquals(_gradedMenu, menu))
-                            EndGrade();
-                        ScheduleOpeningPreparation();
-                    };
-
-                    menu.ActionInvoked += OnActionInvoked;
 
                     // Position the menu centered at cursor
                     menu.ShowAtPosition(position);
+                    CompleteMenuInitialization(menu);
                     BeginGrade(menu, position);
                 }
                 catch (Exception ex)
                 {
+                    if (openingMenu != null)
+                    {
+                        if (ReferenceEquals(_currentMenu, openingMenu)) _currentMenu = null;
+                        if (ReferenceEquals(_gradedMenu, openingMenu)) _ = EndGrade();
+                        DestroyMenu(openingMenu);
+                    }
                     ActionFailed?.Invoke(this, $"The radial menu could not be shown: {ex.Message}");
                 }
             });
@@ -897,6 +1102,7 @@ namespace Action_Wheel.Services
                     {
                         _playingRefreshes.Add(menu);
                         _currentMenu = null;
+                        ScheduleOpeningPreparation();
                     }
                 });
             }
@@ -937,7 +1143,7 @@ namespace Action_Wheel.Services
         {
             try
             {
-                if (_stopped) menu.CloseMenu();
+                if (_stopped) menu.DestroyMenu();
                 else menu.DismissMenu();
             }
             catch (Exception ex)
