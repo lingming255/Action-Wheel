@@ -44,6 +44,11 @@ namespace Action_Wheel
             // Explicit diagnostics run before single-instance registration and hooks. UI previews
             // save only isolated copies; the input/pixel probes briefly show disposable windows.
             string[] command = Environment.GetCommandLineArgs();
+            if (command.Length == 3 && command[1] == "--window-placement-smoke")
+            {
+                WindowPlacementSmoke.Run(command[2], Exit);
+                return;
+            }
             if (command.Length == 3 && command[1] == "--wheel-reuse-smoke")
             {
                 WheelReuseSmoke.Run(command[2], Exit);
@@ -120,7 +125,7 @@ namespace Action_Wheel
             try
             {
                 _launcherService = new LauncherService();
-                _launcherService.SettingsRequested += (s, e) => ShowSettings();
+                _launcherService.SettingsRequested += (s, e) => ShowSettings(s as WindowPlacementTarget);
                 _launcherService.Start();
             }
             catch (Exception)
@@ -239,13 +244,19 @@ namespace Action_Wheel
         /// Opens the settings window, or brings the existing one forward. Only one is allowed:
         /// two windows editing the same file would silently overwrite each other on save.
         /// </summary>
-        private void ShowSettings()
+        private void ShowSettings(WindowPlacementTarget? placementTarget = null)
         {
+            placementTarget ??= WindowSizing.CaptureTarget();
             // Only one action editor may exist: its in-memory snapshot would otherwise replace
             // changes just saved by the quick adder.
             if (_quickAddWindow != null)
             {
-                try { ActivateToolWindow(_quickAddWindow); return; }
+                try
+                {
+                    _quickAddWindow.PlaceOnTarget(placementTarget);
+                    ActivateToolWindow(_quickAddWindow);
+                    return;
+                }
                 catch (Exception) { _quickAddWindow = null; }
             }
             // Reusing the existing window can throw if it has already been torn down - the Closed
@@ -256,8 +267,8 @@ namespace Action_Wheel
             {
                 try
                 {
-                    _settingsWindow.AppWindow.Show();
-                    _settingsWindow.Activate();
+                    _settingsWindow.PlaceOnTarget(placementTarget);
+                    ActivateToolWindow(_settingsWindow);
                     return;
                 }
                 catch (Exception)
@@ -270,7 +281,7 @@ namespace Action_Wheel
             {
                 // App is the composition root: it owns construction and lifetime, while the Window
                 // only owns WinUI concerns and receives the state/commands it presents.
-                var settings = new SettingsWindow(new SettingsViewModel());
+                var settings = new SettingsWindow(new SettingsViewModel(), placementTarget);
                 _settingsWindow = settings;
 
                 settings.ActionsSaved += (s, e) =>
@@ -286,7 +297,8 @@ namespace Action_Wheel
                         _settingsWindow = null;
                 };
 
-                settings.Activate();
+                settings.PlaceOnTarget(placementTarget);
+                ActivateToolWindow(settings);
             }
             catch (Exception)
             {
@@ -296,26 +308,39 @@ namespace Action_Wheel
             }
         }
 
-        private void OnQuickAddRequested(object? sender, IntPtr targetWindow) =>
-            _window?.DispatcherQueue.TryEnqueue(() => ShowQuickAdd(targetWindow));
-
-        private void OnNoteBoardRequested(object? sender, EventArgs e) =>
-            _window?.DispatcherQueue.TryEnqueue(ShowNoteBoard);
-
-        private async void ShowQuickAdd(IntPtr targetWindow = default)
+        private void OnQuickAddRequested(object? sender, IntPtr targetWindow)
         {
+            var placementTarget = sender as WindowPlacementTarget ?? WindowSizing.CaptureTarget();
+            _window?.DispatcherQueue.TryEnqueue(() => ShowQuickAdd(targetWindow, placementTarget));
+        }
+
+        private void OnNoteBoardRequested(object? sender, EventArgs e)
+        {
+            var placementTarget = sender as WindowPlacementTarget ?? WindowSizing.CaptureTarget();
+            _window?.DispatcherQueue.TryEnqueue(() => ShowNoteBoard(placementTarget));
+        }
+
+        private async void ShowQuickAdd(IntPtr targetWindow = default, WindowPlacementTarget? placementTarget = null)
+        {
+            placementTarget ??= WindowSizing.CaptureTarget();
             try
             {
                 if (_quickAddWindow != null)
                 {
-                    try { ActivateToolWindow(_quickAddWindow); return; }
+                    try
+                    {
+                        _quickAddWindow.PlaceOnTarget(placementTarget);
+                        ActivateToolWindow(_quickAddWindow);
+                        return;
+                    }
                     catch (Exception) { _quickAddWindow = null; }
                 }
                 if (_settingsWindow != null)
                 {
                     if (_settingsWindow.ViewModel.HasUnsavedChanges)
                     {
-                        _settingsWindow.Activate();
+                        _settingsWindow.PlaceOnTarget(placementTarget);
+                        ActivateToolWindow(_settingsWindow);
                         var root = (_settingsWindow.Content as FrameworkElement)?.XamlRoot;
                         if (root != null)
                         {
@@ -332,7 +357,7 @@ namespace Action_Wheel
                     _settingsWindow.ForceClose();
                     _settingsWindow = null;
                 }
-                var quickAdd = new QuickAddWindow(targetWindow);
+                var quickAdd = new QuickAddWindow(targetWindow, placementTarget: placementTarget);
                 _quickAddWindow = quickAdd;
                 quickAdd.ActionsSaved += (s, e) =>
                 {
@@ -343,6 +368,7 @@ namespace Action_Wheel
                 {
                     if (ReferenceEquals(_quickAddWindow, quickAdd)) _quickAddWindow = null;
                 };
+                quickAdd.PlaceOnTarget(placementTarget);
                 ActivateToolWindow(quickAdd);
             }
             catch (Exception error)
@@ -351,19 +377,21 @@ namespace Action_Wheel
             }
         }
 
-        private void ShowNoteBoard()
+        private void ShowNoteBoard(WindowPlacementTarget? placementTarget = null)
         {
+            placementTarget ??= WindowSizing.CaptureTarget();
             try
             {
                 if (_noteBoardWindow == null)
                 {
-                    var board = new NoteBoardWindow();
+                    var board = new NoteBoardWindow(placementTarget: placementTarget);
                     _noteBoardWindow = board;
                     board.Closed += (s, e) =>
                     {
                         if (ReferenceEquals(_noteBoardWindow, board)) _noteBoardWindow = null;
                     };
                 }
+                _noteBoardWindow.PlaceOnTarget(placementTarget);
                 ActivateToolWindow(_noteBoardWindow);
                 _noteBoardWindow.FocusEditor();
             }
@@ -375,9 +403,14 @@ namespace Action_Wheel
 
         private static void ActivateToolWindow(Window window)
         {
+            if (!WindowInputFocus.CanActivateActionTarget)
+            {
+                window.AppWindow.Show(false);
+                return;
+            }
             window.Activate();
             window.AppWindow.Show();
-            WindowInputFocus.TryActivate(WinRT.Interop.WindowNative.GetWindowHandle(window));
+            WindowInputFocus.TryActivateActionTarget(WinRT.Interop.WindowNative.GetWindowHandle(window));
         }
 
         private void ReportFeatureError(string title, Exception error)

@@ -6,12 +6,14 @@ namespace Action_Wheel.Overlay
     public sealed partial class RadialMenu
     {
         internal bool IsQuickInfo { get; set; }
+        internal WindowPlacementTarget? ActionPlacementTarget { get; set; }
         internal bool OwnsInput => !_closed && !_parked && !_closing && !IsRefreshPlaying;
         private bool _inputReturned;
 
         private void AcquireInputFocus()
         {
             if (!OwnsInput) return;
+            WindowInputFocus.EnterWheel(_windowHandle);
             int style = GetWindowLong(_windowHandle, GWL_EXSTYLE);
             SetWindowLong(_windowHandle, GWL_EXSTYLE,
                 (style | WS_EX_TOOLWINDOW) & ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT));
@@ -21,6 +23,7 @@ namespace Action_Wheel.Overlay
 
         private void ReturnInputFocus()
         {
+            WindowInputFocus.LeaveWheel(_windowHandle);
             if (_inputReturned) return;
             _inputReturned = true;
             // Alt+Tab or an explicit focus change belongs to the user; a late closing tail must

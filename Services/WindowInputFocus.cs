@@ -6,7 +6,27 @@ namespace Action_Wheel.Services
     /// <summary>Short-lived focus handoff between the interactive wheel and its original app.</summary>
     internal static class WindowInputFocus
     {
+        private static nint _interactiveWheel;
         internal static nint Foreground => GetForegroundWindow();
+
+        internal static void EnterWheel(nint window) => System.Threading.Interlocked.Exchange(ref _interactiveWheel, window);
+        internal static void LeaveWheel(nint window) => System.Threading.Interlocked.CompareExchange(ref _interactiveWheel, 0, window);
+
+        internal static bool CanActivateActionTarget
+        {
+            get
+            {
+                nint wheel = System.Threading.Interlocked.CompareExchange(ref _interactiveWheel, 0, 0);
+                return wheel == 0 || !IsWindow(wheel);
+            }
+        }
+
+        // A slow launch from an earlier gesture must not take focus from a newer open wheel.
+        // Its window may still be placed, and a later user invocation can explicitly raise it.
+        internal static bool TryActivateActionTarget(nint target)
+        {
+            return CanActivateActionTarget && TryActivate(target);
+        }
 
         internal static bool TryActivate(nint target)
         {

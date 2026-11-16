@@ -45,12 +45,15 @@ namespace Action_Wheel.Settings
 
         /// <summary>Set once the user has answered the unsaved-changes prompt, or on app exit.</summary>
         private bool _forceClose;
+        private WindowPlacementTarget? _placementTarget;
+        private bool _placementLoaded;
 
         /// <summary>Raised after actions.json has been written successfully.</summary>
         public event EventHandler? ActionsSaved;
 
-        public SettingsWindow(SettingsViewModel viewModel)
+        public SettingsWindow(SettingsViewModel viewModel, WindowPlacementTarget? placementTarget = null)
         {
+            _placementTarget = placementTarget;
             ViewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
 
             InitializeComponent();
@@ -98,10 +101,22 @@ namespace Action_Wheel.Settings
         /// </summary>
         private void RootGrid_Loaded(object sender, RoutedEventArgs e)
         {
-            WindowSizing.SizeAndCentre(this, RootGrid, 1400, 900, "the Settings window");
+            if (!_placementLoaded)
+            {
+                _placementLoaded = true;
+                WindowSizing.SizeAndCentre(this, RootGrid, 1400, 900, "the Settings window", _placementTarget);
+            }
 
             // The canvas only exists now, so this is the first render that can actually draw.
             ViewModel.RefreshDerivedState();
+        }
+
+        public void PlaceOnTarget(WindowPlacementTarget? target)
+        {
+            if (target == null) return;
+            _placementTarget = target;
+            if (_placementLoaded) WindowSizing.CentreOnTarget(this, RootGrid, target);
+            else WindowSizing.SizeAndCentre(this, RootGrid, 1400, 900, "the Settings window", target);
         }
 
         /// <summary>

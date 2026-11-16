@@ -26,8 +26,37 @@ The interactive wheel acquires the foreground. Ordinary keys, wheel scrolling, a
 
 Closing or cancelling restores the original foreground only while the wheel still owns it. A user-initiated intervening focus change is preserved. Actions that send shortcuts verify the original window before dispatch. The released refresh animation remains a non-activating, click-through decoration.
 
+## Opening on the wheel's display
+
+Each wheel invocation captures its physical screen point before dispatch. Its settings editor,
+Quick Add and Note Board open centered in that display's work area, including when the tool
+already exists. Existing logical sizes and maximized state are retained where they fit. A tray
+invocation uses the cursor display captured when that command runs.
+
+External launches follow the same captured display. A plain executable with no arguments can
+reuse an unambiguous existing window, restore it if minimized, and bring it forward. URLs,
+documents and argument-bearing launches still reach their normal handler so the requested
+content opens; a bounded observer identifies that handler's new or activated window, moves it
+when necessary and raises it once. A unique unchanged handler is also eligible after a short
+settle period. Same-display external windows keep their position. Window titles, web content
+and desktop pixels are not read or saved.
+
+The observer checks process identity, creation time and protocol/file association. Known Windows
+Calculator, Notepad and Terminal launch stubs use their exact package families. It does not
+guess between ambiguous windows, accept generic shell hosts without verified children, or keep
+pulling a window back after a user drag. Special shell surfaces such as Task View and the Run
+dialog, arbitrary launcher handoffs and nonstandard frameless windows may use their own layout.
+Late launches cannot take focus from a newer interactive wheel. Pending observers end after
+their bounded wait or launcher shutdown; newer requests for the same handler supersede older ones.
+
 ## Verification
 
 `Tools/QuickAddCheck`, `Tools/NoteBoardCheck`, `Tools/MouseDispatchCheck`, `Tools/ChordGateCheck`, and `Tools/RingGestureTests` exercise persistence, replacement, input pairing and geometry. Run `--input-smoke-report <absolute-json-path>` for a brief native-window focus check using disposable windows without global hooks or simulated input.
 
 `--quick-add-preview` opens the real editor against temporary config copies. `--note-board-preview <absolute-note-path>` opens an isolated board without changing the remembered working location.
+
+`--window-placement-smoke <absolute-json-path>` checks real but DWM-cloaked disposable windows
+on all attached displays, including normal/maximized/minimized placement and logical sizing.
+It also checks synthetic candidate selection and the original screen surviving delayed dispatch
+from a reused wheel. It does not open external applications, inject input or change user settings;
+external application association and foreground behavior still require desktop acceptance.

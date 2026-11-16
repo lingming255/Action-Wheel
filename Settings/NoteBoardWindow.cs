@@ -29,13 +29,18 @@ namespace Action_Wheel.Settings
         private bool _dirty;
         private bool _choosingLocation;
         private bool _composingText;
+        private WindowPlacementTarget? _placementTarget;
+        private bool _placementLoaded;
 
-        public NoteBoardWindow(string? filePath = null) : this(new NoteBoardStore(filePath), filePath == null) { }
+        public NoteBoardWindow(string? filePath = null, WindowPlacementTarget? placementTarget = null)
+            : this(new NoteBoardStore(filePath), filePath == null, placementTarget) { }
 
-        internal NoteBoardWindow(NoteBoardStore store, bool rememberLocation = false)
+        internal NoteBoardWindow(NoteBoardStore store, bool rememberLocation = false,
+            WindowPlacementTarget? placementTarget = null)
         {
             _store = store;
             _rememberLocation = rememberLocation;
+            _placementTarget = placementTarget;
             Title = "Action Wheel · 笔记板";
             AppIcon.ApplyTo(this);
 
@@ -111,7 +116,11 @@ namespace Action_Wheel.Settings
             _root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Root_KeyDown), true);
             _root.Loaded += (s, e) =>
             {
-                WindowSizing.SizeAndCentre(this, _root, 620, 560, "the note board");
+                if (!_placementLoaded)
+                {
+                    _placementLoaded = true;
+                    WindowSizing.SizeAndCentre(this, _root, 620, 560, "the note board", _placementTarget);
+                }
                 FocusEditor();
             };
             AppWindow.Closing += (s, e) =>
@@ -125,6 +134,14 @@ namespace Action_Wheel.Settings
         }
 
         public void FocusEditor() => _editor.Focus(FocusState.Programmatic);
+
+        public void PlaceOnTarget(WindowPlacementTarget? target)
+        {
+            if (target == null) return;
+            _placementTarget = target;
+            if (_placementLoaded) WindowSizing.CentreOnTarget(this, _root, target);
+            else WindowSizing.SizeAndCentre(this, _root, 620, 560, "the note board", target);
+        }
 
         /// <summary>App must honour false before exiting; a forced application exit cannot save a failed draft.</summary>
         public bool TrySave()

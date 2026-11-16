@@ -44,11 +44,14 @@ namespace Action_Wheel.Settings
         private bool _closed;
         private bool _saving;
         private bool _loaded;
+        private WindowPlacementTarget? _placementTarget;
 
         public event EventHandler? ActionsSaved;
 
-        public QuickAddWindow(IntPtr originalTarget = default, IQuickAddPageSource? pageSource = null, bool preview = false)
+        public QuickAddWindow(IntPtr originalTarget = default, IQuickAddPageSource? pageSource = null, bool preview = false,
+            WindowPlacementTarget? placementTarget = null)
         {
+            _placementTarget = placementTarget;
             Title = "Action Wheel · 快捷添加";
             AppIcon.ApplyTo(this);
             _source.Items.Add("网页");
@@ -141,9 +144,9 @@ namespace Action_Wheel.Settings
             {
                 if (_loaded) return;
                 _loaded = true;
-                WindowSizing.SizeAndCentre(this, _root, 640, 780, "快捷添加");
+                WindowSizing.SizeAndCentre(this, _root, 640, 780, "快捷添加", _placementTarget);
                 _url.Focus(FocusState.Programmatic);
-                await PrefillClipboardAsync();
+                if (!preview) await PrefillClipboardAsync();
             };
             Closed += (_, _) =>
             {
@@ -167,6 +170,14 @@ namespace Action_Wheel.Settings
                 _vault.SelectedIndex = 0;
             else
                 _noteStatus.Text = "尚未找到本机 Obsidian 库。请先在 Obsidian 中打开一次所需的库。";
+        }
+
+        public void PlaceOnTarget(WindowPlacementTarget? target)
+        {
+            if (target == null) return;
+            _placementTarget = target;
+            if (_loaded) WindowSizing.CentreOnTarget(this, _root, target);
+            else WindowSizing.SizeAndCentre(this, _root, 640, 780, "快捷添加", target);
         }
 
         private async Task PrefillClipboardAsync()

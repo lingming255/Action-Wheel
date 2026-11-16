@@ -193,6 +193,7 @@ namespace Action_Wheel.Services
         public void Stop()
         {
             _stopped = true;
+            LaunchWindowFollower.CancelPending();
             _menuRequestGeneration++;
             _menuConfigurationGeneration++;
             _gestureActive = false;
@@ -519,7 +520,7 @@ namespace Action_Wheel.Services
             _dispatcherQueue.TryEnqueue(() => ActionFailed?.Invoke(this, message));
 
         private void OnSettingsRequested(object? sender, EventArgs e) =>
-            _dispatcherQueue.TryEnqueue(() => SettingsRequested?.Invoke(this, EventArgs.Empty));
+            _dispatcherQueue.TryEnqueue(() => SettingsRequested?.Invoke(sender, EventArgs.Empty));
 
         private void OnReloadRequested(object? sender, EventArgs e) =>
             _dispatcherQueue.TryEnqueue(ReloadActions);
@@ -649,6 +650,7 @@ namespace Action_Wheel.Services
                     var menu = (quickInfo ? null : RentMainMenu(actions)) ?? CreateMenu(actions, quickInfo);
                     openingMenu = menu;
                     menu.ActionTargetWindow = targetWindow;
+                    menu.ActionPlacementTarget = new WindowPlacementTarget(position.X, position.Y);
                     _currentMenu = menu;
 
                     // Position the menu centered at cursor
@@ -821,6 +823,9 @@ namespace Action_Wheel.Services
             _gestureActive = _keyboardGestureActive = false;
             _mouseHook.TrackMovement = false;
             var targetWindow = (sender as RadialMenu)?.ActionTargetWindow ?? IntPtr.Zero;
+            // A parked wheel can be rented again during the dispatch delay. Snapshot the point
+            // with its original target HWND, before the reusable window starts another session.
+            var placement = (sender as RadialMenu)?.ActionPlacementTarget;
             if (action.Kind == ActionKind.Function && action.Value == QuickInfoCatalog.NextPage)
             {
                 _quickInfoPage++;
@@ -836,6 +841,7 @@ namespace Action_Wheel.Services
             // alone is not enough: teardown can continue in the compositor after the UI queue is
             // empty, causing occasional shortcuts to land while the overlay is disappearing.
             await Task.Delay(40).ConfigureAwait(false);
+            if (_stopped) return;
             if (NeedsOriginalForeground(action)
                 && !WindowInputFocus.TryActivate(targetWindow))
             {
@@ -844,9 +850,9 @@ namespace Action_Wheel.Services
                 return;
             }
             if (action.Kind == ActionKind.CopyText)
-                _dispatcherQueue.TryEnqueue(() => ActionDispatcher.Execute(action));
+                _dispatcherQueue.TryEnqueue(() => ActionDispatcher.Execute(action, targetWindow, placement));
             else
-                ActionDispatcher.Execute(action, targetWindow);
+                ActionDispatcher.Execute(action, targetWindow, placement);
         }
 
         private static bool NeedsOriginalForeground(ActionItem action) => action.Kind == ActionKind.Keys

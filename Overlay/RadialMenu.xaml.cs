@@ -298,6 +298,7 @@ namespace Action_Wheel.Overlay
 
         private void RadialMenu_Closed(object sender, WindowEventArgs args)
         {
+            WindowInputFocus.LeaveWheel(_windowHandle);
             _closed = true;
             StopMenuPlacement();
             _ringMotion?.Stop();

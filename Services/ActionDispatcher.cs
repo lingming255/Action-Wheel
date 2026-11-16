@@ -159,7 +159,8 @@ namespace Action_Wheel.Services
         /// </summary>
         public static IntPtr CaptureTargetWindow() => GetForegroundWindow();
 
-        public static void Execute(ActionItem action, IntPtr targetWindow = default)
+        public static void Execute(ActionItem action, IntPtr targetWindow = default,
+            WindowPlacementTarget? placement = null)
         {
             try
             {
@@ -170,7 +171,7 @@ namespace Action_Wheel.Services
                         break;
 
                     case ActionKind.Launch:
-                        Launch(action);
+                        Launch(action, placement);
                         break;
 
                     case ActionKind.CopyText:
@@ -180,7 +181,7 @@ namespace Action_Wheel.Services
                         break;
 
                     case ActionKind.Function:
-                        RunFunction(action, targetWindow);
+                        RunFunction(action, targetWindow, placement);
                         break;
                 }
             }
@@ -197,7 +198,7 @@ namespace Action_Wheel.Services
             ActionFailed?.Invoke(null, message);
         }
 
-        private static void Launch(ActionItem action)
+        private static void Launch(ActionItem action, WindowPlacementTarget? placement = null)
         {
             if (string.IsNullOrWhiteSpace(action.Value))
             {
@@ -213,12 +214,28 @@ namespace Action_Wheel.Services
             if (!string.IsNullOrWhiteSpace(action.Arguments))
                 info.Arguments = action.Arguments;
 
+            LaunchWindowFollower? follower = null;
             try
             {
-                Process.Start(info)?.Dispose();
+                // Observe before ShellExecute: a browser or single-instance program may reuse
+                // an existing window and return no new process. Following runs asynchronously.
+                if (placement != null)
+                {
+                    try { follower = LaunchWindowFollower.Begin(action.Value, action.Arguments, placement); }
+                    catch (Exception) { /* Optional placement must not prevent the launch itself. */ }
+                }
+                if (follower != null)
+                {
+                    try { if (follower.TryReuseExisting()) return; }
+                    catch (Exception) { follower.Dispose(); follower = null; }
+                }
+                var process = Process.Start(info);
+                if (follower != null) follower.Follow(process);
+                else process?.Dispose();
             }
             catch (Exception ex)
             {
+                follower?.Dispose();
                 // The overwhelmingly common cases are a program that has been uninstalled or moved,
                 // and a UAC prompt the user dismissed. Both used to be completely silent.
                 Fail(action, $"could not start '{action.Value}' ({ex.Message})");
@@ -292,7 +309,7 @@ namespace Action_Wheel.Services
             }
         }
 
-        private static void RunFunction(ActionItem action, IntPtr targetWindow)
+        private static void RunFunction(ActionItem action, IntPtr targetWindow, WindowPlacementTarget? placement)
         {
             if (WindowsFunctions.TryGetProfileName(action.Value, out string profileName))
             {
@@ -308,11 +325,11 @@ namespace Action_Wheel.Services
                     break;
 
                 case WindowsFunctions.FileExplorer:
-                    Launch(new ActionItem { Label = action.Label, Kind = ActionKind.Launch, Value = "explorer.exe" });
+                    LaunchBuiltIn(action, "explorer.exe", placement);
                     break;
 
                 case WindowsFunctions.TaskManager:
-                    Launch(new ActionItem { Label = action.Label, Kind = ActionKind.Launch, Value = "taskmgr.exe" });
+                    LaunchBuiltIn(action, "taskmgr.exe", placement);
                     break;
 
                 case WindowsFunctions.TaskView:
@@ -345,19 +362,19 @@ namespace Action_Wheel.Services
                     break;
 
                 case WindowsFunctions.WindowsSettings:
-                    LaunchBuiltIn(action, "ms-settings:");
+                    LaunchBuiltIn(action, "ms-settings:", placement);
                     break;
 
                 case WindowsFunctions.WindowsTerminal:
-                    LaunchBuiltIn(action, "wt.exe");
+                    LaunchBuiltIn(action, "wt.exe", placement);
                     break;
 
                 case WindowsFunctions.CommandPrompt:
-                    LaunchBuiltIn(action, "cmd.exe");
+                    LaunchBuiltIn(action, "cmd.exe", placement);
                     break;
 
                 case WindowsFunctions.PowerShell:
-                    LaunchBuiltIn(action, "powershell.exe");
+                    LaunchBuiltIn(action, "powershell.exe", placement);
                     break;
 
                 case WindowsFunctions.RunDialog:
@@ -365,39 +382,39 @@ namespace Action_Wheel.Services
                     break;
 
                 case WindowsFunctions.EnvironmentVariables:
-                    LaunchBuiltIn(action, "rundll32.exe", "sysdm.cpl,EditEnvironmentVariables");
+                    LaunchBuiltIn(action, "rundll32.exe", "sysdm.cpl,EditEnvironmentVariables", placement);
                     break;
 
                 case WindowsFunctions.Services:
-                    LaunchBuiltIn(action, "services.msc");
+                    LaunchBuiltIn(action, "services.msc", placement);
                     break;
 
                 case WindowsFunctions.DeviceManager:
-                    LaunchBuiltIn(action, "devmgmt.msc");
+                    LaunchBuiltIn(action, "devmgmt.msc", placement);
                     break;
 
                 case WindowsFunctions.RegistryEditor:
-                    LaunchBuiltIn(action, "regedit.exe");
+                    LaunchBuiltIn(action, "regedit.exe", placement);
                     break;
 
                 case WindowsFunctions.EventViewer:
-                    LaunchBuiltIn(action, "eventvwr.msc");
+                    LaunchBuiltIn(action, "eventvwr.msc", placement);
                     break;
 
                 case WindowsFunctions.Notepad:
-                    LaunchBuiltIn(action, "notepad.exe");
+                    LaunchBuiltIn(action, "notepad.exe", placement);
                     break;
 
                 case WindowsFunctions.Calculator:
-                    LaunchBuiltIn(action, "calc.exe");
+                    LaunchBuiltIn(action, "calc.exe", placement);
                     break;
 
                 case WindowsFunctions.SnippingTool:
-                    LaunchBuiltIn(action, "ms-screenclip:");
+                    LaunchBuiltIn(action, "ms-screenclip:", placement);
                     break;
 
                 case WindowsFunctions.VolumeMixer:
-                    LaunchBuiltIn(action, "sndvol.exe");
+                    LaunchBuiltIn(action, "sndvol.exe", placement);
                     break;
 
                 case WindowsFunctions.ClipboardHistory:
@@ -433,15 +450,15 @@ namespace Action_Wheel.Services
                     break;
 
                 case WindowsFunctions.ActionSettings:
-                    SettingsRequested?.Invoke(null, EventArgs.Empty);
+                    SettingsRequested?.Invoke(placement, EventArgs.Empty);
                     break;
 
                 case WindowsFunctions.QuickAdd:
-                    QuickAddRequested?.Invoke(null, targetWindow);
+                    QuickAddRequested?.Invoke(placement, targetWindow);
                     break;
 
                 case WindowsFunctions.NoteBoard:
-                    NoteBoardRequested?.Invoke(null, EventArgs.Empty);
+                    NoteBoardRequested?.Invoke(placement, EventArgs.Empty);
                     break;
 
                 case WindowsFunctions.ActionReload:
@@ -453,12 +470,12 @@ namespace Action_Wheel.Services
                     break;
 
                 case WindowsFunctions.ActionProfiles:
-                    LaunchBuiltIn(action, new ProfileLibrary().DirectoryPath);
+                    LaunchBuiltIn(action, new ProfileLibrary().DirectoryPath, placement);
                     break;
 
                 case WindowsFunctions.QuickInfo:
                     Directory.CreateDirectory(AppDataPaths.QuickInfoDirectoryPath);
-                    LaunchBuiltIn(action, AppDataPaths.QuickInfoDirectoryPath);
+                    LaunchBuiltIn(action, AppDataPaths.QuickInfoDirectoryPath, placement);
                     break;
 
                 default:
@@ -470,11 +487,11 @@ namespace Action_Wheel.Services
         private static void SendBuiltInShortcut(ActionItem source, string shortcut) =>
             SendShortcut(new ActionItem { Label = source.Label, Kind = ActionKind.Keys, Value = shortcut });
 
-        private static void LaunchBuiltIn(ActionItem source, string target) =>
-            Launch(new ActionItem { Label = source.Label, Kind = ActionKind.Launch, Value = target });
+        private static void LaunchBuiltIn(ActionItem source, string target, WindowPlacementTarget? placement) =>
+            Launch(new ActionItem { Label = source.Label, Kind = ActionKind.Launch, Value = target }, placement);
 
-        private static void LaunchBuiltIn(ActionItem source, string target, string arguments) =>
-            Launch(new ActionItem { Label = source.Label, Kind = ActionKind.Launch, Value = target, Arguments = arguments });
+        private static void LaunchBuiltIn(ActionItem source, string target, string arguments, WindowPlacementTarget? placement) =>
+            Launch(new ActionItem { Label = source.Label, Kind = ActionKind.Launch, Value = target, Arguments = arguments }, placement);
 
         private static void RunWindowCommand(ActionItem action, IntPtr targetWindow, int command)
         {
